@@ -1,39 +1,29 @@
-from flask import Blueprint, Response, jsonify, request
+from fastapi import APIRouter, Depends
 
-from middleware.auth_middleware import require_omada_token
+from middleware.auth_middleware import verify_omada_token
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
+from schemas.telemetry_schema import TelemetryRequest
 from services.positioning_service import positioning_service
 from services.safety_service import safety_service
 
-telemetry_bp = Blueprint("telemetry", __name__)
+router = APIRouter(tags=["telemetry"])
 
 
-@telemetry_bp.route("/telemetry", methods=["POST"])
-@require_omada_token
-def ingest_telemetry() -> Response:
-    """Receive RSSI JSON from Omada Controller, compute position, run safety checks."""
-    body = request.get_json(force=True)
-
+@router.post("/telemetry", dependencies=[Depends(verify_omada_token)])
+def ingest_telemetry(body: TelemetryRequest) -> dict:
+    """Receive RSSI payload from Omada Controller, compute position, run safety checks."""
     readings = [
-        APRssiReading(
-            ap_mac=r["ap_mac"],
-            rssi=float(r["rssi"]),
-            ap_x=float(r["ap_x"]),
-            ap_y=float(r["ap_y"]),
-        )
-        for r in body.get("readings", [])
+        APRssiReading(ap_mac=r.ap_mac, rssi=r.rssi, ap_x=r.ap_x, ap_y=r.ap_y)
+        for r in body.readings
     ]
-
     payload = OmadaTelemetryPayload(
-        reporter_mac=body["reporter_mac"],
-        timestamp=body.get("timestamp", ""),
+        reporter_mac=body.reporter_mac,
+        timestamp=body.timestamp,
         readings=readings,
-        person_id=body.get("person_id", ""),
-        person_type=body.get("person_type", "worker"),
+        person_id=body.person_id,
+        person_type=body.person_type,
     )
-
     position = positioning_service.compute_position(payload)
     if position:
         safety_service.run_all_checks(position)
-
-    return jsonify({"status": "ok"})
+    return {"status": "ok"}

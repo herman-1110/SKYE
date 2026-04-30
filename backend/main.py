@@ -2,33 +2,39 @@ import logging
 
 import firebase_admin
 from firebase_admin import credentials
-from flask import Flask
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
-from middleware.error_handler import register_error_handlers
-from middleware.request_logger import register_request_logger
-from routes.alert_routes import alert_bp
-from routes.report_routes import report_bp
-from routes.telemetry_routes import telemetry_bp
+from middleware.error_handler import register_exception_handlers
+from middleware.request_logger import RequestLoggerMiddleware
+from routes.alert_routes import router as alert_router
+from routes.report_routes import router as report_router
+from routes.telemetry_routes import router as telemetry_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-def create_app() -> Flask:
+def create_app() -> FastAPI:
     cred = credentials.Certificate(settings.FIREBASE_KEY_PATH)
     firebase_admin.initialize_app(cred, {"databaseURL": settings.FIREBASE_DATABASE_URL})
 
-    app = Flask(__name__)
-    register_request_logger(app)
-    register_error_handlers(app)
+    app = FastAPI(title="SKYE Sentinel-AI", version="0.1.0")
 
-    app.register_blueprint(telemetry_bp)
-    app.register_blueprint(alert_bp)
-    app.register_blueprint(report_bp)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(RequestLoggerMiddleware)
+
+    register_exception_handlers(app)
+
+    app.include_router(telemetry_router)
+    app.include_router(alert_router)
+    app.include_router(report_router)
 
     return app
 
 
+app = create_app()
+
 if __name__ == "__main__":
-    application = create_app()
-    application.run(host="0.0.0.0", port=settings.PORT, debug=settings.DEBUG)
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=settings.DEBUG)

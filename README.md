@@ -10,9 +10,9 @@ Make sure you have the following installed on your system:
 
 ---
 
-## 🛠️ Running the Backend
+## Running the Backend
 
-The backend is built with Python and Flask.
+The backend is built with Python and FastAPI.
 
 1. **Navigate to the backend directory:**
    ```bash
@@ -45,9 +45,15 @@ The backend is built with Python and Flask.
 
 6. **Run the server:**
    ```bash
-   python main.py
+   uvicorn main:app --reload
    ```
-   The backend should now be running (default is usually http://localhost:5000 or the port specified in `.env`).
+   The backend should now be running (default is usually http://localhost:8000 or the port specified in `.env`).
+
+7. **Run the Simulation Service (Optional):**
+   To generate synthetic telemetry and patrol log data for testing, run the simulation script from the `backend` directory:
+   ```bash
+   python services/simulation_service.py
+   ```
 
 ---
 
@@ -78,5 +84,5 @@ The frontend is built with Next.js, React, and Tailwind CSS.
 
 ## Structure Overview
 
-- `/backend`: Python Flask API, integrating with Firebase and generating telemetry data/reports.
+- `/backend`: Python FastAPI, integrating with Firebase and generating telemetry data/reports.
 - `/frontend`: Next.js Web App dashboard for viewing alerts, telemetry, and generating real-time reports.

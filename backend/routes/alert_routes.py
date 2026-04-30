@@ -1,26 +1,19 @@
-from flask import Blueprint, Response, jsonify, request
+from fastapi import APIRouter
 
+from schemas.alert_schema import FeedbackRequest
 from services.alert_service import alert_service
 
-alert_bp = Blueprint("alerts", __name__)
+router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
-@alert_bp.route("/alerts", methods=["GET"])
-def get_alerts() -> Response:
+@router.get("")
+def get_alerts() -> dict:
     """Return all alerts."""
-    return jsonify(alert_service.get_all())
+    return alert_service.get_all()
 
 
-@alert_bp.route("/alerts/<alert_id>/feedback", methods=["POST"])
-def post_feedback(alert_id: str) -> Response:
+@router.post("/{alert_id}/feedback")
+def post_feedback(alert_id: str, body: FeedbackRequest) -> dict:
     """Record operator feedback for an alert."""
-    body = request.get_json(force=True)
-    feedback = body.get("feedback", "")
-    reason = body.get("reason")
-
-    try:
-        alert_service.submit_feedback(alert_id, feedback, reason)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    return jsonify({"status": "ok"})
+    alert_service.submit_feedback(alert_id, body.feedback, body.reason)
+    return {"status": "ok"}
