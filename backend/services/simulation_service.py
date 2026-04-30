@@ -72,7 +72,7 @@ VIGI_RADIUS = 3.0  # metres — deterministic presence threshold for VIGI camera
 def _init_firebase() -> None:
     if not firebase_admin._apps:
         cred = credentials.Certificate(settings.FIREBASE_KEY_PATH)
-        firebase_admin.initialize_app(cred, {"databaseURL": settings.FIREBASE_DATABASE_URL})
+        firebase_admin.initialize_app(cred, {"databaseURL": settings.FIREBASE_RTDB_URL})
 
 
 def _synthetic_rssi(beacon_xy: Tuple[float, float], ap_xy: Tuple[float, float]) -> float:

@@ -1,21 +1,16 @@
 import uuid
 from typing import Any, Dict, List
 
-import google.generativeai as genai
-
-from config.settings import settings
 from models.audit_report import AuditReportRecord
+from providers.llm_factory import get_llm_provider
 from repositories.audit_report_repository import audit_report_repository
 from services.rag_service import rag_service
 from utils.timestamp_utils import utcnow_iso
 
+provider = get_llm_provider()
+
 
 class LLMService:
-    MODEL = "gemini-2.5-flash"
-
-    def __init__(self) -> None:
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self._model = genai.GenerativeModel(self.MODEL)
 
     def _build_prompt(
         self,
@@ -52,11 +47,10 @@ class LLMService:
         patrol_summaries: List[Dict[str, Any]],
         alert_summaries: List[Dict[str, Any]],
     ) -> AuditReportRecord:
-        """Build prompt, inject RAG context, call Gemini 2.5 Flash, persist and return report."""
         rag_context = rag_service.get_context(f"shift {shift_id} safety audit")
         prompt = self._build_prompt(shift_id, patrol_summaries, alert_summaries, rag_context)
 
-        response = self._model.generate_content(prompt)
+        report_text = provider.generate(prompt)
 
         record = AuditReportRecord(
             report_id=str(uuid.uuid4()),
@@ -65,8 +59,8 @@ class LLMService:
             patrol_summary=str(patrol_summaries),
             alert_summary=str(alert_summaries),
             rag_examples_used=[rag_context],
-            report_text=response.text,
-            model_used=self.MODEL,
+            report_text=report_text,
+            model_used=provider.get_model_name(),
         )
         audit_report_repository.save(record)
         return record

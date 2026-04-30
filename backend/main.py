@@ -17,7 +17,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 def create_app() -> FastAPI:
     cred = credentials.Certificate(settings.FIREBASE_KEY_PATH)
-    firebase_admin.initialize_app(cred, {"databaseURL": settings.FIREBASE_DATABASE_URL})
+    # databaseURL is required for Realtime Database; Firestore uses the same app via firestore.client()
+    firebase_admin.initialize_app(cred, {"databaseURL": settings.FIREBASE_RTDB_URL})
 
     app = FastAPI(title="SKYE Sentinel-AI", version="0.1.0")
 

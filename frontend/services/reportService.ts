@@ -1,22 +1,30 @@
-import { type DataSnapshot, off, onValue, ref } from "firebase/database";
-import { db } from "@/config/firebase";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  type Unsubscribe,
+} from "firebase/firestore";
+import { fsdb } from "@/config/firebase";
 import type { AuditReportRecord } from "@/types/auditReport";
 
-type Callback = (reports: Record<string, AuditReportRecord>) => void;
+type Callback = (reports: AuditReportRecord[]) => void;
 
-let _off: (() => void) | null = null;
+let _unsubscribe: Unsubscribe | null = null;
 
 export function subscribeToReports(callback: Callback): void {
-  const r = ref(db, "/audit_reports");
-  const handler = (snap: DataSnapshot) =>
-    callback((snap.val() as Record<string, AuditReportRecord>) ?? {});
-  onValue(r, handler);
-  _off = () => off(r, "value", handler);
+  const q = query(
+    collection(fsdb, "audit_reports"),
+    orderBy("generated_at", "desc"),
+  );
+  _unsubscribe = onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map((doc) => doc.data() as AuditReportRecord));
+  });
 }
 
 export function unsubscribeFromReports(): void {
-  _off?.();
-  _off = null;
+  _unsubscribe?.();
+  _unsubscribe = null;
 }
 
 interface GenerateParams {

@@ -4,6 +4,7 @@ export type AlertType =
   | "ghost_patrol"
   | "patrol_violation";
 
+// FeedbackValue stays here — used by FeedbackForm and alertService
 export type FeedbackValue = "confirmed" | "fixed" | "false_alarm";
 
 export interface AlertRecord {
@@ -11,9 +12,7 @@ export interface AlertRecord {
   alert_type: AlertType;
   person_id: string;
   zone: string;
-  timestamp: string;         // ISO 8601
+  timestamp: string;    // ISO 8601
   resolved: boolean;
-  feedback: FeedbackValue | null;
-  feedback_reason: string | null;
-  feedback_timestamp: string | null;
+  // feedback fields removed — feedback lives in Firestore /feedback collection
 }
