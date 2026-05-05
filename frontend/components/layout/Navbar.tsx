@@ -10,6 +10,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/dashboard/alerts":      "Alert Management",
   "/dashboard/reports":     "Audit Reports",
   "/dashboard/floor-plans": "Floor Plans",
+  "/dashboard/users":       "User Management",
 };
 
 function initials(email: string): string {

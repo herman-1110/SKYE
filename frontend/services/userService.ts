@@ -1,4 +1,4 @@
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { fsdb } from "@/config/firebase";
 import type { UserRecord, UserRole, UserStatus } from "@/types/user";
 
@@ -57,4 +57,17 @@ export async function updateUserRole(uid: string, role: UserRole, token: string)
     body: JSON.stringify({ role }),
   });
   if (!res.ok) throw new Error("Failed to update role");
+}
+
+export async function deleteUser(uid: string, token: string): Promise<void> {
+  const res = await fetch(`/api/users/${uid}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to delete user");
+}
+
+export function subscribeToPendingCount(callback: (count: number) => void): () => void {
+  const q = query(collection(fsdb, "users"), where("status", "==", "pending"));
+  return onSnapshot(q, (snap) => callback(snap.size));
 }

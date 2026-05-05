@@ -52,8 +52,12 @@ export default function RegisterPage() {
     setGoogleLoading(true);
     setError(null);
     try {
-      const { role, status } = await signInWithGoogle();
-      router.push(getRedirectPath(role, status));
+      const { role } = await signInWithGoogle();
+      if (role === "admin") {
+        router.push("/dashboard");
+      } else {
+        router.push("/pending-approval");
+      }
     } catch {
       setError("Google sign-in failed. Please try again.");
     } finally {

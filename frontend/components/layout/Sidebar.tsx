@@ -1,7 +1,9 @@
 "use client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDashboardStore } from "@/store/dashboardStore";
+import { subscribeToPendingCount } from "@/services/userService";
 import type { PositionRecord } from "@/types/position";
 
 const NAV = [
@@ -21,6 +23,10 @@ const NAV = [
     href: "/dashboard/floor-plans", label: "Floor Plans",
     icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>,
   },
+  {
+    href: "/dashboard/users", label: "Users",
+    icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  },
 ];
 
 const ROLE_COLOUR: Record<string, string> = {
@@ -37,6 +43,12 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
   const pathname = usePathname();
   const positions = useDashboardStore((s) => s.positions);
   const personnel = Object.values(positions) as PositionRecord[];
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const unsub = subscribeToPendingCount(setPendingCount);
+    return unsub;
+  }, []);
 
   return (
     <aside
@@ -59,6 +71,8 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
       <nav className="p-2 space-y-1 pt-3">
         {NAV.map(({ href, label, icon }) => {
           const active = pathname === href;
+          const isUsers = href === "/dashboard/users";
+          const showBadge = isUsers && pendingCount > 0;
           return (
             <Link
               key={href}
@@ -69,8 +83,24 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
                   : "text-s-muted hover:text-s-text hover:bg-s-elevated"}`}
               title={collapsed ? label : undefined}
             >
-              <span className="shrink-0">{icon}</span>
+              <span className="relative shrink-0">
+                {icon}
+                {showBadge && (
+                  <span className="absolute -top-1.5 -right-1.5 h-3.5 w-3.5 rounded-full bg-s-accent flex items-center justify-center">
+                    <span className="font-mono text-[8px] font-bold text-s-base leading-none">
+                      {pendingCount > 9 ? "9+" : pendingCount}
+                    </span>
+                  </span>
+                )}
+              </span>
               {!collapsed && <span className="font-medium">{label}</span>}
+              {!collapsed && showBadge && (
+                <span className="ml-auto h-4 min-w-4 px-1 rounded-full bg-s-accent flex items-center justify-center">
+                  <span className="font-mono text-[9px] font-bold text-s-base leading-none">
+                    {pendingCount > 9 ? "9+" : pendingCount}
+                  </span>
+                </span>
+              )}
             </Link>
           );
         })}
