@@ -1,6 +1,8 @@
 import {
+  GoogleAuthProvider,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut as _signOut,
   type User,
 } from "firebase/auth";
@@ -17,4 +19,19 @@ export async function signOut(): Promise<void> {
 
 export function onAuthChanged(callback: (user: User | null) => void): () => void {
   return onAuthStateChanged(auth, callback);
+}
+
+export async function signInWithGoogle(): Promise<{ uid: string; role: string; status: string }> {
+  const provider = new GoogleAuthProvider();
+  const result = await signInWithPopup(auth, provider);
+  const idToken = await result.user.getIdToken();
+
+  const res = await fetch("/api/auth/google", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id_token: idToken }),
+  });
+
+  if (!res.ok) throw new Error("Google authentication failed");
+  return res.json() as Promise<{ uid: string; role: string; status: string }>;
 }

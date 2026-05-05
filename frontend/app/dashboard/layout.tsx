@@ -9,7 +9,6 @@ import Sidebar from "@/components/layout/Sidebar";
 import ToastContainer from "@/components/shared/ToastContainer";
 import { FullScreenLoader } from "@/components/shared/LoadingSpinner";
 
-// Subscribes to Firebase and populates Zustand — mounted once for all dashboard pages
 function DataSubscriptions() {
   usePositions();
   useAlerts();
@@ -17,16 +16,19 @@ function DataSubscriptions() {
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user, userRecord, isLoading } = useAuth();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && !user) router.push("/login");
-  }, [user, isLoading, router]);
+    if (isLoading) return;
+    if (!user) { router.push("/login"); return; }
+    // Guards go to their own view, not the admin dashboard
+    if (userRecord && userRecord.role !== "admin") router.push("/guard");
+  }, [user, userRecord, isLoading, router]);
 
   if (isLoading) return <FullScreenLoader />;
-  if (!user) return null;
+  if (!user || (userRecord && userRecord.role !== "admin")) return null;
 
   const sidebarW = collapsed ? 60 : 240;
 

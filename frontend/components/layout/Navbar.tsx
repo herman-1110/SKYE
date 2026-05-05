@@ -32,7 +32,9 @@ export default function Navbar({ user }: { user: User }) {
       {/* Logo */}
       <div className="flex items-center gap-2 w-[240px] shrink-0">
         <div className="h-7 w-7 rounded bg-s-accent flex items-center justify-center">
-          <span className="font-mono font-bold text-sm text-s-base">S</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-s-base">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+          </svg>
         </div>
         <span className="font-semibold text-s-text tracking-wide">SKYE</span>
       </div>
