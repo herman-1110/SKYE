@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple
 from config.settings import settings
 from models.position import PositionRecord
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
+from repositories.floor_plan_repository import floor_plan_repository
 from repositories.position_repository import position_repository
 from services.kalman_service import KalmanService
 from utils.multilateration import least_squares_position
@@ -14,17 +15,31 @@ from utils.zone_utils import coordinate_to_zone
 class PositioningService:
     """
     Orchestrates the full localisation pipeline:
-    RSSI → LDPL distances → multilateration → Kalman smoothing → Firebase save.
+    RSSI → LDPL distances → multilateration → Kalman smoothing → pixel conversion → Firebase save.
     """
 
     def __init__(self) -> None:
-        # One KalmanService instance per beacon MAC, persists across requests.
         self._filters: Dict[str, KalmanService] = {}
+        # Cache scale to avoid a Firestore round-trip on every telemetry packet.
+        self._cached_scale: Optional[float] = None
 
     def _get_filter(self, beacon_mac: str) -> KalmanService:
         if beacon_mac not in self._filters:
             self._filters[beacon_mac] = KalmanService()
         return self._filters[beacon_mac]
+
+    def _get_scale(self) -> Optional[float]:
+        """Return scale_pixels_per_meter from the active floor plan, or None if not calibrated."""
+        if self._cached_scale is not None:
+            return self._cached_scale
+        plan = floor_plan_repository.get_active()
+        if plan and plan.get("scale_pixels_per_meter"):
+            self._cached_scale = float(plan["scale_pixels_per_meter"])
+        return self._cached_scale
+
+    def invalidate_scale_cache(self) -> None:
+        """Call this after a floor plan scale or activation change."""
+        self._cached_scale = None
 
     def compute_position(self, payload: OmadaTelemetryPayload) -> Optional[PositionRecord]:
         """Full pipeline: returns smoothed PositionRecord, or None if < 3 AP readings."""
@@ -46,6 +61,10 @@ class PositioningService:
         sx, sy = kf.update(raw[0], raw[1])
         px, py = kf.predict_ahead(seconds=float(settings.COLLISION_ALERT_SECONDS))
 
+        scale = self._get_scale()
+        pixel_x = sx * scale if scale is not None else None
+        pixel_y = sy * scale if scale is not None else None
+
         record = PositionRecord(
             beacon_mac=payload.reporter_mac,
             person_id=payload.person_id,
@@ -56,6 +75,8 @@ class PositioningService:
             timestamp=payload.timestamp or utcnow_iso(),
             predicted_x=px,
             predicted_y=py,
+            pixel_x=pixel_x,
+            pixel_y=pixel_y,
         )
         position_repository.save(record)
         return record

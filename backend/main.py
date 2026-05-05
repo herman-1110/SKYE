@@ -9,6 +9,7 @@ from config.settings import settings
 from middleware.error_handler import register_exception_handlers
 from middleware.request_logger import RequestLoggerMiddleware
 from routes.alert_routes import router as alert_router
+from routes.floor_plan_routes import router as floor_plan_router
 from routes.report_routes import router as report_router
 from routes.telemetry_routes import router as telemetry_router
 
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(telemetry_router)
     app.include_router(alert_router)
     app.include_router(report_router)
+    app.include_router(floor_plan_router)
 
     return app
 

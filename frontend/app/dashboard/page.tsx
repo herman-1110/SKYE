@@ -1,30 +1,32 @@
 "use client";
-import { useState } from "react";
-import { usePositions } from "@/hooks/usePositions";
-import { useAlerts } from "@/hooks/useAlerts";
-import FloorMap from "@/components/map/FloorMap";
+import StatsRow from "@/components/dashboard/StatsRow";
+import FloorMapArea from "@/components/dashboard/FloorMapArea";
 import AlertList from "@/components/alerts/AlertList";
-import LoadingSpinner from "@/components/shared/LoadingSpinner";
+import { useDashboardStore } from "@/store/dashboardStore";
+import { useRouter } from "next/navigation";
 import type { AlertRecord } from "@/types/alert";
 
 export default function DashboardPage() {
-  const { positions, isLoading: posLoading } = usePositions();
-  const { alerts, isLoading: alertLoading } = useAlerts();
-  const [_selected, setSelected] = useState<AlertRecord | null>(null);
-
-  if (posLoading || alertLoading) return <LoadingSpinner />;
-
-  const positionList = Object.values(positions);
-  const alertList = Object.values(alerts);
+  const alerts = useDashboardStore((s) => s.alerts);
+  const router = useRouter();
+  const alertList = Object.values(alerts) as AlertRecord[];
+  const activeAlerts = alertList.filter((a) => !a.resolved);
 
   return (
-    <main className="p-4 space-y-6 max-w-7xl mx-auto">
-      <h1 className="text-xl font-bold">SKYE — Live Floor View</h1>
-      <FloorMap positions={positionList} />
+    <div className="space-y-4 max-w-[1600px]">
+      <StatsRow />
+      <FloorMapArea />
+
       <section>
-        <h2 className="font-semibold mb-2">Active Alerts ({alertList.length})</h2>
-        <AlertList alerts={alertList} onSelectAlert={setSelected} />
+        <h2 className="font-mono text-xs text-s-muted tracking-widest uppercase mb-3">
+          Active Alerts ({activeAlerts.length})
+        </h2>
+        <AlertList
+          alerts={activeAlerts}
+          selectedId={null}
+          onSelectAlert={(a) => router.push(`/dashboard/alerts?id=${a.alert_id}`)}
+        />
       </section>
-    </main>
+    </div>
   );
 }

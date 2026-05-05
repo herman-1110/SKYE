@@ -1,24 +1,63 @@
 "use client";
-import type { AlertRecord } from "@/types/alert";
+import { useState } from "react";
+import type { AlertRecord, AlertType } from "@/types/alert";
 import AlertCard from "./AlertCard";
+
+type Filter = "all" | AlertType;
+
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all",              label: "All" },
+  { value: "man_down",         label: "Man Down" },
+  { value: "ghost_patrol",     label: "Ghost Patrol" },
+  { value: "collision",        label: "Collision" },
+  { value: "patrol_violation", label: "Patrol Breach" },
+];
 
 interface Props {
   alerts: AlertRecord[];
+  selectedId: string | null;
   onSelectAlert: (alert: AlertRecord) => void;
 }
 
-export default function AlertList({ alerts, onSelectAlert }: Props) {
-  if (alerts.length === 0) {
-    return <p className="text-sm text-gray-500 py-4">No alerts.</p>;
-  }
+export default function AlertList({ alerts, selectedId, onSelectAlert }: Props) {
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const filtered = filter === "all" ? alerts : alerts.filter((a) => a.alert_type === filter);
 
   return (
-    <ul className="space-y-2 overflow-y-auto max-h-96">
-      {alerts.map((a) => (
-        <li key={a.alert_id}>
-          <AlertCard alert={a} onClick={() => onSelectAlert(a)} />
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col h-full gap-3">
+      {/* Filter bar */}
+      <div className="flex gap-1 flex-wrap">
+        {FILTERS.map((f) => (
+          <button
+            key={f.value}
+            onClick={() => setFilter(f.value)}
+            className={`px-2.5 py-1 rounded-md text-xs font-mono transition-colors
+              ${filter === f.value
+                ? "bg-s-accent text-s-base font-semibold"
+                : "bg-s-elevated text-s-muted border border-s-border hover:text-s-text"}`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* List */}
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+        {filtered.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-40 text-s-muted">
+            <p className="text-sm">No alerts</p>
+          </div>
+        )}
+        {filtered.map((a) => (
+          <AlertCard
+            key={a.alert_id}
+            alert={a}
+            selected={a.alert_id === selectedId}
+            onClick={() => onSelectAlert(a)}
+          />
+        ))}
+      </div>
+    </div>
   );
 }

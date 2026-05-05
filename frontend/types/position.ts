@@ -8,5 +8,7 @@ export interface PositionRecord {
   timestamp: string;         // ISO 8601
   predicted_x: number | null;
   predicted_y: number | null;
+  pixel_x: number | null;   // metres × scale_pixels_per_meter; null until floor plan is calibrated
+  pixel_y: number | null;
   is_stationary: boolean;
 }

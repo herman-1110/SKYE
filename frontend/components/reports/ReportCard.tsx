@@ -1,21 +1,21 @@
 "use client";
 import type { AuditReportRecord } from "@/types/auditReport";
 
-interface Props {
-  report: AuditReportRecord;
-}
+interface Props { report: AuditReportRecord; selected: boolean; onClick: () => void }
 
-export default function ReportCard({ report }: Props) {
+export default function ReportCard({ report, selected, onClick }: Props) {
+  const preview = report.report_text?.slice(0, 80) ?? "";
+
   return (
-    <div className="border rounded-lg p-4 bg-white shadow-sm space-y-2">
-      <div className="flex justify-between items-start">
-        <h3 className="font-semibold text-sm">Shift {report.shift_id}</h3>
-        <span className="text-xs text-gray-400">{report.generated_at}</span>
-      </div>
-      <p className="text-xs text-gray-400">Model: {report.model_used}</p>
-      <pre className="text-sm whitespace-pre-wrap font-sans bg-gray-50 rounded p-3 max-h-64 overflow-y-auto">
-        {report.report_text}
-      </pre>
-    </div>
+    <button
+      onClick={onClick}
+      className={`w-full text-left rounded-lg border p-3 transition-all
+        ${selected ? "border-s-accent bg-s-elevated" : "border-s-border bg-s-surface hover:bg-s-elevated"}`}
+    >
+      <p className="font-mono text-xs text-s-accent">Shift {report.shift_id}</p>
+      <p className="font-mono text-[10px] text-s-muted mt-0.5">{report.generated_at}</p>
+      <p className="font-mono text-[10px] text-s-mono mt-1 truncate">{report.model_used}</p>
+      <p className="text-xs text-s-muted mt-2 line-clamp-2">{preview}…</p>
+    </button>
   );
 }

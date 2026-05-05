@@ -2,6 +2,7 @@ import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { type Auth, getAuth } from "firebase/auth";
 import { type Database, getDatabase } from "firebase/database";
 import { type Firestore, getFirestore } from "firebase/firestore";
+import { type FirebaseStorage, getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -17,6 +18,7 @@ const firebaseConfig = {
 const app: FirebaseApp =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-export const db: Database = getDatabase(app);      // Realtime Database — /positions, /alerts
-export const fsdb: Firestore = getFirestore(app);  // Firestore — patrol_logs, audit_reports, feedback
+export const db: Database = getDatabase(app);           // Realtime Database — /positions, /alerts
+export const fsdb: Firestore = getFirestore(app);       // Firestore — patrol_logs, audit_reports, feedback
+export const storage: FirebaseStorage = getStorage(app); // Storage — floor plan images
 export const auth: Auth = getAuth(app);

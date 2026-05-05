@@ -13,4 +13,6 @@ class PositionRecord:
     timestamp: str            # ISO 8601
     predicted_x: Optional[float] = None
     predicted_y: Optional[float] = None
+    pixel_x: Optional[float] = None   # metres × scale_pixels_per_meter from active floor plan
+    pixel_y: Optional[float] = None
     is_stationary: bool = False

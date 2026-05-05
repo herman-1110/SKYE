@@ -1,21 +1,19 @@
-type Status = "online" | "offline" | "alert";
+export type StatusType = "online" | "offline" | "alert" | "shift-active" | "no-shift";
 
-const STYLES: Record<Status, string> = {
-  online:  "bg-green-100 text-green-800",
-  offline: "bg-gray-100 text-gray-600",
-  alert:   "bg-red-100 text-red-700",
+const CONFIG: Record<StatusType, { dot: string; text: string; label: string; pulse?: boolean }> = {
+  "online":       { dot: "bg-s-success", text: "text-s-success", label: "ONLINE" },
+  "offline":      { dot: "bg-s-muted",   text: "text-s-muted",   label: "OFFLINE" },
+  "alert":        { dot: "bg-s-danger",  text: "text-s-danger",  label: "ALERT", pulse: true },
+  "shift-active": { dot: "bg-s-accent",  text: "text-s-accent",  label: "SHIFT ACTIVE" },
+  "no-shift":     { dot: "bg-s-muted",   text: "text-s-muted",   label: "NO ACTIVE SHIFT" },
 };
 
-const LABELS: Record<Status, string> = {
-  online:  "Online",
-  offline: "Offline",
-  alert:   "Alert",
-};
-
-export default function StatusBadge({ status }: { status: Status }) {
+export default function StatusBadge({ status }: { status: StatusType }) {
+  const c = CONFIG[status];
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STYLES[status]}`}>
-      {LABELS[status]}
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-s-elevated border border-s-border">
+      <span className={`h-1.5 w-1.5 rounded-full ${c.dot} ${c.pulse ? "animate-alert-pulse" : ""}`} />
+      <span className={`font-mono text-[10px] font-medium tracking-widest ${c.text}`}>{c.label}</span>
     </span>
   );
 }
