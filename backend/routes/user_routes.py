@@ -40,3 +40,13 @@ def update_status(uid: str, body: UpdateStatusRequest, admin: UserRecord = Depen
     except (ValueError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "ok"}
+
+
+@router.delete("/{uid}")
+def delete_user(uid: str, admin: UserRecord = Depends(require_admin)) -> dict:
+    """Delete a user's Firebase Auth account and Firestore doc. Admin only."""
+    try:
+        user_service.delete(uid)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "ok"}

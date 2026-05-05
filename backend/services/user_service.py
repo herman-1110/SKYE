@@ -67,6 +67,11 @@ class UserService:
         self._assert_admin(approver_uid)
         user_repository.update_status(uid, status)
 
+    def delete(self, uid: str) -> None:
+        """Delete Firebase Auth account and Firestore doc."""
+        firebase_auth.delete_user(uid)
+        user_repository.delete(uid)
+
     def register_google(self, uid: str, email: str, display_name: str) -> UserRecord:
         """Upsert via Google sign-in: return existing record if found, else create new one."""
         existing = user_repository.get_by_uid(uid)

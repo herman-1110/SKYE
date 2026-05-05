@@ -69,5 +69,9 @@ class UserRepository:
         """Update the BLE person_id mapping for this user."""
         self._col().document(uid).update({"person_id": person_id})
 
+    def delete(self, uid: str) -> None:
+        """Delete the Firestore users/{uid} document."""
+        self._col().document(uid).delete()
+
 
 user_repository = UserRepository()
