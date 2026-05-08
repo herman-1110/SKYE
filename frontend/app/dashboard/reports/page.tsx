@@ -5,6 +5,7 @@ import { getDistinctShifts, type ShiftOption } from "@/services/patrolLogService
 import type { AuditReportRecord } from "@/types/auditReport";
 import ReportCard from "@/components/reports/ReportCard";
 import { toast } from "@/store/toastStore";
+import { useDashboardStore } from "@/store/dashboardStore";
 
 function SimpleMarkdown({ text }: { text: string }) {
   return (
@@ -25,22 +26,24 @@ function SimpleMarkdown({ text }: { text: string }) {
 }
 
 export default function ReportsPage() {
-  const [reports, setReports] = useState<AuditReportRecord[]>([]);
+  const { cachedReports, setCachedReports } = useDashboardStore();
+  const [reports, setReports] = useState<AuditReportRecord[]>(cachedReports);
   const [selected, setSelected] = useState<AuditReportRecord | null>(null);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
   const [shiftId, setShiftId] = useState("");
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(cachedReports.length === 0);
 
   useEffect(() => {
     subscribeToReports((data) => {
       setReports(data);
+      setCachedReports(data);
       setIsLoading(false);
     });
     getDistinctShifts().then(setShifts).catch(() => {});
     return () => unsubscribeFromReports();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleGenerate() {
     if (!shiftId.trim()) return;

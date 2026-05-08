@@ -1,8 +1,12 @@
 import { create } from "zustand";
 import type { AlertRecord } from "@/types/alert";
+import type { AuditReportRecord } from "@/types/auditReport";
+import type { BuildingRecord } from "@/types/building";
 import type { PositionRecord } from "@/types/position";
+import type { UserRecord } from "@/types/user";
 
 interface DashboardState {
+  // live subscriptions (populated by DataSubscriptions in layout)
   positions: Record<string, PositionRecord>;
   alerts: Record<string, AlertRecord>;
   selectedWorkerId: string | null;
@@ -11,6 +15,14 @@ interface DashboardState {
   setAlerts: (alerts: Record<string, AlertRecord>) => void;
   setSelectedWorker: (id: string | null) => void;
   setActiveShift: (id: string | null) => void;
+
+  // cached tab data — survives tab switches
+  cachedReports: AuditReportRecord[];
+  cachedUsers: UserRecord[];
+  cachedBuildings: BuildingRecord[];
+  setCachedReports: (reports: AuditReportRecord[]) => void;
+  setCachedUsers: (users: UserRecord[]) => void;
+  setCachedBuildings: (buildings: BuildingRecord[]) => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
@@ -22,4 +34,11 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setAlerts: (alerts) => set({ alerts }),
   setSelectedWorker: (selectedWorkerId) => set({ selectedWorkerId }),
   setActiveShift: (activeShiftId) => set({ activeShiftId }),
+
+  cachedReports: [],
+  cachedUsers: [],
+  cachedBuildings: [],
+  setCachedReports: (cachedReports) => set({ cachedReports }),
+  setCachedUsers: (cachedUsers) => set({ cachedUsers }),
+  setCachedBuildings: (cachedBuildings) => set({ cachedBuildings }),
 }));

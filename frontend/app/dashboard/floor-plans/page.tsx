@@ -482,7 +482,7 @@ function FloorCard({
       {/* Zone editor — expands inline */}
       {zonesOpenForId === floor.id && (
         <div className="border-t border-s-border px-4 py-4">
-          <ZoneEditor buildingId={building.id} floor={floor} isAdmin={isAdmin} />
+          <ZoneEditor buildingId={building.id} floor={floor} isAdmin={isAdmin} onClose={() => onToggleZones(floor.id)} />
         </div>
       )}
 
@@ -525,7 +525,7 @@ function FloorCard({
             </button>
             <button onClick={handleManageZones} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-text hover:bg-s-elevated transition-colors flex items-center gap-2">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
-              Manage Zones
+              {zonesOpenForId === floor.id ? "Close Zones" : "Manage Zones"}
             </button>
             <div className="border-t border-s-border my-1" />
             <button

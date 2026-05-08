@@ -200,6 +200,17 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
         onLoad={() => setImgLoaded(true)}
       />
 
+      {/* Step hint pill */}
+      {step < 3 && imgLoaded && (
+        <div
+          className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full pointer-events-none z-50 border border-white/20"
+          style={{ background: "rgba(255,255,255,0.25)", backdropFilter: "blur(8px)", whiteSpace: "nowrap" }}
+        >
+          <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+          <span className="font-mono text-[11px] text-white/90">{stepLabel}</span>
+        </div>
+      )}
+
       {/* ── Modal box ──────────────────────────────────────────────── */}
       <div
         style={{
@@ -219,7 +230,7 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
         <button
           onClick={onClose}
           aria-label="Close calibration"
-          className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg border border-white/15 bg-transparent text-white/60 hover:text-white hover:border-white/30 transition-colors"
+          className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg bg-transparent text-s-muted hover:text-s-text transition-colors"
           style={{ fontSize: 15 }}
         >
           ✕
@@ -338,16 +349,7 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
             </div>
           )}
 
-          {/* Step hint pill */}
-          {step < 3 && imgLoaded && (
-            <div
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full pointer-events-none"
-              style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(8px)", whiteSpace: "nowrap" }}
-            >
-              <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-              <span className="font-mono text-[11px] text-white/70">{stepLabel}</span>
-            </div>
-          )}
+
         </div>
 
         {/* ── RIGHT: controls panel ─────────────────────────────────── */}
@@ -462,34 +464,7 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
               </button>
             )}
 
-            {/* Divider */}
-            <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
 
-            {/* Quit — always visible */}
-            <button
-              onClick={onClose}
-              className="py-2 px-4 rounded-lg text-[11px] font-mono"
-              style={{
-                background: "rgba(239,68,68,0.08)",
-                border: "1px solid rgba(239,68,68,0.25)",
-                color: "rgba(239,68,68,0.7)",
-                transition: "background 150ms, color 150ms, border-color 150ms",
-              }}
-              onMouseEnter={e => {
-                const b = e.currentTarget as HTMLButtonElement;
-                b.style.background = "rgba(239,68,68,0.15)";
-                b.style.color = "#ef4444";
-                b.style.borderColor = "rgba(239,68,68,0.5)";
-              }}
-              onMouseLeave={e => {
-                const b = e.currentTarget as HTMLButtonElement;
-                b.style.background = "rgba(239,68,68,0.08)";
-                b.style.color = "rgba(239,68,68,0.7)";
-                b.style.borderColor = "rgba(239,68,68,0.25)";
-              }}
-            >
-              ✕ Quit Calibration
-            </button>
           </div>
         </div>
       </div>

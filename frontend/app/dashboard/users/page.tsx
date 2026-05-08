@@ -6,6 +6,7 @@ import { getUsers, updateUserStatus, updateUserRole, deleteUser } from "@/servic
 import { signOut } from "@/services/authService";
 import { toast } from "@/store/toastStore";
 import type { UserRecord, UserStatus, UserRole } from "@/types/user";
+import { useDashboardStore } from "@/store/dashboardStore";
 
 const STATUS_COLOURS: Record<UserStatus, string> = {
   approved: "bg-s-success/20 text-s-success",
@@ -79,8 +80,9 @@ function DeleteModal({ target, isSelf, onCancel, onConfirm, loading }: {
 export default function UsersPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { cachedUsers, setCachedUsers } = useDashboardStore();
+  const [users, setUsers] = useState<UserRecord[]>(cachedUsers);
+  const [loading, setLoading] = useState(cachedUsers.length === 0);
   const [deleteTarget, setDeleteTarget] = useState<UserRecord | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -89,10 +91,13 @@ export default function UsersPage() {
     const token = await user.getIdToken();
     const data = await getUsers(token);
     setUsers(data);
+    setCachedUsers(data);
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (cachedUsers.length === 0) load();
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStatus(uid: string, status: UserStatus) {
     if (!user) return;

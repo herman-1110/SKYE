@@ -81,9 +81,10 @@ interface Props {
   buildingId: string;
   floor: FloorRecord;
   isAdmin: boolean;
+  onClose?: () => void;
 }
 
-export default function ZoneEditor({ buildingId, floor, isAdmin }: Props) {
+export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Props) {
   const { zones, setZones, isLoading } = useZones(buildingId, floor.id);
 
   // Layout / draw
@@ -417,6 +418,12 @@ export default function ZoneEditor({ buildingId, floor, isAdmin }: Props) {
           </svg>
           {showZones ? "Hide Zones" : "Show Zones"}
         </button>
+        {onClose && (
+          <button onClick={onClose} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-s-elevated border border-s-border text-xs font-mono text-s-muted hover:text-s-danger transition-colors">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Close
+          </button>
+        )}
       </div>
 
       {aiLoading && (
