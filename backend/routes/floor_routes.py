@@ -60,6 +60,16 @@ def activate_floor(
     return {"status": "ok"}
 
 
+@router.patch("/{floor_id}/deactivate")
+def deactivate_floor(
+    building_id: str,
+    floor_id: str,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    floor_service.deactivate(building_id, floor_id)
+    return {"status": "ok"}
+
+
 @router.delete("/{floor_id}")
 def delete_floor(
     building_id: str,

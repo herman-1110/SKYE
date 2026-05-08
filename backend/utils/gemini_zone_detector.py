@@ -86,54 +86,44 @@ def detect_zones_from_image(image_url: str, scale_pixels_per_meter: float) -> li
 
     prompt = f"""Analyse this floor plan image carefully.
 
-Image pixel dimensions: {img_width_px} x {img_height_px} pixels
-Scale: {compressed_scale:.2f} pixels per metre
-Real-world dimensions:
-  Width:  {real_width_m:.1f} metres
-  Height: {real_height_m:.1f} metres
+The image is {img_width_px} x {img_height_px} pixels.
 
-The coordinate origin (0, 0) is the TOP-LEFT corner of the image.
-X increases to the right. Y increases downward.
+The coordinate origin (0.0, 0.0) is the TOP-LEFT corner.
+(1.0, 1.0) is the BOTTOM-RIGHT corner.
+Express ALL coordinates as fractions of the image dimensions (0.0 to 1.0).
 
-To convert a pixel position to metres:
-  x_metres = pixel_x / {compressed_scale:.2f}
-  y_metres = pixel_y / {compressed_scale:.2f}
+Example: a zone covering the left half of the image =
+  x_min: 0.0, x_max: 0.5, y_min: 0.0, y_max: 1.0
 
-Use this conversion to estimate zone boundaries precisely.
-First, determine what type of building this is
-(e.g. factory, warehouse, office, residential, hospital).
-Then identify every distinct room, area, and zone visible.
-Name each zone appropriately for the building type you detected.
+Identify every distinct room and zone visible in the floor plan.
+First determine the building type, then name zones appropriately.
 
 For industrial/factory buildings use names like:
   Loading Bay, Control Room, Assembly Floor, Forklift Zone,
   Storage Area, Exit Corridor, Warehouse, etc.
+For office buildings: Meeting Room, Open Office, Reception, Server Room, etc.
+For residential buildings: Master Bedroom, Kitchen, Living Room, etc.
 
-For office buildings use names like:
-  Meeting Room, Open Office, Reception, Server Room, etc.
+High-risk zones (machinery, forklifts, electrical, hazardous):
+  is_high_risk: true
 
-For any building type, also identify:
-  - High-risk zones (heavy machinery, forklifts, electrical rooms,
-    hazardous storage) → is_high_risk: true
-  - All other zones → is_high_risk: false
+Color guide:
+  High risk:     "#ef444433"
+  Normal work:   "#3b82f633"
+  Exit/corridor: "#22c55e33"
+  Storage:       "#f59e0b33"
 
-Assign a colour based on zone function:
-  High risk zones:    "#ef444433"
-  Normal work areas:  "#3b82f633"
-  Exit/corridors:     "#22c55e33"
-  Storage areas:      "#f59e0b33"
-
-Respond with ONLY a valid JSON array — no explanation, no markdown.
+Respond with ONLY a valid JSON array. No explanation. No markdown.
 
 [
   {{
     "name": "Zone Name",
     "x_min": 0.0,
-    "x_max": 5.5,
+    "x_max": 0.45,
     "y_min": 0.0,
-    "y_max": 4.0,
-    "is_high_risk": true,
-    "color": "#ef444433"
+    "y_max": 0.5,
+    "is_high_risk": false,
+    "color": "#3b82f633"
   }}
 ]
 """
@@ -168,7 +158,18 @@ Respond with ONLY a valid JSON array — no explanation, no markdown.
             raw = raw[4:]
 
     zones: list[dict] = json.loads(raw.strip())
-    logger.info("Parsed zones: %s", json.dumps(zones, indent=2))
+    logger.info("Parsed zones (raw percentages): %s", json.dumps(zones, indent=2))
+
+    # Convert 0.0–1.0 fractions to metres
+    for zone in zones:
+        zone["x_min"] = float(zone.get("x_min", 0.0)) * real_width_m
+        zone["x_max"] = float(zone.get("x_max", 1.0)) * real_width_m
+        zone["y_min"] = float(zone.get("y_min", 0.0)) * real_height_m
+        zone["y_max"] = float(zone.get("y_max", 1.0)) * real_height_m
+        logger.info(
+            "Converted zone '%s': (%.1f,%.1f) → (%.1f,%.1f) metres",
+            zone.get("name", "?"), zone["x_min"], zone["y_min"], zone["x_max"], zone["y_max"],
+        )
 
     _apply_fallback_colors(zones)
 

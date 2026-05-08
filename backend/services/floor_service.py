@@ -42,6 +42,10 @@ class FloorService:
         floor_repository.set_active(building_id, floor_id)
         positioning_service.invalidate_scale_cache()
 
+    def deactivate(self, building_id: str, floor_id: str) -> None:
+        floor_repository.deactivate(building_id, floor_id)
+        positioning_service.invalidate_scale_cache()
+
     def rename(self, building_id: str, floor_id: str, name: str) -> None:
         floor_repository.update(building_id, floor_id, {"name": name})
 

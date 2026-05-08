@@ -11,6 +11,7 @@ import {
 } from "@/services/buildingService";
 import {
   activateFloor,
+  deactivateFloor,
   deleteFloor,
   renameFloor,
   uploadFloor,
@@ -363,6 +364,7 @@ function FloorCard({
   onToggleZones,
   onCalibrate,
   onActivate,
+  onDeactivate,
   onRename,
   onDelete,
 }: {
@@ -373,6 +375,7 @@ function FloorCard({
   onToggleZones: (id: string) => void;
   onCalibrate: (floor: FloorRecord) => void;
   onActivate: (id: string) => void;
+  onDeactivate: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (floor: FloorRecord) => Promise<void>;
 }) {
@@ -402,6 +405,13 @@ function FloorCard({
     setMenuOpen(false);
     setBusy(true);
     try { await onActivate(floor.id); }
+    finally { setBusy(false); }
+  };
+
+  const handleDeactivate = async () => {
+    setMenuOpen(false);
+    setBusy(true);
+    try { await onDeactivate(floor.id); }
     finally { setBusy(false); }
   };
 
@@ -494,10 +504,15 @@ function FloorCard({
               padding: "4px 0",
             }}
           >
-            {!floor.is_active && (
+            {!floor.is_active ? (
               <button onClick={handleActivate} disabled={busy} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-text hover:bg-s-elevated transition-colors flex items-center gap-2">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 Set as Active
+              </button>
+            ) : (
+              <button onClick={handleDeactivate} disabled={busy} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-muted hover:bg-s-elevated transition-colors flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                Deactivate
               </button>
             )}
             <button onClick={handleRename} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-text hover:bg-s-elevated transition-colors flex items-center gap-2">
@@ -593,6 +608,12 @@ export default function FloorPlansPage() {
     if (!selectedBuildingId) return;
     try { await activateFloor(selectedBuildingId, floorId); toast.success("Floor activated"); }
     catch { toast.error("Activation failed."); }
+  };
+
+  const handleDeactivateFloor = async (floorId: string) => {
+    if (!selectedBuildingId) return;
+    try { await deactivateFloor(selectedBuildingId, floorId); toast.success("Floor deactivated"); }
+    catch { toast.error("Deactivation failed."); }
   };
 
   const handleDeleteFloor = async (floor: FloorRecord) => {
@@ -758,6 +779,7 @@ export default function FloorPlansPage() {
                         onToggleZones={toggleZones}
                         onCalibrate={setCalibratingFloor}
                         onActivate={handleActivateFloor}
+                        onDeactivate={handleDeactivateFloor}
                         onRename={handleRenameFloor}
                         onDelete={handleDeleteFloor}
                       />

@@ -109,6 +109,9 @@ export const updateFloorScale = (
 export const activateFloor = (buildingId: string, floorId: string): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/activate`);
 
+export const deactivateFloor = (buildingId: string, floorId: string): Promise<void> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/deactivate`);
+
 export const renameFloor = (buildingId: string, floorId: string, name: string): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}`, { name });
 

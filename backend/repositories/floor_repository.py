@@ -78,6 +78,9 @@ class FloorRepository:
         batch.update(self._col(building_id).document(floor_id), {"is_active": True})
         batch.commit()
 
+    def deactivate(self, building_id: str, floor_id: str) -> None:
+        self._col(building_id).document(floor_id).update({"is_active": False})
+
     def update(self, building_id: str, floor_id: str, fields: Dict[str, Any]) -> None:
         self._col(building_id).document(floor_id).update(fields)
 

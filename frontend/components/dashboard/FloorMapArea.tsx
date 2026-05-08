@@ -30,12 +30,14 @@ export default function FloorMapArea() {
   }, [buildings, selectedBuildingId]);
 
   useEffect(() => {
-    if (!selectedFloorId && floors.length > 0) {
-      setSelectedFloorId(activeFloor?.id ?? floors[0].id);
+    if (activeFloor) {
+      setSelectedFloorId(activeFloor.id);
+    } else {
+      setSelectedFloorId(null);
     }
-  }, [floors, activeFloor, selectedFloorId]);
+  }, [activeFloor]);
 
-  const displayedFloor = floors.find((f) => f.id === selectedFloorId) ?? activeFloor;
+  const displayedFloor = floors.find((f) => f.id === selectedFloorId && f.is_active) ?? activeFloor;
 
   const handleBuildingChange = (id: string) => {
     setSelectedBuildingId(id);
@@ -74,6 +76,25 @@ export default function FloorMapArea() {
             {isAdmin
               ? "Create a building and upload a floor plan to enable live tracking"
               : "No floor plans available. Contact your administrator."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoading && floors.length > 0 && !activeFloor) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 rounded-xl bg-s-surface border border-dashed border-s-border text-center gap-4">
+        <svg className="text-s-muted" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
+          <line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>
+        </svg>
+        <div>
+          <p className="text-s-text font-medium">No Active Floor Plan</p>
+          <p className="text-s-muted text-sm mt-1">
+            {isAdmin
+              ? "Set a floor as active in the Floor Plans tab to display it here"
+              : "No floor plan is currently active. Contact your administrator."}
           </p>
         </div>
       </div>
