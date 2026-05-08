@@ -27,6 +27,10 @@ class FloorPlanRepository:
         )
         return [doc.to_dict() for doc in docs]
 
+    def get_by_id(self, floor_plan_id: str) -> Optional[Dict[str, Any]]:
+        doc = self._db().collection(self._COL).document(floor_plan_id).get()
+        return doc.to_dict() if doc.exists else None
+
     def get_active(self, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Return the active floor plan; scoped to user_id if provided, else any active plan."""
         query = self._db().collection(self._COL).where("is_active", "==", True)
@@ -40,6 +44,10 @@ class FloorPlanRepository:
         self._db().collection(self._COL).document(floor_plan_id).update(
             {"scale_pixels_per_meter": scale_pixels_per_meter}
         )
+
+    def delete(self, floor_plan_id: str) -> None:
+        """Delete a floor plan document from Firestore."""
+        self._db().collection(self._COL).document(floor_plan_id).delete()
 
     def set_active(self, floor_plan_id: str, user_id: str) -> None:
         """Set is_active=True on this plan and is_active=False on all others for the user."""

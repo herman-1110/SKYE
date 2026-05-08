@@ -1,29 +1,50 @@
-from typing import Dict, List, Tuple
+from typing import Optional
 
-# Zone definitions: name → list of axis-aligned rectangles (x_min, y_min, x_max, y_max) in metres.
-# Must stay in sync with the frontend ZoneOverlay component.
-ZONES: Dict[str, List[Tuple[float, float, float, float]]] = {
-    "loading_bay":        [(0.0,  0.0, 20.0, 10.0)],
-    "forklift_corridor":  [(0.0, 10.0, 40.0, 15.0)],
-    "assembly_floor":     [(20.0, 0.0, 60.0, 30.0)],
-    "storage_rack_a":     [(60.0, 0.0, 80.0, 15.0)],
-    "storage_rack_b":     [(60.0, 15.0, 80.0, 30.0)],
-    "control_room":       [(0.0, 30.0, 15.0, 40.0)],
-    "exit_corridor":      [(15.0, 30.0, 80.0, 40.0)],
-}
-
-HIGH_RISK_ZONES = frozenset({"loading_bay", "forklift_corridor", "storage_rack_a", "storage_rack_b"})
+from models.zone import ZoneRecord
+from repositories.zone_repository import zone_repository
 
 
-def coordinate_to_zone(x: float, y: float) -> str:
-    """Map (x, y) metres to a named factory zone; returns 'unknown' if outside all zones."""
-    for zone_name, rects in ZONES.items():
-        for x_min, y_min, x_max, y_max in rects:
-            if x_min <= x <= x_max and y_min <= y <= y_max:
-                return zone_name
+def coordinate_to_zone(
+    x: float,
+    y: float,
+    building_id: Optional[str] = None,
+    floor_id: Optional[str] = None,
+) -> str:
+    """Map (x, y) metres to a named zone. Returns 'unknown' if ids absent or no match."""
+    if not building_id or not floor_id:
+        return "unknown"
+
+    zones: list[ZoneRecord] = zone_repository.get_all(building_id, floor_id)
+    for zone in zones:
+        if zone.x_min <= x <= zone.x_max and zone.y_min <= y <= zone.y_max:
+            return zone.name
+
     return "unknown"
 
 
-def is_high_risk(zone: str) -> bool:
-    """Return True if the zone is classified as high-risk for man-down / collision detection."""
-    return zone in HIGH_RISK_ZONES
+def is_high_risk_zone(
+    x: float,
+    y: float,
+    building_id: Optional[str] = None,
+    floor_id: Optional[str] = None,
+) -> bool:
+    """Return True if the coordinate falls inside a high-risk zone."""
+    if not building_id or not floor_id:
+        return False
+
+    zones: list[ZoneRecord] = zone_repository.get_all(building_id, floor_id)
+    for zone in zones:
+        if zone.x_min <= x <= zone.x_max and zone.y_min <= y <= zone.y_max:
+            return zone.is_high_risk
+
+    return False
+
+
+def is_high_risk(
+    x: float,
+    y: float,
+    building_id: str,
+    floor_id: str,
+) -> bool:
+    """Public alias — returns True if (x, y) falls in a high-risk zone."""
+    return is_high_risk_zone(x, y, building_id, floor_id)

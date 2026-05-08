@@ -22,8 +22,8 @@ export default function PendingApprovalPage() {
         <div>
           <h1 className="text-lg font-bold text-s-text">Awaiting Approval</h1>
           <p className="text-sm text-s-muted mt-1">
-            Your account has been created and is pending review by a Security Manager.
-            You will be notified once access is granted.
+            Your account is pending approval by the Security Manager.
+            You will be granted access once approved.
           </p>
         </div>
         <p className="font-mono text-[10px] text-s-muted tracking-widest uppercase">

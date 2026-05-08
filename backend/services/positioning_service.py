@@ -3,13 +3,14 @@ from typing import Dict, List, Optional, Tuple
 from config.settings import settings
 from models.position import PositionRecord
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
-from repositories.floor_plan_repository import floor_plan_repository
+from models.zone import ZoneRecord
+from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
+from repositories.zone_repository import zone_repository
 from services.kalman_service import KalmanService
 from utils.multilateration import least_squares_position
 from utils.rssi_utils import rssi_to_distance
 from utils.timestamp_utils import utcnow_iso
-from utils.zone_utils import coordinate_to_zone
 
 
 class PositioningService:
@@ -20,26 +21,52 @@ class PositioningService:
 
     def __init__(self) -> None:
         self._filters: Dict[str, KalmanService] = {}
-        # Cache scale to avoid a Firestore round-trip on every telemetry packet.
         self._cached_scale: Optional[float] = None
+        self._cached_building_id: Optional[str] = None
+        self._cached_floor_id: Optional[str] = None
+        self._cached_zones: List[ZoneRecord] = []
 
     def _get_filter(self, beacon_mac: str) -> KalmanService:
         if beacon_mac not in self._filters:
             self._filters[beacon_mac] = KalmanService()
         return self._filters[beacon_mac]
 
+    def _refresh_cache(self) -> None:
+        """Load scale, building_id, floor_id, and zones from the active floor."""
+        floor = floor_repository.get_any_active()
+        if floor:
+            self._cached_scale = floor.scale_pixels_per_meter
+            self._cached_building_id = floor.building_id
+            self._cached_floor_id = floor.id
+            if self._cached_building_id and self._cached_floor_id:
+                self._cached_zones = zone_repository.get_all(
+                    self._cached_building_id, self._cached_floor_id
+                )
+            else:
+                self._cached_zones = []
+        else:
+            self._cached_scale = None
+            self._cached_building_id = None
+            self._cached_floor_id = None
+            self._cached_zones = []
+
     def _get_scale(self) -> Optional[float]:
-        """Return scale_pixels_per_meter from the active floor plan, or None if not calibrated."""
-        if self._cached_scale is not None:
-            return self._cached_scale
-        plan = floor_plan_repository.get_active()
-        if plan and plan.get("scale_pixels_per_meter"):
-            self._cached_scale = float(plan["scale_pixels_per_meter"])
+        if self._cached_scale is None and self._cached_building_id is None:
+            self._refresh_cache()
         return self._cached_scale
 
+    def _lookup_zone(self, x: float, y: float) -> str:
+        for zone in self._cached_zones:
+            if zone.x_min <= x <= zone.x_max and zone.y_min <= y <= zone.y_max:
+                return zone.name
+        return "unknown"
+
     def invalidate_scale_cache(self) -> None:
-        """Call this after a floor plan scale or activation change."""
+        """Call this after a floor scale, activation, or zone change."""
         self._cached_scale = None
+        self._cached_building_id = None
+        self._cached_floor_id = None
+        self._cached_zones = []
 
     def compute_position(self, payload: OmadaTelemetryPayload) -> Optional[PositionRecord]:
         """Full pipeline: returns smoothed PositionRecord, or None if < 3 AP readings."""
@@ -71,7 +98,7 @@ class PositioningService:
             person_type=payload.person_type,
             x=sx,
             y=sy,
-            zone=coordinate_to_zone(sx, sy),
+            zone=self._lookup_zone(sx, sy),
             timestamp=payload.timestamp or utcnow_iso(),
             predicted_x=px,
             predicted_y=py,

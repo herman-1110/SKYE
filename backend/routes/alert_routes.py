@@ -18,8 +18,8 @@ def get_alerts(caller: UserRecord = Depends(require_auth)) -> dict:
 def post_feedback(
     alert_id: str,
     body: FeedbackRequest,
-    admin: UserRecord = Depends(require_admin),
+    caller: UserRecord = Depends(require_auth),
 ) -> dict:
-    """Record operator feedback for an alert. Admin (Security Manager) only."""
+    """Record operator feedback for an alert. All authenticated users."""
     alert_service.submit_feedback(alert_id, body.feedback, body.reason)
     return {"status": "ok"}

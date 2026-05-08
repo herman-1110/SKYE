@@ -25,9 +25,20 @@ function DeleteModal({ target, isSelf, onCancel, onConfirm, loading }: {
   onConfirm: () => void;
   loading: boolean;
 }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !loading) onCancel(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onCancel, loading]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-s-surface border border-s-border rounded-xl p-6 max-w-sm w-full mx-4 space-y-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget && !loading) onCancel(); }}
+    >
+      <div className="rounded-xl p-6 max-w-sm w-full mx-4 space-y-4"
+        style={{ background: "var(--glass-bg)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--glass-border)", boxShadow: "var(--glass-shadow)" }}
+      >
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-full bg-s-danger/10 flex items-center justify-center shrink-0">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-s-danger">
@@ -130,8 +141,20 @@ export default function UsersPage() {
   }
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <span className="h-6 w-6 rounded-full border-2 border-s-accent border-t-transparent animate-spin" />
+    <div className="max-w-[1200px] mx-auto px-10 py-8 space-y-4">
+      <div className="h-3 bg-s-elevated rounded w-36 animate-pulse" />
+      <div className="bg-s-surface border border-s-border rounded-lg overflow-hidden">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="flex gap-4 px-4 py-3.5 border-b border-s-border/50 animate-pulse last:border-0">
+            <div className="h-3 bg-s-elevated rounded flex-1" />
+            <div className="h-3 bg-s-elevated rounded flex-1" />
+            <div className="h-3 bg-s-elevated rounded w-16" />
+            <div className="h-3 bg-s-elevated rounded w-20" />
+            <div className="h-3 bg-s-elevated rounded w-16" />
+            <div className="h-3 bg-s-elevated rounded w-24" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 
@@ -147,7 +170,7 @@ export default function UsersPage() {
         />
       )}
 
-      <div className="max-w-[1200px] space-y-4">
+      <div className="max-w-[1200px] mx-auto px-10 py-8 space-y-4">
         <h1 className="font-mono text-xs text-s-muted tracking-widest uppercase">
           User Management ({users.length})
         </h1>

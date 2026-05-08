@@ -15,18 +15,25 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4 max-w-[1600px]">
       <StatsRow />
-      <FloorMapArea />
 
-      <section>
-        <h2 className="font-mono text-xs text-s-muted tracking-widest uppercase mb-3">
-          Active Alerts ({activeAlerts.length})
-        </h2>
-        <AlertList
-          alerts={activeAlerts}
-          selectedId={null}
-          onSelectAlert={(a) => router.push(`/dashboard/alerts?id=${a.alert_id}`)}
-        />
-      </section>
+      <div className="grid grid-cols-12 gap-4 items-start">
+        {/* Map — 8 cols */}
+        <div className="col-span-12 lg:col-span-8">
+          <FloorMapArea />
+        </div>
+
+        {/* Alerts panel — 4 cols */}
+        <div className="col-span-12 lg:col-span-4 bento-card flex flex-col gap-3" style={{ minHeight: 320 }}>
+          <h2 className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+            Active Alerts ({activeAlerts.length})
+          </h2>
+          <AlertList
+            alerts={activeAlerts}
+            selectedId={null}
+            onSelectAlert={(a) => router.push(`/dashboard/alerts?id=${a.alert_id}`)}
+          />
+        </div>
+      </div>
     </div>
   );
 }

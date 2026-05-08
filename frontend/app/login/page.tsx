@@ -7,7 +7,7 @@ import { getUserRecord } from "@/services/userService";
 function getRedirectPath(role: string, status: string): string {
   if (status === "pending") return "/pending-approval";
   if (status === "suspended") return "/suspended";
-  return role === "admin" ? "/dashboard" : "/guard";
+  return "/dashboard";
 }
 
 export default function LoginPage() {
@@ -70,27 +70,14 @@ export default function LoginPage() {
           <div className="flex items-center gap-4">
             <div className="h-16 w-16 rounded-xl bg-s-accent flex items-center justify-center shadow-lg shadow-amber-500/20">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-s-base">
-                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
-                </svg>
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+              </svg>
             </div>
             <span className="font-bold text-5xl tracking-tight text-s-text">SKYE</span>
           </div>
           <p className="font-mono text-sm text-s-muted tracking-widest text-center uppercase">
             Industrial Safety. Intelligently Monitored.
           </p>
-          <div className="mt-8 border border-s-border rounded-xl p-6 bg-s-base/40 backdrop-blur-sm space-y-3 max-w-sm w-full">
-            {[
-              { icon: "●", label: "Know where every guard is, instantly" },
-              { icon: "○", label: "Precise indoor tracking, even around obstacles" },
-              { icon: "▲", label: "Shift reports written automatically by AI" },
-              { icon: "◆", label: "Catch missed patrols before they become incidents" },
-            ].map((f) => (
-              <div key={f.label} className="flex items-center gap-3">
-                <span className="w-5 flex items-center justify-center flex-shrink-0 text-s-accent font-mono text-sm">{f.icon}</span>
-                <span className="text-xs text-s-muted">{f.label}</span>
-              </div>
-            ))}
-          </div>
         </div>
         <p className="relative z-10 text-center pb-6 font-mono text-[10px] text-s-muted tracking-widest">
           RESTRICTED ACCESS — AUTHORISED PERSONNEL ONLY

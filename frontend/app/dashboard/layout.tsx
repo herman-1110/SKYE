@@ -1,6 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePositions } from "@/hooks/usePositions";
 import { useAlerts } from "@/hooks/useAlerts";
@@ -18,17 +18,27 @@ function DataSubscriptions() {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, userRecord, isLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const hasLoadedOnce = useRef(false);
+
+  // Mark auth as resolved so subsequent navigations skip the full-screen loader
+  if (!isLoading) {
+    hasLoadedOnce.current = true;
+  }
 
   useEffect(() => {
     if (isLoading) return;
     if (!user) { router.push("/login"); return; }
-    // Guards go to their own view, not the admin dashboard
-    if (userRecord && userRecord.role !== "admin") router.push("/guard");
+    if (!userRecord) return;
+    if (userRecord.status === "pending") { router.push("/pending-approval"); return; }
+    if (userRecord.status === "suspended") { router.push("/suspended"); return; }
   }, [user, userRecord, isLoading, router]);
 
-  if (isLoading) return <FullScreenLoader />;
-  if (!user || (userRecord && userRecord.role !== "admin")) return null;
+  // Only block on initial load — tab navigation never triggers this again
+  if (isLoading && !hasLoadedOnce.current) return <FullScreenLoader />;
+  if (!user) return null;
+  if (userRecord && (userRecord.status === "pending" || userRecord.status === "suspended")) return null;
 
   const sidebarW = collapsed ? 60 : 240;
 
@@ -38,8 +48,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <Navbar user={user} />
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
       <main
-        className="pt-14 min-h-screen transition-all duration-200"
-        style={{ marginLeft: sidebarW }}
+        key={pathname}
+        className="pt-14 min-h-screen transition-[margin-left] duration-200 animate-fade-in"
+        style={{ marginLeft: sidebarW, overflowX: "hidden", position: "relative", willChange: "opacity" }}
       >
         <div className="p-4">{children}</div>
       </main>

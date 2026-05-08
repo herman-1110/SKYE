@@ -52,12 +52,10 @@ export default function RegisterPage() {
     setGoogleLoading(true);
     setError(null);
     try {
-      const { role } = await signInWithGoogle();
-      if (role === "admin") {
-        router.push("/dashboard");
-      } else {
-        router.push("/pending-approval");
-      }
+      const { status } = await signInWithGoogle();
+      if (status === "pending") { router.push("/pending-approval"); return; }
+      if (status === "suspended") { router.push("/suspended"); return; }
+      router.push("/dashboard");
     } catch {
       setError("Google sign-in failed. Please try again.");
     } finally {
@@ -83,12 +81,10 @@ export default function RegisterPage() {
           <p className="font-mono text-sm text-s-muted tracking-widest text-center uppercase">
             Autonomous Industrial Safety Intelligence
           </p>
-          <div className="mt-4 border border-s-border rounded-xl p-5 bg-s-base/40 backdrop-blur-sm max-w-sm w-full">
-            <p className="text-xs text-s-muted leading-relaxed">
-              New accounts require approval from a Security Manager before access is granted.
-              The first account registered is automatically promoted to admin.
-            </p>
-          </div>
+          <p className="mt-4 text-xs text-s-muted leading-relaxed text-center max-w-xs">
+            New accounts require approval from a Security Manager before access is granted.
+            The first account registered is automatically promoted to admin.
+          </p>
         </div>
         <p className="relative z-10 text-center pb-6 font-mono text-[10px] text-s-muted tracking-widest">
           RESTRICTED ACCESS — AUTHORISED PERSONNEL ONLY

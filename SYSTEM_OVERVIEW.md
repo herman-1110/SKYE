@@ -1,546 +1,509 @@
-# SKYE — System Overview
+# SKYE Sentinel-AI — System Overview
 
-**Autonomous Industrial Safety & Semantic Patrol Intelligence System**
+> Autonomous Industrial Safety & Semantic Patrol Intelligence System
 
 ---
 
 ## Table of Contents
 
-1. [Architecture Summary](#architecture-summary)
-2. [Backend](#backend)
-   - [Entry Point & Config](#entry-point--config)
-   - [Routes](#routes)
-   - [Services](#services)
-   - [Repositories](#repositories)
-   - [Models](#models)
-   - [Providers (LLM)](#providers-llm)
-   - [Utils](#utils)
-   - [Middleware](#middleware)
-3. [Frontend](#frontend)
-   - [Pages](#pages)
-   - [Components](#components)
-   - [Hooks](#hooks)
-   - [Services](#services-1)
-   - [Stores](#stores)
-   - [Types](#types)
-4. [Firebase Split](#firebase-split)
-5. [Data Flows](#data-flows)
-6. [Safety Features](#safety-features)
-7. [Environment Variables](#environment-variables)
-8. [File Tree](#file-tree)
+1. [Architecture Summary](#1-architecture-summary)
+2. [Backend](#2-backend)
+3. [Frontend](#3-frontend)
+4. [Data Flow](#4-data-flow-ble--backend--frontend)
+5. [Firebase Usage](#5-firebase-usage)
+6. [Key Design Decisions](#6-key-design-decisions)
+7. [Environment Variables](#7-environment-variables)
 
 ---
 
-## Architecture Summary
+## 1. Architecture Summary
 
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.13 + FastAPI + Uvicorn |
-| Frontend | Next.js 15 + React 18 + TypeScript |
-| State | Zustand 4.5 |
-| Realtime DB | Firebase Realtime Database (RTDB) |
-| Persistent DB | Firestore |
-| File Storage | Firebase Cloud Storage |
-| Auth | Firebase Auth (email/password) |
-| LLM | Pluggable — Gemini (default), OpenAI, Ollama, Claude |
-| Positioning | BLE RSSI → LDPL → Multilateration → Kalman filter |
-
-**Strict one-way layering (backend):**
 ```
-Routes → Services → Repositories → Firebase
+Omada WiFi APs (BLE beacons) → POST /telemetry
+                                    ↓
+                         Positioning + Safety Services
+                                    ↓
+                     Firebase Realtime DB (/positions, /alerts)
+                                    ↓
+                    Next.js Frontend (live onValue subscriptions)
+                                    ↓
+                     Admin Dashboard / Guard Dashboard
 ```
 
+**Stack:**
+- Backend: Python FastAPI + Firebase Admin SDK
+- Frontend: Next.js 14 (App Router) + TypeScript + Tailwind CSS
+- Database: Firebase Realtime DB (live) + Firestore (persistent) + Storage (images)
+- Auth: Firebase Auth (email/password + Google OAuth)
+- AI: Gemini (audit reports) + Google text-embedding-004 (RAG)
+
 ---
 
-## Backend
+## 2. Backend
 
-### Entry Point & Config
+### 2.1 Application Setup (`main.py`)
 
-| File | Purpose |
+- FastAPI app: `SKYE Sentinel-AI v0.1.0`
+- Firebase Admin SDK initialised with RTDB URL on startup
+- Middleware: CORS (all origins), RequestLogger
+- Route prefixes:
+  - `/auth` — public
+  - `/telemetry` — Omada Bearer token
+  - `/alerts`, `/users`, `/guard`, `/floor-plans`, `/reports` — Firebase ID token
+
+---
+
+### 2.2 Routes
+
+#### `POST /auth/register` — PUBLIC
+Creates Firebase Auth account + Firestore user doc.  
+Body: `{ email, password, display_name, person_id? }`  
+Returns: `{ uid, role, status }`  
+First user ever → `role=admin, status=approved`. All others → `role=user, status=pending`.
+
+#### `POST /auth/google` — PUBLIC
+Verifies Firebase Google ID token, upserts user doc.  
+Body: `{ id_token }`  
+Returns: `{ uid, role, status }`
+
+---
+
+#### `POST /telemetry` — Omada Bearer token
+Main positioning pipeline. Receives RSSI payload from Omada Controller.  
+Body: `{ reporter_mac, person_id, person_type, readings: [{ ap_mac, rssi, ap_x, ap_y }] }`  
+Runs: RSSI → distances → multilateration → Kalman → pixel coords → RTDB save → safety checks.  
+Returns: `{ status: "ok" }`
+
+---
+
+#### `GET /alerts` — require_auth
+All alerts from Realtime DB.
+
+#### `POST /alerts/{alert_id}/feedback` — require_admin
+Submit operator feedback on an alert. Marks resolved in RTDB, persists to Firestore for RAG.  
+Body: `{ feedback: "confirmed"|"fixed"|"false_alarm", reason? }`
+
+---
+
+#### `GET /users` — require_admin
+All users ordered by `created_at` descending.
+
+#### `GET /users/pending` — require_admin
+All users where `status == "pending"`.
+
+#### `PATCH /users/{uid}/role` — require_admin
+Body: `{ role: "admin"|"user" }`
+
+#### `PATCH /users/{uid}/status` — require_admin
+Body: `{ status: "pending"|"approved"|"suspended" }`
+
+#### `DELETE /users/{uid}` — require_admin
+Deletes Firebase Auth account + Firestore doc.
+
+---
+
+#### `GET /guard/position` — require_auth
+Live position for the calling guard's `person_id` only.
+
+#### `GET /guard/patrol` — require_auth
+Patrol log entries for the calling guard's current shift.
+
+#### `GET /guard/alerts` — require_auth
+Alerts filtered to the calling guard's `person_id` only.
+
+---
+
+#### `GET /floor-plans` — require_admin
+All floor plans for a user, ordered by upload date.  
+Query: `?user_id={uid}`
+
+#### `POST /floor-plans` — require_admin
+Create floor plan metadata after image upload to Storage.  
+Body: `{ user_id, name, url }`
+
+#### `PATCH /floor-plans/{floor_plan_id}/scale` — require_admin
+Body: `{ scale_pixels_per_meter }`
+
+#### `PATCH /floor-plans/{floor_plan_id}/activate` — require_admin
+Sets this plan active; deactivates all others for the same user.
+
+---
+
+#### `POST /reports/generate` — require_admin
+Triggers Gemini audit report generation for a shift.  
+Body: `{ shift_id, patrol_summaries, alert_summaries }`
+
+---
+
+### 2.3 Models
+
+| Model | Fields |
 |---|---|
-| `main.py` | FastAPI app factory — registers routers, CORS, request logger, Firebase Admin SDK init |
-| `config/settings.py` | Dataclass config from env vars — Firebase URLs, LLM provider, safety thresholds, RSSI calibration |
-| `requirements.txt` | Pinned deps — fastapi 0.111.1, firebase-admin 6.5.0, filterpy 1.4.5, numpy 2.1.3, scipy 1.14.1, pydantic 2.10.6 |
+| `UserRecord` | uid, email, display_name, role, status, person_id, created_at |
+| `PositionRecord` | beacon_mac, person_id, person_type, x, y, zone, timestamp, predicted_x, predicted_y, pixel_x, pixel_y, is_stationary |
+| `AlertRecord` | alert_id, alert_type, person_id, zone, timestamp, resolved |
+| `PatrolLogRecord` | log_id, guard_id, checkpoint_id, checkpoint_name, expected_arrival, actual_arrival, dwell_time_seconds, min_dwell_required, ble_detected, vigi_detected, compliant, shift_id |
+| `FloorPlanRecord` | floor_plan_id, user_id, name, url, uploaded_at, is_active, scale_pixels_per_meter |
+| `FeedbackRecord` | feedback_id, alert_id, alert_type, zone, feedback, timestamp, feedback_reason, shift_id |
+| `AuditReportRecord` | report_id, shift_id, generated_at, patrol_summary, alert_summary, rag_examples_used, report_text, model_used |
+
+Alert types: `man_down` · `collision` · `ghost_patrol` · `patrol_violation`  
+Feedback values: `confirmed` · `fixed` · `false_alarm`
 
 ---
 
-### Routes
+### 2.4 Services
 
-| File | Endpoints |
-|---|---|
-| `routes/telemetry_routes.py` | `POST /telemetry` — accepts RSSI payload from Omada WiFi controller (Bearer token required); triggers positioning + safety checks |
-| `routes/alert_routes.py` | `GET /alerts` — all alerts from RTDB; `POST /alerts/{alert_id}/feedback` — mark resolved in RTDB + save feedback to Firestore |
-| `routes/report_routes.py` | `POST /reports/generate` — triggers LLM audit report for a given shift |
-| `routes/floor_plan_routes.py` | `GET /floor-plans?user_id=`, `POST /floor-plans`, `PATCH /{id}/scale`, `PATCH /{id}/activate` |
+#### PositioningService
+Full BLE → position pipeline per telemetry packet:
+1. RSSI readings → distances via Log-Distance Path Loss (LDPL)  
+   `distance = 10^((TX_POWER - RSSI) / (10 × PATH_LOSS_EXPONENT))`
+2. Least-squares multilateration (requires ≥ 3 AP readings) → raw (x, y) in metres
+3. KalmanFilter.update() → smoothed (x, y) + velocity (vx, vy)
+4. KalmanFilter.predict_ahead(3s) → projected position for collision detection
+5. Pixel conversion: metres × `scale_pixels_per_meter` (from active FloorPlan)
+6. Zone assignment via `coordinate_to_zone(x, y)`
+7. Save to Realtime DB `/positions/{beacon_mac}`
+
+#### SafetyService
+- `check_man_down()` — Alert if beacon stationary in high-risk zone > `MAN_DOWN_MINUTES`
+- `check_collision()` — Alert when worker and forklift predicted positions converge within threshold
+- `check_patrol_compliance()` — Alert if guard missed checkpoint or `dwell_time < min_dwell_required`
+- `verify_multimodal()` — Ghost patrol: alert when BLE tag present but VIGI does NOT confirm human
+- `run_all_checks()` — Called after every telemetry packet; runs man-down + collision
+
+#### AlertService
+- `get_all()` — All alerts from RTDB
+- `submit_feedback(alert_id, feedback, reason)` — Mark resolved in RTDB + persist to Firestore
+
+#### UserService
+- `register()`, `register_google()` — Create/upsert user
+- `get_all()`, `get_pending()` — Query users
+- `update_role()`, `update_status()` — Admin operations (validates caller is admin)
+- `delete(uid)` — Delete Firebase Auth + Firestore doc
+
+#### GuardService
+- `get_position(person_id)` — Live position entry
+- `get_patrol(guard_id)` — Patrol logs for guard
+- `get_alerts(person_id)` — Alerts for guard
+
+#### FloorPlanService
+- `get_all(user_id)`, `get_active(user_id)` — Retrieve floor plans
+- `create(user_id, name, url)` — Create metadata post-upload
+- `update_scale(floor_plan_id, scale)` — Update calibration
+- `set_active(floor_plan_id, user_id)` — Activate, deactivate all others
+
+#### LLMService
+- `generate_report(shift_id, patrol_summaries, alert_summaries)` — Build prompt with RAG context, call Gemini, persist AuditReport to Firestore
+
+#### RAGService
+- `get_context(query, alert_type)` — Hybrid retrieval:
+  1. Pre-filter feedback by `alert_type` (rule-based)
+  2. Semantic re-rank via Google `text-embedding-004`
+  3. Return top-3 most similar past incidents as report context
+
+#### KalmanService
+- `update(x, y)` — Apply measurement, return smoothed (x, y)
+- `predict_ahead(seconds)` — Project state forward for collision prediction
 
 ---
 
-### Services
+### 2.5 Repositories
 
-| File | Responsibility |
-|---|---|
-| `services/positioning_service.py` | Full positioning pipeline: RSSI → LDPL distances → multilateration (least squares) → Kalman smoothing → predict 3s ahead → metres-to-pixels conversion → save to RTDB |
-| `services/kalman_service.py` | 2D Kalman filter per beacon; state `[x, y, vx, vy]`; `update()` smooths position, `predict_ahead(seconds)` projects for collision detection; reduces error to ~1.2 m |
-| `services/safety_service.py` | `check_man_down()` — stationary in high-risk zone > threshold; `check_collision()` — predicted positions converge within threshold; `check_patrol_compliance()` — missed checkpoint or short dwell; `verify_multimodal()` — BLE present but VIGI absent (ghost patrol) |
-| `services/alert_service.py` | `get_all()` from RTDB; `submit_feedback()` — dual write: mark resolved in RTDB + save FeedbackRecord to Firestore |
-| `services/llm_service.py` | Builds prompt with patrol logs + alerts + RAG context → calls LLM provider → saves AuditReportRecord to Firestore |
-| `services/rag_service.py` | Hybrid RAG: rule-based pre-filter (same alert_type) → Google text-embedding-004 semantic re-rank → cosine similarity → top-3 examples injected into prompt |
-| `services/floor_plan_service.py` | CRUD for floor plan metadata; `set_active()` deactivates others for same user_id; `update_scale()` validates > 0 |
-| `services/simulation_service.py` | Generates synthetic telemetry and patrol log data for testing |
-
----
-
-### Repositories
-
-All repos interface with Firebase only. Services never call Firebase directly.
-
-| File | Database | Collection / Path |
+| Repository | Storage | Key Methods |
 |---|---|---|
-| `repositories/position_repository.py` | RTDB | `/positions/{beacon_mac}` |
-| `repositories/alert_repository.py` | RTDB | `/alerts/{alert_id}` |
-| `repositories/feedback_repository.py` | Firestore | `feedback` |
-| `repositories/floor_plan_repository.py` | Firestore | `floor_plans` |
-| `repositories/audit_report_repository.py` | Firestore | `audit_reports` |
-| `repositories/patrol_log_repository.py` | Firestore | `patrol_logs` |
-| `repositories/accuracy_metrics_repository.py` | Firestore | `accuracy_metrics` |
+| `PositionRepository` | RTDB `/positions` | save, get, get_all, delete |
+| `AlertRepository` | RTDB `/alerts` | save, get, get_all, mark_resolved |
+| `UserRepository` | Firestore `users` | create, get_by_uid, get_all, get_pending, update_role, update_status, update_person_id, delete |
+| `FeedbackRepository` | Firestore `feedback` | save, get_resolved_with_feedback, get_by_alert_type, get_by_zone |
+| `FloorPlanRepository` | Firestore `floor_plans` | save, get_all, get_active, update_scale, set_active |
+| `PatrolLogRepository` | Firestore `patrol_logs` | save, get, get_by_shift, get_by_guard |
+| `AuditReportRepository` | Firestore `audit_reports` | save, get, get_all, get_by_shift |
 
 ---
 
-### Models
+### 2.6 Middleware
 
-| File | Key Fields |
-|---|---|
-| `models/position.py` | `beacon_mac`, `person_id`, `person_type` (guard/worker/forklift), `x`, `y`, `zone`, `timestamp`, `predicted_x/y`, `pixel_x/y`, `is_stationary` |
-| `models/alert.py` | `alert_id`, `alert_type` (man_down/collision/ghost_patrol/patrol_violation), `person_id`, `zone`, `timestamp`, `resolved` |
-| `models/telemetry.py` | `OmadaTelemetryPayload`: `reporter_mac`, `timestamp`, `readings[]` (each: `ap_mac`, `rssi`, `ap_x`, `ap_y`), `person_id`, `person_type` |
-| `models/patrol_log.py` | `log_id`, `guard_id`, `checkpoint_id/name`, `expected_arrival`, `actual_arrival`, `dwell_time_seconds`, `min_dwell_required`, `ble_detected`, `vigi_detected`, `compliant`, `shift_id` |
-| `models/feedback.py` | `feedback_id`, `alert_id`, `alert_type`, `zone`, `feedback` (confirmed/fixed/false_alarm), `timestamp`, `feedback_reason`, `shift_id` |
-| `models/floor_plan.py` | `floor_plan_id`, `user_id`, `name`, `url` (Storage), `uploaded_at`, `is_active`, `scale_pixels_per_meter` |
-| `models/audit_report.py` | `report_id`, `shift_id`, `generated_at`, `patrol_summary`, `alert_summary`, `rag_examples_used[]`, `report_text`, `model_used` |
+```
+require_auth(Authorization: Bearer <Firebase ID token>)
+  → verify_id_token() → get user from Firestore
+  → reject if status == "pending" (403) or "suspended" (403)
+  → return UserRecord
 
----
+require_admin(user: UserRecord = Depends(require_auth))
+  → reject if role != "admin" (403)
+  → return UserRecord
 
-### Providers (LLM)
-
-Pluggable via `LLM_PROVIDER` env var. All implement `BaseLLMProvider` ABC.
-
-| File | Provider |
-|---|---|
-| `providers/base_llm_provider.py` | ABC — `generate(prompt) -> str`, `get_model_name() -> str` |
-| `providers/llm_factory.py` | `get_llm_provider()` — reads `LLM_PROVIDER`, returns correct instance |
-| `providers/gemini_provider.py` | Google Gemini (default, active) |
-| `providers/openai_provider.py` | OpenAI ChatGPT |
-| `providers/ollama_provider.py` | Ollama (local LLM) |
-| `providers/claude_provider.py` | Anthropic Claude |
+verify_omada_token(Authorization: Bearer <Omada token>)
+  → validates static token from .env
+```
 
 ---
 
-### Utils
+## 3. Frontend
 
-| File | Purpose |
-|---|---|
-| `utils/multilateration.py` | `least_squares_position(ap_positions, distances)` → `(x, y)` using `np.linalg.lstsq`; requires ≥ 3 APs |
-| `utils/rssi_utils.py` | RSSI → distance via Log Distance Path Loss model |
-| `utils/zone_utils.py` | `coordinate_to_zone(x, y)` → zone name; 7 axis-aligned zones defined; high-risk: loading_bay, forklift_corridor, storage_rack_a/b |
-| `utils/timestamp_utils.py` | ISO 8601 timestamp helpers |
+### 3.1 Pages
 
----
-
-### Middleware
-
-| File | Purpose |
-|---|---|
-| `middleware/auth_middleware.py` | `verify_omada_token()` FastAPI dependency — validates Bearer token on `/telemetry` against `OMADA_ACCESS_TOKEN` config |
-| `middleware/request_logger.py` | Logs incoming requests |
-| `middleware/error_handler.py` | Global exception handlers |
-
----
-
-## Frontend
-
-### Pages
-
-| Route | File | Description |
+| Route | Access | Purpose |
 |---|---|---|
-| `/` | `app/page.tsx` | Redirects to `/dashboard` |
-| `/login` | `app/login/page.tsx` | Split-screen — 60% branding with feature list, 40% email/password form; auto-redirects if already authenticated |
-| `/dashboard` | `app/dashboard/layout.tsx` + `page.tsx` | Auth guard + shell (Navbar, Sidebar, ToastContainer, DataSubscriptions); page shows StatsRow + FloorMapArea + active AlertList |
-| `/dashboard/alerts` | `app/dashboard/alerts/page.tsx` | 40/60 split — AlertList with filter bar on left, FeedbackForm (or empty state) on right |
-| `/dashboard/reports` | `app/dashboard/reports/page.tsx` | 35/65 split — shift selector + Generate button + report list on left; markdown report detail + copy button on right |
-| `/dashboard/floor-plans` | `app/dashboard/floor-plans/page.tsx` | Floor plan upload, list, scale calibration, activate |
-
-**Dashboard layout responsibilities (`app/dashboard/layout.tsx`):**
-- Checks `useAuth()` and redirects unauthenticated users to `/login`
-- Mounts `DataSubscriptions` — calls `usePositions()` + `useAlerts()` once, populates Zustand for all child pages
-- Renders `Navbar`, collapsible `Sidebar`, `ToastContainer`
+| `/` | Public | Redirects to `/dashboard` |
+| `/login` | Public | Email/password + Google sign-in |
+| `/register` | Public | Account creation (first = admin, others = pending) |
+| `/pending-approval` | Pending users | Waiting for admin approval message |
+| `/suspended` | Suspended users | Account suspended message |
+| `/dashboard` | Admin | Live map + stats + active alerts |
+| `/dashboard/alerts` | Admin | All alerts + feedback form |
+| `/dashboard/reports` | Admin | Generate + view AI audit reports |
+| `/dashboard/users` | Admin | Approve/suspend/unsuspend/promote/remove users |
+| `/dashboard/floor-plans` | Admin | Upload, calibrate, activate floor plans |
+| `/guard` | Guard | Own live position + patrol log |
+| `/guard/alerts` | Guard | Own alerts only |
 
 ---
 
-### Components
+### 3.2 Layout & Routing
+
+**`/dashboard/layout.tsx`**
+- Uses `useAuth()` — redirects unauthenticated → `/login`, guards → `/guard`
+- Renders: `Navbar` + `Sidebar` (collapsible) + `ToastContainer`
+- Mounts `DataSubscriptions` (positions + alerts real-time hooks)
+
+**`/guard/layout.tsx`**
+- Redirects admins → `/dashboard`
+- Minimal header bar
+
+---
+
+### 3.3 Components
 
 **Layout**
-| File | Purpose |
-|---|---|
-| `components/layout/Navbar.tsx` | Top bar — SKYE amber logo, page title (from pathname), shift status badge, user initials, sign-out button |
-| `components/layout/Sidebar.tsx` | Collapsible (240 px / 60 px) — nav links with inline SVG icons, amber active state, live personnel list from Zustand (colour-coded by role), system OPERATIONAL status |
+- `Navbar` — Cloud logo, SKYE wordmark, page title, user initials avatar, sign-out
+- `Sidebar` — Collapsible nav: Dashboard, Alerts, Reports, Floor Plans, Users. Amber pending badge on Users link (live Firestore count). Personnel live list at bottom.
 
 **Map**
-| File | Purpose |
-|---|---|
-| `components/map/FloorMap.tsx` | Renders floor plan image + SVG overlay; converts `pixel_x/y` (or metre fallback) to canvas coordinates; mounts ZoneOverlay + WorkerMarkers |
-| `components/map/WorkerMarker.tsx` | Per-worker SVG marker — green (guard), blue (worker), amber (forklift); outer glow ring; dark tooltip |
-| `components/map/ZoneOverlay.tsx` | SVG zone rectangles synced with `zone_utils.py`; danger fill (red 10% opacity), safe fill (green 6% opacity) |
-
-**Dashboard**
-| File | Purpose |
-|---|---|
-| `components/dashboard/StatsRow.tsx` | 4 stat cards — Active Personnel, Active Alerts (amber pulse if > 0), Patrol Compliance, Ghost Patrol Detections |
-| `components/dashboard/FloorMapArea.tsx` | Wraps FloorMap; shows "No Floor Plan" empty state with upload CTA; FloorPlanModal for upload/change |
+- `FloorMap` — Renders active floor plan image, scaled to calibration
+- `ZoneOverlay` — Draws zone boundaries over floor plan
+- `WorkerMarker` — Animated position markers (guard/worker/forklift), coloured by type
 
 **Alerts**
-| File | Purpose |
-|---|---|
-| `components/alerts/AlertList.tsx` | Filter bar + scrollable list of AlertCards; emits `onSelectAlert` |
-| `components/alerts/AlertCard.tsx` | Single alert — AlertTypeBadge, person_id, zone, timestamp, ACTIVE/RESOLVED pill; animate-alert-pulse for man_down/collision |
-| `components/alerts/FeedbackForm.tsx` | Radio cards (confirmed/fixed/false_alarm) + optional notes textarea; calls `alertService.submitFeedback()`; toast on result |
-
-**Reports**
-| File | Purpose |
-|---|---|
-| `components/reports/ReportCard.tsx` | Summary card — shift ID (amber), generated_at, model_used, text preview |
-| `components/reports/GenerateReportButton.tsx` | Standalone generate trigger button |
+- `AlertList` — Filterable list of alerts, selectable
+- `AlertCard` — Type badge, zone, person_id, timestamp, resolved state
+- `FeedbackForm` — Radio (confirmed/fixed/false_alarm), notes, submit
 
 **Floor Plans**
-| File | Purpose |
-|---|---|
-| `components/floor-plans/FloorPlanModal.tsx` | Modal overlay — drag-drop zone, name input, progress bar, Cancel/Upload buttons |
-| `components/floor-plans/FloorPlanList.tsx` | List with activate button + scale number input per plan |
-| `components/floor-plans/FloorPlanUpload.tsx` | File picker + name input + upload to Firebase Storage + backend POST |
+- `FloorPlanList` — All uploaded plans, activate/delete actions
+- `FloorPlanUpload` — File input → Storage upload → create Firestore metadata
+- `FloorPlanModal` — Calibration: mark two reference points → calculate `scale_pixels_per_meter`
+
+**Reports**
+- `ReportCard` — Rendered audit report: markdown text, model used, timestamp
+- `GenerateReportButton` — Trigger report generation with shift_id
 
 **Shared**
-| File | Purpose |
-|---|---|
-| `components/shared/AlertTypeBadge.tsx` | Coloured badge per alert type — red (man_down/collision), amber (ghost_patrol), orange-600 (patrol_violation) |
-| `components/shared/StatusBadge.tsx` | ACTIVE / RESOLVED pill |
-| `components/shared/LoadingSpinner.tsx` | Full-screen and inline spinner variants |
-| `components/shared/SkeletonCard.tsx` | Shimmer skeleton loading placeholder |
-| `components/shared/ToastContainer.tsx` | Fixed bottom-right toast stack; slide-in; colour-coded border-l-2; auto-dismissed via toastStore |
+- `LoadingSpinner` / `FullScreenLoader`
+- `StatusBadge` — pending / approved / suspended
+- `AlertTypeBadge` — man_down / collision / ghost_patrol / patrol_violation
+- `SkeletonCard` — Loading placeholder
+- `ToastContainer` — Auto-dismiss success/error/info toasts
 
 ---
 
-### Hooks
+### 3.4 Services
 
-| File | Returns |
-|---|---|
-| `hooks/useAuth.ts` | `{ user: User \| null, isLoading: boolean }` — subscribes to Firebase Auth state |
-| `hooks/usePositions.ts` | Calls `subscribeToPositions()`, stores result in `dashboardStore` |
-| `hooks/useAlerts.ts` | Calls `subscribeToAlerts()`, stores result in `dashboardStore` |
-| `hooks/useFloorPlan.ts` | `useActiveFloorPlan()` → `{ floorPlan, isLoading }` — fetches active floor plan for current user |
-
----
-
-### Services
-
-| File | Responsibility |
-|---|---|
-| `services/authService.ts` | `signIn()`, `signOut()`, `onAuthChanged()` via Firebase Auth |
-| `services/positionService.ts` | `subscribeToPositions()` / `unsubscribeFromPositions()` — RTDB `onValue` listener on `/positions` |
-| `services/alertService.ts` | `subscribeToAlerts()` / `unsubscribeFromAlerts()` — RTDB `onValue` on `/alerts`; `submitFeedback()` → `POST /api/alerts/{id}/feedback` |
-| `services/reportService.ts` | `subscribeToReports()` — Firestore `onSnapshot` on `audit_reports`; `generateReport()` → `POST /reports/generate` |
-| `services/floorPlanService.ts` | `subscribeToFloorPlans()`, `subscribeToActiveFloorPlan()`, `uploadFloorPlan()` (Storage + backend POST), `updateScale()`, `activateFloorPlan()` |
-| `services/patrolLogService.ts` | `getDistinctShifts()` — queries Firestore `patrol_logs`, deduplicates by `shift_id`, returns `ShiftOption[]` for report selector |
-
----
-
-### Stores
-
-| File | State |
-|---|---|
-| `store/dashboardStore.ts` | `positions: Record<string, PositionRecord>`, `alerts: Record<string, AlertRecord>`, `selectedWorkerId`, `activeShiftId`; setters for each |
-| `store/toastStore.ts` | `toasts[]`; `addToast()` auto-dismisses after 4 s; exported helpers: `toast.success()`, `toast.error()`, `toast.info()` |
-
----
-
-### Types
-
-| File | Key Types |
-|---|---|
-| `types/alert.ts` | `AlertType`, `FeedbackValue`, `AlertRecord` |
-| `types/position.ts` | `PositionRecord` (includes `pixel_x/y`, `predicted_x/y`) |
-| `types/floorPlan.ts` | `FloorPlanRecord` |
-| `types/auditReport.ts` | `AuditReportRecord` |
-| `types/feedback.ts` | `FeedbackRecord` |
-| `types/patrolLog.ts` | `PatrolLogRecord` |
-
----
-
-## Firebase Split
-
-| Data | Database | Why |
+| Service | Transport | Key Functions |
 |---|---|---|
-| `/positions/{beacon_mac}` | **RTDB** | Live, low-latency — streams to frontend in real-time |
-| `/alerts/{alert_id}` | **RTDB** | Live — frontend subscribes, RTDB pushes on new alerts |
-| `feedback` collection | **Firestore** | Queryable — RAG pipeline filters by alert_type, zone |
-| `floor_plans` collection | **Firestore** | Structured — ordered queries, single-active constraint |
-| `audit_reports` collection | **Firestore** | Structured — ordered by generated_at desc |
-| `patrol_logs` collection | **Firestore** | Structured — queried by shift_id, guard_id |
-| `accuracy_metrics` collection | **Firestore** | Structured — historical metrics |
-| Floor plan images | **Cloud Storage** | Binary blob — accessed via download URL stored in Firestore |
+| `authService` | Firebase SDK | signIn, signOut, onAuthChanged, signInWithGoogle |
+| `userService` | Firestore + API | getUserRecord, registerUser, getUsers, updateUserStatus, updateUserRole, deleteUser, subscribeToPendingCount |
+| `alertService` | RTDB + API | subscribeToAlerts, submitFeedback |
+| `positionService` | RTDB | subscribeToPositions, unsubscribeFromPositions |
+| `floorPlanService` | Firestore + Storage + API | subscribeToFloorPlans, subscribeToActiveFloorPlan, uploadFloorPlan, updateScale, activateFloorPlan |
+| `guardService` | API | getMyPosition, getMyPatrol, getMyAlerts |
+| `reportService` | API | generateReport |
+| `patrolLogService` | API | getPatrolLogs |
 
 ---
 
-## Data Flows
+### 3.5 Hooks
 
-### 1. Real-time Position Tracking
-
-```
-Omada WiFi Controller
-  → POST /telemetry (Bearer token)
-    → positioning_service.compute_position()
-        RSSI → LDPL distance
-        Multilateration (np.linalg.lstsq, ≥3 APs)
-        Kalman smoothing per beacon
-        Predict 3s ahead (collision)
-        Metres → pixels (floor plan scale, cached)
-      → RTDB /positions/{beacon_mac}
-    → safety_service.run_all_checks()
-        check_man_down()
-        check_collision()
-      → RTDB /alerts/{alert_id}  (if triggered)
-
-Frontend:
-  positionService.subscribeToPositions()
-    → RTDB onValue listener
-      → dashboardStore.setPositions()
-        → FloorMap re-renders markers
-        → Sidebar updates personnel list
-```
-
-### 2. Alert Feedback
-
-```
-FeedbackForm.handleSubmit()
-  → alertService.submitFeedback(alertId, feedback, reason)
-    → POST /api/alerts/{alertId}/feedback
-      → alert_service.submit_feedback()
-          mark_resolved() → RTDB /alerts/{alertId}
-          FeedbackRecord → Firestore /feedback
-            (used by rag_service for future reports)
-```
-
-### 3. Audit Report Generation
-
-```
-ReportsPage: shift selector → handleGenerate()
-  → reportService.generateReport({ shift_id, ... })
-    → POST /reports/generate
-      → llm_service.generate_report()
-          rag_service.get_context()
-            Firestore /feedback → rule-based pre-filter
-            Google text-embedding-004 → cosine similarity
-            Top-3 examples
-          Build prompt (patrol logs + alerts + RAG)
-          LLM provider (Gemini) → report_text
-          AuditReportRecord → Firestore /audit_reports
-
-Frontend:
-  subscribeToReports() (Firestore onSnapshot)
-    → ReportsPage list updates live
-```
-
-### 4. Floor Plan Calibration
-
-```
-FloorPlanUpload: user picks image + name
-  → uploadToStorage() → Firebase Cloud Storage (URL)
-  → POST /floor-plans { user_id, name, url }
-    → floor_plan_service.create() → Firestore /floor_plans
-
-User marks reference points on map → calculates scale
-  → PATCH /floor-plans/{id}/scale { scale_pixels_per_meter }
-    → floor_plan_service.update_scale() → Firestore
-    → positioning_service.invalidate_scale_cache()
-
-Next telemetry packet:
-  positioning_service._get_scale() → Firestore (fresh)
-  pixel_x = sx * scale, pixel_y = sy * scale
-```
-
----
-
-## Safety Features
-
-| Feature | Trigger Condition | Alert Type |
+| Hook | Returns | Description |
 |---|---|---|
-| Man-Down Detection | Beacon stationary (< movement threshold) in high-risk zone for > `MAN_DOWN_MINUTES` | `man_down` |
-| Collision Prediction | Worker + forklift Kalman-predicted positions converge within threshold in 3 s | `collision` |
-| Patrol Compliance | Guard missed checkpoint or dwell_time < min_dwell_required | `patrol_violation` |
-| Ghost Patrol Verification | BLE tag detected but VIGI (visual) camera absent at checkpoint | `ghost_patrol` |
-
-**High-risk zones:** `loading_bay`, `forklift_corridor`, `storage_rack_a`, `storage_rack_b`
+| `useAuth` | `{ user, userRecord, isLoading }` | Firebase auth state + Firestore UserRecord |
+| `usePositions` | `{ positions, isLoading }` | RTDB live subscription → updates dashboardStore |
+| `useAlerts` | `{ alerts, isLoading }` | RTDB live subscription → updates dashboardStore |
+| `useFloorPlan` | `{ floorPlan }` | Active floor plan from Firestore |
 
 ---
 
-## Environment Variables
+### 3.6 Stores (Zustand)
 
-### Backend (`.env`)
+**`dashboardStore`**
+```typescript
+{
+  positions:       Record<beacon_mac, PositionRecord>
+  alerts:          Record<alert_id, AlertRecord>
+  selectedWorkerId: string | null
+  activeShiftId:    string | null
+}
+```
 
-| Variable | Description |
-|---|---|
-| `FIREBASE_KEY_PATH` | Path to service account JSON |
-| `FIREBASE_RTDB_URL` | Realtime Database URL |
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `ANTHROPIC_API_KEY` | Claude API key (if using claude provider) |
-| `OPENAI_API_KEY` | OpenAI API key (if using openai provider) |
-| `OLLAMA_HOST` | Ollama server URL (if using ollama provider) |
-| `LLM_PROVIDER` | `gemini` \| `openai` \| `ollama` \| `claude` (default: `gemini`) |
-| `LLM_MODEL_NAME` | e.g. `gemini-2.5-flash` |
-| `OMADA_ACCESS_TOKEN` | Bearer token for telemetry endpoint |
-| `PORT` | Uvicorn port (default: `8000`) |
-| `MAN_DOWN_MINUTES` | Stationary threshold for man-down alert |
-| `COLLISION_ALERT_SECONDS` | Prediction window for collision detection |
-
-### Frontend (`.env.local`)
-
-| Variable | Description |
-|---|---|
-| `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase project API key |
-| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Firebase Auth domain |
-| `NEXT_PUBLIC_FIREBASE_RTDB_URL` | Realtime Database URL |
-| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firestore project ID |
-| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Cloud Storage bucket |
-| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | FCM sender ID |
-| `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase App ID |
+**`toastStore`**
+```typescript
+{ toasts: Toast[] }
+// toast.success(), toast.error(), toast.info() — auto-dismiss
+```
 
 ---
 
-## File Tree
+### 3.7 Types
+
+| Type | Fields |
+|---|---|
+| `UserRecord` | uid, email, display_name, role, status, person_id, created_at |
+| `PositionRecord` | beacon_mac, person_id, person_type, x, y, zone, timestamp, predicted_x, predicted_y, pixel_x, pixel_y, is_stationary |
+| `AlertRecord` | alert_id, alert_type, person_id, zone, timestamp, resolved |
+| `FloorPlanRecord` | floor_plan_id, user_id, name, url, uploaded_at, is_active, scale_pixels_per_meter |
+| `PatrolLogRecord` | log_id, guard_id, checkpoint_id, checkpoint_name, expected_arrival, actual_arrival, dwell_time_seconds, min_dwell_required, ble_detected, vigi_detected, compliant, shift_id |
+| `AuditReportRecord` | report_id, shift_id, generated_at, patrol_summary, alert_summary, rag_examples_used, report_text, model_used |
+
+---
+
+## 4. Data Flow: BLE → Backend → Frontend
 
 ```
-SKYE/
-├── backend/
-│   ├── main.py
-│   ├── requirements.txt
-│   ├── .env / .env.example
-│   ├── config/
-│   │   └── settings.py
-│   ├── middleware/
-│   │   ├── auth_middleware.py
-│   │   ├── error_handler.py
-│   │   └── request_logger.py
-│   ├── models/
-│   │   ├── accuracy_metrics.py
-│   │   ├── alert.py
-│   │   ├── audit_report.py
-│   │   ├── feedback.py
-│   │   ├── floor_plan.py
-│   │   ├── patrol_log.py
-│   │   ├── position.py
-│   │   └── telemetry.py
-│   ├── providers/
-│   │   ├── base_llm_provider.py
-│   │   ├── llm_factory.py
-│   │   ├── gemini_provider.py
-│   │   ├── openai_provider.py
-│   │   ├── ollama_provider.py
-│   │   └── claude_provider.py
-│   ├── repositories/
-│   │   ├── accuracy_metrics_repository.py
-│   │   ├── alert_repository.py
-│   │   ├── audit_report_repository.py
-│   │   ├── feedback_repository.py
-│   │   ├── floor_plan_repository.py
-│   │   ├── patrol_log_repository.py
-│   │   └── position_repository.py
-│   ├── routes/
-│   │   ├── alert_routes.py
-│   │   ├── floor_plan_routes.py
-│   │   ├── report_routes.py
-│   │   └── telemetry_routes.py
-│   ├── services/
-│   │   ├── alert_service.py
-│   │   ├── floor_plan_service.py
-│   │   ├── kalman_service.py
-│   │   ├── llm_service.py
-│   │   ├── positioning_service.py
-│   │   ├── rag_service.py
-│   │   ├── safety_service.py
-│   │   └── simulation_service.py
-│   └── utils/
-│       ├── multilateration.py
-│       ├── rssi_utils.py
-│       ├── timestamp_utils.py
-│       └── zone_utils.py
-│
-└── frontend/
-    ├── app/
-    │   ├── layout.tsx               # Root layout (IBM Plex fonts)
-    │   ├── page.tsx                 # → /dashboard redirect
-    │   ├── globals.css              # CSS variables + keyframes
-    │   ├── login/
-    │   │   └── page.tsx
-    │   └── dashboard/
-    │       ├── layout.tsx           # Auth guard + Navbar + Sidebar
-    │       ├── page.tsx             # Overview (StatsRow + map + alerts)
-    │       ├── alerts/
-    │       │   └── page.tsx
-    │       ├── reports/
-    │       │   └── page.tsx
-    │       └── floor-plans/
-    │           └── page.tsx
-    ├── components/
-    │   ├── layout/
-    │   │   ├── Navbar.tsx
-    │   │   └── Sidebar.tsx
-    │   ├── map/
-    │   │   ├── FloorMap.tsx
-    │   │   ├── WorkerMarker.tsx
-    │   │   └── ZoneOverlay.tsx
-    │   ├── dashboard/
-    │   │   ├── StatsRow.tsx
-    │   │   └── FloorMapArea.tsx
-    │   ├── alerts/
-    │   │   ├── AlertCard.tsx
-    │   │   ├── AlertList.tsx
-    │   │   └── FeedbackForm.tsx
-    │   ├── reports/
-    │   │   ├── ReportCard.tsx
-    │   │   └── GenerateReportButton.tsx
-    │   ├── floor-plans/
-    │   │   ├── FloorPlanModal.tsx
-    │   │   ├── FloorPlanList.tsx
-    │   │   └── FloorPlanUpload.tsx
-    │   └── shared/
-    │       ├── AlertTypeBadge.tsx
-    │       ├── LoadingSpinner.tsx
-    │       ├── SkeletonCard.tsx
-    │       ├── StatusBadge.tsx
-    │       └── ToastContainer.tsx
-    ├── config/
-    │   └── firebase.ts              # db (RTDB), fsdb (Firestore), storage, auth
-    ├── hooks/
-    │   ├── useAuth.ts
-    │   ├── useAlerts.ts
-    │   ├── usePositions.ts
-    │   └── useFloorPlan.ts
-    ├── services/
-    │   ├── authService.ts
-    │   ├── alertService.ts
-    │   ├── positionService.ts
-    │   ├── reportService.ts
-    │   ├── floorPlanService.ts
-    │   └── patrolLogService.ts
-    ├── store/
-    │   ├── dashboardStore.ts
-    │   └── toastStore.ts
-    ├── types/
-    │   ├── alert.ts
-    │   ├── auditReport.ts
-    │   ├── feedback.ts
-    │   ├── floorPlan.ts
-    │   ├── patrolLog.ts
-    │   └── position.ts
-    ├── next.config.js
-    ├── tailwind.config.ts
-    └── package.json
+[Guard wears BLE tag]
+        ↓
+[Omada WiFi APs pick up RSSI broadcasts]
+        ↓
+POST /telemetry  (Omada Bearer token)
+  payload: { reporter_mac, person_id, person_type, readings: [{ap_mac, rssi, ap_x, ap_y}] }
+        ↓
+PositioningService.compute_position()
+  1. RSSI → LDPL distance per AP
+  2. Multilateration (≥3 APs) → (x, y) metres
+  3. Kalman filter → smoothed (x, y), velocity (vx, vy)
+  4. predict_ahead(3s) → collision candidate position
+  5. pixel_x, pixel_y = x,y × scale_pixels_per_meter
+  6. zone = coordinate_to_zone(x, y)
+  7. RTDB /positions/{beacon_mac} ← save
+        ↓
+SafetyService.run_all_checks()
+  ├─ man_down?   → RTDB /alerts/{id} ← save
+  └─ collision?  → RTDB /alerts/{id} ← save
+        ↓
+[Firebase RTDB pushes to all connected clients instantly]
+        ↓
+Frontend — onValue listeners
+  ├─ /positions → dashboardStore.positions → FloorMap WorkerMarkers update
+  └─ /alerts    → dashboardStore.alerts    → AlertList updates
+
+[Admin submits feedback]
+  POST /alerts/{id}/feedback
+  ├─ RTDB mark_resolved   → live alert disappears from dashboard
+  └─ Firestore feedback/  → persisted for RAG
+
+[Admin generates shift report]
+  POST /reports/generate
+  ├─ RAGService.get_context() → top-3 similar past incidents from Firestore feedback
+  ├─ LLMService builds prompt + calls Gemini
+  └─ Firestore audit_reports/ ← save generated report
 ```
+
+---
+
+## 5. Firebase Usage
+
+### Realtime Database — live, ephemeral
+
+| Path | Data | Update Frequency |
+|---|---|---|
+| `/positions/{beacon_mac}` | PositionRecord | Every telemetry packet (~1–2s) |
+| `/alerts/{alert_id}` | AlertRecord | On safety event detection |
+
+### Firestore — persistent, queryable
+
+| Collection | Data | Key Queries |
+|---|---|---|
+| `users` | UserRecord | by uid, by status=="pending" |
+| `feedback` | FeedbackRecord | by alert_type, by zone (for RAG) |
+| `floor_plans` | FloorPlanRecord | by user_id, by is_active==true |
+| `patrol_logs` | PatrolLogRecord | by shift_id, by guard_id |
+| `audit_reports` | AuditReportRecord | by shift_id |
+
+### Storage — binary files
+
+| Path | Content |
+|---|---|
+| `floor_plans/{user_id}/{timestamp}_{filename}` | Floor plan images |
+
+---
+
+## 6. Key Design Decisions
+
+### Dual Database Strategy
+Realtime DB for **live, ephemeral** data (positions, alerts) — instant frontend streaming.  
+Firestore for **persistent, queryable** data (users, feedback, logs) — historical records and RAG.
+
+### No Auto Sign-In After Register
+After registration the user is redirected — either to `/login?registered=admin` (first user) or `/pending-approval`. The frontend never calls `signInWithEmailAndPassword` immediately after registering because the backend creates the Firebase Auth account server-side; auto-sign-in was causing race conditions with auth state listeners.
+
+### Kalman Smoothing + Collision Prediction
+A 2D Kalman filter (state: x, y, vx, vy) smooths noisy RSSI-based positions and estimates velocity. The filter projects each tracked entity 3 seconds ahead to warn of collisions before impact occurs.
+
+### RAG-Augmented Report Generation
+Audit reports are grounded in real past incidents. When generating a shift report, the LLM service fetches the top-3 semantically similar historical feedback records from Firestore (pre-filtered by alert type, then re-ranked by `text-embedding-004` cosine similarity) and injects them into the Gemini prompt.
+
+### Multi-Modal Ghost Patrol Detection
+Ghost patrol alerts combine BLE beacon detection (Omada) with VIGI camera confirmation. An alert only fires when the BLE tag is present **but** VIGI does not confirm a human — detecting tag-without-person scenarios (e.g. left badge, proxy).
+
+### Guard Data Isolation
+Guard routes (`/guard/*`) always filter by `caller.person_id` extracted from the verified Firebase ID token. A guard can never query another guard's position, patrol, or alerts regardless of what uid they pass.
+
+### Admin Self-Protection
+Admins cannot suspend or demote their own account. Self-deletion is allowed but requires a confirmation modal and immediately signs them out. Other users can be suspended, unsuspended, or removed entirely with a separate confirmation flow.
+
+### Pending Badge
+The sidebar Users link subscribes to Firestore `users` via `onSnapshot` filtered by `status=="pending"`. The count updates in real-time without polling and cleans up on unmount.
+
+---
+
+## 7. Environment Variables
+
+### Backend (`backend/.env`)
+
+```env
+FIREBASE_CREDENTIALS_PATH=path/to/serviceAccount.json
+FIREBASE_RTDB_URL=https://your-project-default-rtdb.firebaseio.com
+GEMINI_API_KEY=AIza...
+OMADA_ACCESS_TOKEN=your-omada-bearer-token
+
+# Positioning
+TX_POWER_DEFAULT=-59
+PATH_LOSS_EXPONENT=2.5
+
+# Safety thresholds
+MAN_DOWN_MINUTES=5
+MAN_DOWN_MOVEMENT_THRESHOLD=1.0
+COLLISION_ALERT_SECONDS=3
+
+# LLM
+LLM_PROVIDER=gemini
+LLM_MODEL=gemini-2.5-flash
+```
+
+### Frontend (`frontend/.env.local`)
+
+```env
+NEXT_PUBLIC_FIREBASE_API_KEY=AIza...
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_RTDB_URL=https://your-project-default-rtdb.firebaseio.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
+NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abc123
+
+BACKEND_URL=http://localhost:8000
+```
+
+---
+
+*SKYE Sentinel-AI · Authorised Access Only*

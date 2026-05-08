@@ -16,13 +16,14 @@ class FloorPlanService:
         """Return the currently active floor plan, optionally scoped to a user."""
         return floor_plan_repository.get_active(user_id)
 
-    def create(self, user_id: str, name: str, url: str) -> FloorPlanRecord:
+    def create(self, user_id: str, name: str, url: str, storage_path: str) -> FloorPlanRecord:
         """Create and persist a new floor plan record after the image is in Storage."""
         record = FloorPlanRecord(
             floor_plan_id=str(uuid.uuid4()),
             user_id=user_id,
             name=name,
             url=url,
+            storage_path=storage_path,
             uploaded_at=utcnow_iso(),
             is_active=False,
         )
@@ -34,6 +35,10 @@ class FloorPlanService:
         if scale_pixels_per_meter <= 0:
             raise ValueError("scale_pixels_per_meter must be positive")
         floor_plan_repository.update_scale(floor_plan_id, scale_pixels_per_meter)
+
+    def delete(self, floor_plan_id: str) -> None:
+        """Remove a floor plan record from Firestore."""
+        floor_plan_repository.delete(floor_plan_id)
 
     def set_active(self, floor_plan_id: str, user_id: str) -> None:
         """Activate a floor plan — deactivates all others for the same user."""

@@ -31,9 +31,13 @@ export default function ReportsPage() {
   const [shiftId, setShiftId] = useState("");
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    subscribeToReports((data) => setReports(data));
+    subscribeToReports((data) => {
+      setReports(data);
+      setIsLoading(false);
+    });
     getDistinctShifts().then(setShifts).catch(() => {});
     return () => unsubscribeFromReports();
   }, []);
@@ -57,6 +61,22 @@ export default function ReportsPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
+
+  if (isLoading) return (
+    <div className="flex gap-4 h-[calc(100vh-5rem)] max-w-[1600px]">
+      <div className="w-[35%] flex flex-col gap-3">
+        <div className="h-3 bg-s-elevated rounded w-28 animate-pulse" />
+        <div className="h-9 bg-s-elevated rounded animate-pulse" />
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="bento-card animate-pulse">
+            <div className="h-4 bg-s-elevated rounded w-3/4 mb-2" />
+            <div className="h-3 bg-s-elevated rounded w-1/2" />
+          </div>
+        ))}
+      </div>
+      <div className="flex-1 bg-s-elevated rounded-xl animate-pulse" />
+    </div>
+  );
 
   return (
     <div className="flex gap-4 h-[calc(100vh-5rem)] max-w-[1600px]">
@@ -163,7 +183,7 @@ export default function ReportsPage() {
             </div>
           </div>
         ) : (
-          <div className="h-full flex flex-col items-center justify-center bg-s-surface border border-s-border rounded-lg text-center gap-3">
+          <div className="h-full flex flex-col items-center justify-center text-center gap-3">
             <svg className="text-s-muted" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>

@@ -43,20 +43,22 @@ export default function AlertList({ alerts, selectedId, onSelectAlert }: Props) 
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-        {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-40 text-s-muted">
-            <p className="text-sm">No alerts</p>
-          </div>
-        )}
-        {filtered.map((a) => (
-          <AlertCard
-            key={a.alert_id}
-            alert={a}
-            selected={a.alert_id === selectedId}
-            onClick={() => onSelectAlert(a)}
-          />
-        ))}
+      <div className="flex-1 overflow-hidden">
+        <div className="divide-y divide-s-border/50 overflow-y-auto h-full">
+          {filtered.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-40 text-s-muted">
+              <p className="text-sm">No alerts</p>
+            </div>
+          )}
+          {filtered.map((a) => (
+            <AlertCard
+              key={a.alert_id}
+              alert={a}
+              selected={a.alert_id === selectedId}
+              onClick={() => onSelectAlert(a)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

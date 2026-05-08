@@ -8,6 +8,8 @@ export interface Toast {
   type: ToastType;
 }
 
+const MAX_TOASTS = 3;
+
 interface ToastState {
   toasts: Toast[];
   addToast: (message: string, type: ToastType) => void;
@@ -18,8 +20,11 @@ export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   addToast: (message, type) => {
     const id = crypto.randomUUID();
-    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }));
-    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 4000);
+    set((s) => {
+      const next = [...s.toasts, { id, message, type }];
+      // Drop oldest toasts beyond the cap
+      return { toasts: next.slice(-MAX_TOASTS) };
+    });
   },
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }));

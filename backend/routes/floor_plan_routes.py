@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from middleware.auth_middleware import require_admin
+from middleware.auth_middleware import require_admin, require_auth
 from models.user import UserRecord
 from schemas.floor_plan_schema import ActivateRequest, FloorPlanCreateRequest, ScaleUpdateRequest
 from services.floor_plan_service import floor_plan_service
@@ -9,16 +9,23 @@ router = APIRouter(prefix="/floor-plans", tags=["floor-plans"])
 
 
 @router.get("")
-def get_floor_plans(user_id: str, admin: UserRecord = Depends(require_admin)) -> list:
-    """Return all floor plans for a user ordered by upload date. Admin only."""
+def get_floor_plans(user_id: str, caller: UserRecord = Depends(require_auth)) -> list:
+    """Return all floor plans for a user ordered by upload date. All authenticated users."""
     return floor_plan_service.get_all(user_id)
 
 
 @router.post("")
 def create_floor_plan(body: FloorPlanCreateRequest, admin: UserRecord = Depends(require_admin)) -> dict:
     """Persist floor plan metadata after the frontend uploads the image to Firebase Storage. Admin only."""
-    record = floor_plan_service.create(body.user_id, body.name, body.url)
+    record = floor_plan_service.create(body.user_id, body.name, body.url, body.storage_path)
     return record.__dict__
+
+
+@router.delete("/{floor_plan_id}")
+def delete_floor_plan(floor_plan_id: str, admin: UserRecord = Depends(require_admin)) -> dict:
+    """Delete a floor plan record. Admin only."""
+    floor_plan_service.delete(floor_plan_id)
+    return {"status": "ok"}
 
 
 @router.patch("/{floor_plan_id}/scale")

@@ -7,6 +7,7 @@ from models.alert import AlertRecord
 from models.patrol_log import PatrolLogRecord
 from models.position import PositionRecord
 from repositories.alert_repository import alert_repository
+from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
 from utils.timestamp_utils import utcnow_iso, seconds_between
 from utils.zone_utils import is_high_risk
@@ -19,7 +20,10 @@ class SafetyService:
     # ------------------------------------------------------------------
     def check_man_down(self, current: PositionRecord) -> Optional[AlertRecord]:
         """Alert if a beacon has not moved more than the threshold in a high-risk zone for > MAN_DOWN_MINUTES."""
-        if not is_high_risk(current.zone):
+        floor = floor_repository.get_any_active()
+        building_id: str = floor.building_id if floor else ""
+        floor_id: str = floor.id if floor else ""
+        if not is_high_risk(current.x, current.y, building_id, floor_id):
             return None
 
         previous = position_repository.get(current.beacon_mac)
@@ -60,7 +64,6 @@ class SafetyService:
                     w.predicted_x - f.predicted_x,  # type: ignore[operator]
                     w.predicted_y - f.predicted_y,  # type: ignore[operator]
                 )
-                # Threshold: 2 × movement_threshold metres indicates convergence
                 if dist < settings.MAN_DOWN_MOVEMENT_THRESHOLD * 2:
                     record = AlertRecord(
                         alert_id=str(uuid.uuid4()),

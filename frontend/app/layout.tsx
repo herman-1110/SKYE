@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import ThemeProvider from "@/components/layout/ThemeProvider";
 
 const ibmPlexSans = IBM_Plex_Sans({
   weight: ["400", "500", "600", "700"],
@@ -21,10 +22,18 @@ export const metadata: Metadata = {
   description: "Autonomous Industrial Safety & Semantic Patrol Intelligence System",
 };
 
+// Runs before React hydration to prevent flash of wrong theme.
+const themeScript = `(function(){try{var s=localStorage.getItem('skye-theme');var t=s?JSON.parse(s).state?.theme:null;if(t==='light'){document.documentElement.classList.add('light')}else{document.documentElement.classList.add('dark')}}catch(e){}})()`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`}>
-      <body className="font-sans antialiased bg-s-base text-s-text min-h-screen">
+    <html lang="en" className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`} suppressHydrationWarning>
+      <head>
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body className="font-sans antialiased bg-s-base text-s-text min-h-screen" suppressHydrationWarning>
+        <ThemeProvider />
         {children}
       </body>
     </html>
