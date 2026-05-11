@@ -1,6 +1,6 @@
 export interface ZoneRecord {
   id: string;
-  floor_plan_id: string;
+  floor_id: string;
   name: string;
   color: string;          // hex with alpha e.g. "#ef444433"
   is_high_risk: boolean;

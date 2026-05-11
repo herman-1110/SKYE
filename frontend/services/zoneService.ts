@@ -31,7 +31,7 @@ export const getZones = (buildingId: string, floorId: string): Promise<ZoneRecor
 export const createZone = (
   buildingId: string,
   floorId: string,
-  zone: Omit<ZoneRecord, "id" | "floor_plan_id" | "created_at" | "created_by">,
+  zone: Omit<ZoneRecord, "id" | "floor_id" | "created_at" | "created_by">,
 ): Promise<ZoneRecord> =>
   req("POST", base(buildingId, floorId), zone);
 
@@ -49,7 +49,7 @@ export const deleteZone = (buildingId: string, floorId: string, zoneId: string):
 export async function aiDetectZones(
   buildingId: string,
   floorId: string,
-): Promise<Omit<ZoneRecord, "id" | "floor_plan_id" | "created_at" | "created_by">[]> {
+): Promise<Omit<ZoneRecord, "id" | "floor_id" | "created_at" | "created_by">[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
   try {

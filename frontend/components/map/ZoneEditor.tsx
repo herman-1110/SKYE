@@ -25,7 +25,7 @@ interface DragState {
   startY: number;
   origZone: { x_min: number; x_max: number; y_min: number; y_max: number };
 }
-interface Suggestion extends Omit<ZoneRecord, "id" | "floor_plan_id" | "created_at" | "created_by"> {
+interface Suggestion extends Omit<ZoneRecord, "id" | "floor_id" | "created_at" | "created_by"> {
   _key: string;
 }
 

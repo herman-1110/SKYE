@@ -22,7 +22,7 @@ class ZoneService:
     ) -> ZoneRecord:
         zone = ZoneRecord(
             id=str(uuid.uuid4()),
-            floor_plan_id=floor_id,  # holds floor_id; ZoneRecord field kept for compat
+            floor_id=floor_id,
             name=data["name"],
             color=data.get("color", "#3b82f633"),
             is_high_risk=bool(data.get("is_high_risk", False)),

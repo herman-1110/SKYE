@@ -4,7 +4,7 @@ from dataclasses import dataclass
 @dataclass
 class ZoneRecord:
     id: str
-    floor_plan_id: str
+    floor_id: str
     name: str
     color: str            # hex with alpha e.g. "#ef444433"
     is_high_risk: bool

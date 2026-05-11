@@ -53,7 +53,6 @@ Omada WiFi APs (BLE beacons) → POST /telemetry
   - `/telemetry` — Omada Bearer token
   - `/alerts`, `/users` — Firebase ID token
   - `/buildings`, `/floors`, `/zones` — Firebase ID token
-  - `/floor-plans` — Firebase ID token (legacy; kept for backward compat)
   - `/reports` — Firebase ID token (admin only)
 
 ---
@@ -112,13 +111,7 @@ Omada WiFi APs (BLE beacons) → POST /telemetry
 | DELETE | `/buildings/{building_id}/floors/{floor_id}/zones/{zone_id}` | Delete a zone. |
 | POST | `/buildings/{building_id}/floors/{floor_id}/zones/ai-detect` | Gemini Vision auto-detect zones from floor plan image. |
 
-#### Floor Plans — require_admin (legacy)
-| Method | Path | Description |
-|---|---|---|
-| GET | `/floor-plans` | All floor plans for a user. |
-| POST | `/floor-plans` | Create floor plan metadata post-upload. |
-| PATCH | `/floor-plans/{id}/scale` | Update calibration. |
-| PATCH | `/floor-plans/{id}/activate` | Activate plan. |
+
 
 #### Reports — require_admin
 | Method | Path | Description |
@@ -136,8 +129,7 @@ Omada WiFi APs (BLE beacons) → POST /telemetry
 | `AlertRecord` | alert_id, alert_type, person_id, zone, timestamp, resolved |
 | `BuildingRecord` | id, name, description, user_id, created_at |
 | `FloorRecord` | id, building_id, name, floor_number, url, storage_path, is_active, uploaded_at, scale_pixels_per_meter |
-| `ZoneRecord` | id, floor_plan_id, name, color (hex+alpha), is_high_risk, x_min/max, y_min/max, created_at, created_by |
-| `FloorPlanRecord` | floor_plan_id, user_id, name, url, storage_path, uploaded_at, is_active, scale_pixels_per_meter (legacy) |
+| `ZoneRecord` | id, floor_id, name, color (hex+alpha), is_high_risk, x_min/max, y_min/max, created_at, created_by |
 | `PatrolLogRecord` | log_id, guard_id, checkpoint_id, checkpoint_name, expected_arrival, actual_arrival, dwell_time_seconds, min_dwell_required, ble_detected, vigi_detected, compliant, shift_id |
 | `FeedbackRecord` | feedback_id, alert_id, alert_type, zone, feedback, timestamp, feedback_reason, shift_id |
 | `AuditReportRecord` | report_id, shift_id, generated_at, patrol_summary, alert_summary, rag_examples_used, report_text, model_used |
@@ -188,8 +180,7 @@ Full BLE → position pipeline per telemetry packet:
 - `get_zones(floor_id)`, `create()`, `update()`, `delete()` — Zone CRUD
 - `ai_detect(floor_id, image_url)` — Gemini Vision generates zone suggestions from floor plan image
 
-#### FloorPlanService (legacy)
-- `get_all()`, `create()`, `update_scale()`, `set_active()` — Original single-floor plan management
+
 
 #### LLMService
 - `generate_report(shift_id, patrol_summaries, alert_summaries)` — Build prompt with RAG context → call active LLM provider → persist AuditReport to Firestore
@@ -236,7 +227,6 @@ The `llm_factory.get_llm_provider()` factory reads `LLM_PROVIDER` and instantiat
 | `BuildingRepository` | Firestore `buildings` | create, get_all, update, delete |
 | `FloorRepository` | Firestore `floors` | save, get_all, get_active, update_scale, set_active, delete |
 | `ZoneRepository` | Firestore `zones` | save, get_by_floor, update, delete |
-| `FloorPlanRepository` | Firestore `floor_plans` | save, get_all, get_active, update_scale, set_active (legacy) |
 | `PatrolLogRepository` | Firestore `patrol_logs` | save, get, get_by_shift, get_by_guard |
 | `AuditReportRepository` | Firestore `audit_reports` | save, get, get_all, get_by_shift |
 | `AccuracyMetricsRepository` | Firestore `accuracy_metrics` | save, get_by_run, get_by_shift |
@@ -312,10 +302,7 @@ verify_omada_token(Authorization: Bearer <Omada token>)
 - `AlertCard` — Type badge, zone, person_id, timestamp, resolved state
 - `FeedbackForm` — Radio (confirmed/fixed/false_alarm), reason textarea, submit
 
-**Floor Plans**
-- `FloorPlanList` — Buildings → Floors tabbed interface with activate/delete actions
-- `FloorPlanUpload` — File input → Firebase Storage upload → create Floor doc
-- `FloorPlanModal` — Metadata modal (rename, delete, activate actions)
+
 
 **Reports**
 - `ReportCard` — Rendered audit report: markdown text, model used, timestamp
@@ -341,7 +328,6 @@ verify_omada_token(Authorization: Bearer <Omada token>)
 | `zoneService` | Firestore + API | createZone, updateZone, deleteZone, aiDetectZones |
 | `alertService` | RTDB + API | subscribeToAlerts, submitFeedback |
 | `positionService` | RTDB | subscribeToPositions, unsubscribeFromPositions |
-| `floorPlanService` | Firestore + Storage + API | legacy floor plan operations |
 | `reportService` | API | generateReport, subscribeToReports |
 | `patrolLogService` | API | getPatrolLogs, getDistinctShifts |
 
@@ -356,7 +342,6 @@ verify_omada_token(Authorization: Bearer <Omada token>)
 | `useAlerts` | `{ alerts, isLoading }` | RTDB live subscription → updates dashboardStore |
 | `useBuildings` | `{ buildings, isLoading }` | All buildings for current user |
 | `useFloors` | `{ floors, isLoading }` | Floors for a building, with active state |
-| `useFloorPlan` | `{ floorPlan }` | Active floor plan (legacy) |
 | `useZones` | `{ zones, isLoading }` | Live zones for a floor |
 
 ---
@@ -398,8 +383,7 @@ verify_omada_token(Authorization: Bearer <Omada token>)
 | `AlertRecord` | alert_id, alert_type, person_id, zone, timestamp, resolved |
 | `BuildingRecord` | id, name, description, user_id, created_at |
 | `FloorRecord` | id, building_id, name, floor_number, url, storage_path, is_active, uploaded_at, scale_pixels_per_meter |
-| `ZoneRecord` | id, floor_plan_id, name, color, is_high_risk, x_min/max, y_min/max, created_at, created_by |
-| `FloorPlanRecord` | floor_plan_id, user_id, name, url, uploaded_at, is_active, scale_pixels_per_meter |
+| `ZoneRecord` | id, floor_id, name, color, is_high_risk, x_min/max, y_min/max, created_at, created_by |
 | `PatrolLogRecord` | log_id, guard_id, checkpoint_id, checkpoint_name, expected_arrival, actual_arrival, dwell_time_seconds, min_dwell_required, ble_detected, vigi_detected, compliant, shift_id |
 | `AuditReportRecord` | report_id, shift_id, generated_at, patrol_summary, alert_summary, rag_examples_used, report_text, model_used |
 
@@ -471,9 +455,8 @@ Frontend — onValue listeners
 | `users` | UserRecord | by uid, by status=="pending" |
 | `buildings` | BuildingRecord | by user_id |
 | `floors` | FloorRecord | by building_id, by is_active==true |
-| `zones` | ZoneRecord | by floor_plan_id |
+| `zones` | ZoneRecord | by floor_id |
 | `feedback` | FeedbackRecord | by alert_type, by zone (for RAG) |
-| `floor_plans` | FloorPlanRecord | by user_id, by is_active==true (legacy) |
 | `patrol_logs` | PatrolLogRecord | by shift_id, by guard_id |
 | `audit_reports` | AuditReportRecord | by shift_id |
 | `accuracy_metrics` | AccuracyMetricsRecord | by run_id, by shift_id |
@@ -489,7 +472,7 @@ Frontend — onValue listeners
 ## 6. Key Design Decisions
 
 ### Multi-Floor Hierarchy
-The system organises floor plans as: **Building → Floors → Zones**. Each building can have multiple floors; each floor can have multiple named zones (with risk flags and colors). One floor per building can be "active" — only the active floor's zones are used for positioning and safety checks. This replaced the original flat `FloorPlan` model.
+The system organises floor plans as: **Building → Floors → Zones**. Each building can have multiple floors; each floor can have multiple named zones (with risk flags and colors). One floor per building can be "active" — only the active floor's zones are used for positioning and safety checks.
 
 ### Dual Database Strategy
 Realtime DB for **live, ephemeral** data (positions, alerts) — instant frontend streaming.  
