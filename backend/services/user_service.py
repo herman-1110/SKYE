@@ -51,11 +51,32 @@ class UserService:
 
     def get_all(self) -> list:
         """Return all users ordered by created_at descending."""
-        return user_repository.get_all()
+        users = user_repository.get_all()
+        return self._clean_orphan_users(users)
 
     def get_pending(self) -> list:
         """Return all users with status=pending."""
-        return user_repository.get_pending()
+        users = user_repository.get_pending()
+        return self._clean_orphan_users(users)
+
+    def _clean_orphan_users(self, users: list) -> list:
+        """Verify users exist in Firebase Auth. Delete from Firestore if missing."""
+        if not users:
+            return []
+            
+        try:
+            auth_uids = {u.uid for u in firebase_auth.list_users().iterate_all()}
+            valid_users = []
+            for u in users:
+                if u.uid in auth_uids:
+                    valid_users.append(u)
+                else:
+                    print(f"[{self.__class__.__name__}] Deleting orphan user from Firestore: {u.uid}")
+                    user_repository.delete(u.uid)
+            return valid_users
+        except Exception as e:
+            print(f"[{self.__class__.__name__}] Error cleaning orphan users: {e}")
+            return users
 
     def update_role(self, uid: str, role: str, approver_uid: str) -> None:
         """Update role. Approver must be admin."""

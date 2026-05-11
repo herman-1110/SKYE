@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 
 from repositories.building_repository import building_repository
 from repositories.floor_repository import floor_repository
+from services.floor_service import floor_service
 from models.building import BuildingRecord
 
 
@@ -17,10 +18,10 @@ class BuildingService:
         building_repository.update(building_id, {"name": name})
 
     def delete(self, building_id: str) -> None:
-        # Delete all floors (and their zones subcollection is cleaned by zone_repository)
+        # Delete all floors (and their zones and floorplan images via floor_service)
         floors = floor_repository.get_all(building_id)
         for floor in floors:
-            floor_repository.delete(building_id, floor.id)
+            floor_service.delete(building_id, floor.id)
         building_repository.delete(building_id)
 
 
