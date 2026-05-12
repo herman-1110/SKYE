@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from middleware.auth_middleware import verify_omada_token
-from models.telemetry import APRssiReading, OmadaTelemetryPayload
-from schemas.telemetry_schema import TelemetryRequest
+from schemas.telemetry_schema import OmadaTelemetryRequest
 from services.positioning_service import positioning_service
 from services.safety_service import safety_service
 
@@ -10,20 +9,19 @@ router = APIRouter(tags=["telemetry"])
 
 
 @router.post("/telemetry", dependencies=[Depends(verify_omada_token)])
-def ingest_telemetry(body: TelemetryRequest) -> dict:
-    """Receive RSSI payload from Omada Controller, compute position, run safety checks."""
-    readings = [
-        APRssiReading(ap_mac=r.ap_mac, rssi=r.rssi, ap_x=r.ap_x, ap_y=r.ap_y)
-        for r in body.readings
-    ]
-    payload = OmadaTelemetryPayload(
-        reporter_mac=body.reporter_mac,
-        timestamp=body.timestamp,
-        readings=readings,
-        person_id=body.person_id,
-        person_type=body.person_type,
-    )
-    position = positioning_service.compute_position(payload)
-    if position:
-        safety_service.run_all_checks(position)
+def ingest_telemetry(body: OmadaTelemetryRequest) -> dict:
+    """Receive Omada BLE telemetry (one POST per AP), buffer per beacon, run positioning."""
+    ap_mac = body.reporter.mac
+    ap_name = body.reporter.name
+    print(f"[TEL] Saved AP Info: {ap_name} ({ap_mac}), beacons={len(body.reported)}")
+
+    for entry in body.reported:
+        position = positioning_service.process_ap_reading(
+            ap_mac=ap_mac,
+            beacon_mac=entry.mac,
+            rssi=entry.rssi,
+        )
+        if position:
+            safety_service.run_all_checks(position)
+
     return {"status": "ok"}
