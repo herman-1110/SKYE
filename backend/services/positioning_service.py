@@ -1,4 +1,3 @@
-import time
 from typing import Dict, List, Optional, Tuple
 
 from config.settings import settings
@@ -13,16 +12,11 @@ from utils.multilateration import least_squares_position
 from utils.rssi_utils import rssi_to_distance
 from utils.timestamp_utils import utcnow_iso
 
-_BUFFER_TTL_S = 10  # drop readings older than this before multilateration
-
 
 class PositioningService:
     """
     Orchestrates the full localisation pipeline:
     RSSI → LDPL distances → multilateration → Kalman smoothing → pixel conversion → Firebase save.
-
-    Supports both the Omada per-AP push format (process_ap_reading) and the legacy
-    all-at-once format (compute_position) used by tests.
     """
 
     def __init__(self) -> None:
@@ -31,73 +25,6 @@ class PositioningService:
         self._cached_building_id: Optional[str] = None
         self._cached_floor_id: Optional[str] = None
         self._cached_zones: List[ZoneRecord] = []
-
-        # AP MAC → (x_m, y_m) physical position registry
-        self._ap_registry: Dict[str, Tuple[float, float]] = {}
-
-        # Beacon MAC → {ap_mac: (rssi, received_at)}  — rolling latest reading per AP
-        self._beacon_buffer: Dict[str, Dict[str, Tuple[int, float]]] = {}
-
-    # ------------------------------------------------------------------
-    # AP position registry
-    # ------------------------------------------------------------------
-
-    def register_ap(self, mac: str, x_m: float, y_m: float) -> None:
-        """Record the physical position of an AP so it can be used for multilateration."""
-        self._ap_registry[mac] = (x_m, y_m)
-
-    # ------------------------------------------------------------------
-    # Omada per-AP ingest (main path)
-    # ------------------------------------------------------------------
-
-    def process_ap_reading(
-        self,
-        ap_mac: str,
-        beacon_mac: str,
-        rssi: int,
-    ) -> Optional[PositionRecord]:
-        """
-        Accept one AP's RSSI reading for a beacon.  Buffer it, and once ≥3 APs have
-        fresh readings for the same beacon run multilateration and return the result.
-        """
-        now = time.time()
-
-        if beacon_mac not in self._beacon_buffer:
-            self._beacon_buffer[beacon_mac] = {}
-        self._beacon_buffer[beacon_mac][ap_mac] = (rssi, now)
-
-        # Drop stale entries
-        self._beacon_buffer[beacon_mac] = {
-            mac: (r, t)
-            for mac, (r, t) in self._beacon_buffer[beacon_mac].items()
-            if now - t <= _BUFFER_TTL_S
-        }
-
-        fresh = self._beacon_buffer[beacon_mac]
-        if len(fresh) < 3:
-            return None
-
-        # Build APRssiReading list — skip APs whose position is unknown
-        readings: List[APRssiReading] = []
-        for a_mac, (a_rssi, _) in fresh.items():
-            if a_mac not in self._ap_registry:
-                continue
-            ax, ay = self._ap_registry[a_mac]
-            readings.append(APRssiReading(ap_mac=a_mac, rssi=float(a_rssi), ap_x=ax, ap_y=ay))
-
-        if len(readings) < 3:
-            return None
-
-        payload = OmadaTelemetryPayload(
-            reporter_mac=beacon_mac,
-            timestamp=utcnow_iso(),
-            readings=readings,
-        )
-        return self.compute_position(payload)
-
-    # ------------------------------------------------------------------
-    # Core multilateration pipeline (shared by both paths)
-    # ------------------------------------------------------------------
 
     def _get_filter(self, beacon_mac: str) -> KalmanService:
         if beacon_mac not in self._filters:
