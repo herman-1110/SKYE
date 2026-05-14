@@ -45,3 +45,8 @@ def _load() -> Settings:
 
 
 settings = _load()
+
+# Rate limit strings (documentation & reuse in tests)
+RATE_LIMIT_AUTH = "5/15minutes"
+RATE_LIMIT_GENERAL = "100/minute"
+RATE_LIMIT_TELEMETRY = "200/minute"

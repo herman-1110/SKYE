@@ -15,6 +15,12 @@ const COLOR_PRESETS = [
 
 function colorSolid(hex8: string): string { return hex8.slice(0, 7); }
 
+const RISK_LABELS: Record<string, { label: string; bg: string; text: string }> = {
+  high:     { label: "High Risk",     bg: "#fca5a5", text: "#7f1d1d" },
+  moderate: { label: "Moderate Risk", bg: "#fde68a", text: "#78350f" },
+  low:      { label: "Low Risk",      bg: "#bbf7d0", text: "#14532d" },
+};
+
 interface Pt { x: number; y: number }
 interface NaturalSize { w: number; h: number }
 interface DragState {
@@ -248,8 +254,9 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
   const handleSave = async (name: string, color: string, isHighRisk: boolean) => {
     if (!pendingMetres) return;
     setSavingZone(true);
+    const risk_level: ZoneRecord["risk_level"] = isHighRisk ? "high" : "moderate";
     try {
-      const zone = await createZone(buildingId, floor.id, { name, color, is_high_risk: isHighRisk, ...pendingMetres });
+      const zone = await createZone(buildingId, floor.id, { name, color, is_high_risk: isHighRisk, risk_level, ...pendingMetres });
       setZones((z) => [...z, zone]);
       setPendingMetres(null);
       toast.success(`Zone "${name}" saved`);
@@ -496,11 +503,18 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
               onClick={(e) => e.stopPropagation()}
             >
               {/* Label / inline rename */}
-              <div className="absolute inset-0 flex items-center justify-center p-1">
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-1 gap-1">
                 {editingNameKey === zone._key ? (
                   <input autoFocus value={editingName} onChange={(e) => setEditingName(e.target.value)} onBlur={() => commitPendingName(zone._key)} onKeyDown={(e) => { if (e.key === "Enter") commitPendingName(zone._key); if (e.key === "Escape") setEditingNameKey(null); }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} className="w-full text-center bg-s-surface/90 border border-s-accent rounded px-1 py-0.5 text-[10px] font-mono text-s-text focus:outline-none" style={{ maxWidth: "90%" }} />
                 ) : (
-                  <span className="font-mono text-[10px] font-bold text-center leading-tight truncate max-w-full pointer-events-none" style={{ color: colorSolid(zone.color), textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>{zone.is_high_risk && "⚠ "}{zone.name}</span>
+                  <>
+                    <span className="font-mono text-[10px] font-bold text-center leading-tight truncate max-w-full pointer-events-none" style={{ color: colorSolid(zone.color), textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>{zone.name}</span>
+                    {zone.risk_level && RISK_LABELS[zone.risk_level] && (
+                      <span style={{ background: RISK_LABELS[zone.risk_level].bg, color: RISK_LABELS[zone.risk_level].text, padding: "1px 6px", borderRadius: "999px", fontSize: "9px", fontWeight: 600, pointerEvents: "none", whiteSpace: "nowrap" }}>
+                        {RISK_LABELS[zone.risk_level].label}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
 

@@ -181,11 +181,19 @@ export default function UsersPage() {
         </h1>
 
         <div className="bg-s-surface border border-s-border rounded-lg overflow-hidden">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs" style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '200px' }} />
+              <col style={{ width: '240px' }} />
+              <col style={{ width: '100px' }} />
+              <col style={{ width: '100px' }} />
+              <col style={{ width: '140px' }} />
+              <col style={{ minWidth: '200px' }} />
+            </colgroup>
             <thead>
-              <tr className="border-b border-s-border">
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {["Name", "Email", "Role", "Status", "Person ID", "Actions"].map((h) => (
-                  <th key={h} className="font-mono text-[10px] text-s-muted tracking-widest uppercase text-left px-4 py-3">
+                  <th key={h} style={{ textAlign: 'left', color: 'var(--text-secondary)', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
                     {h}
                   </th>
                 ))}
@@ -195,24 +203,24 @@ export default function UsersPage() {
               {users.map((u) => {
                 const isSelf = u.uid === user?.uid;
                 return (
-                  <tr key={u.uid} className="border-b border-s-border/50 hover:bg-s-elevated transition-colors">
-                    <td className="px-4 py-3 text-s-text font-medium">
+                  <tr key={u.uid} style={{ borderBottom: '1px solid var(--border)' }} className="hover:bg-s-elevated transition-colors">
+                    <td style={{ padding: '10px 12px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="font-medium">
                       {u.display_name}
                       {isSelf && <span className="ml-2 font-mono text-[9px] text-s-muted">(you)</span>}
                     </td>
-                    <td className="px-4 py-3 text-s-muted font-mono">{u.email}</td>
-                    <td className="px-4 py-3">
+                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="font-mono">{u.email}</td>
+                    <td style={{ padding: '10px 12px' }}>
                       <span className={`font-mono text-[10px] px-2 py-0.5 rounded-full ${ROLE_COLOURS[u.role]}`}>
                         {u.role.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td style={{ padding: '10px 12px' }}>
                       <span className={`font-mono text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLOURS[u.status]}`}>
                         {u.status.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-s-muted font-mono">{u.person_id || "—"}</td>
-                    <td className="px-4 py-3">
+                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="font-mono">{u.person_id || "—"}</td>
+                    <td style={{ padding: '10px 12px' }}>
                       <div className="flex gap-2 flex-wrap">
                         {/* Approve pending */}
                         {u.status === "pending" && (

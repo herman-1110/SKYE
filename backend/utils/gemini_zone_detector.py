@@ -13,6 +13,12 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+RISK_COLOURS = {
+    "high":     "#fca5a533",  # light red   (Tailwind red-300 with alpha)
+    "moderate": "#fde68a33",  # light yellow (Tailwind yellow-200 with alpha)
+    "low":      "#bbf7d033",  # light green  (Tailwind green-200 with alpha)
+}
+
 
 def _compress_for_gemini(img: PIL.Image.Image) -> tuple[bytes, int, int]:
     """Resize to max 800 px wide and encode as JPEG. Returns (bytes, width_px, height_px)."""
@@ -25,35 +31,43 @@ def _compress_for_gemini(img: PIL.Image.Image) -> tuple[bytes, int, int]:
     return buf.getvalue(), img.width, img.height
 
 
-_COLOR_HIGH_RISK = "#ef444433"
-_COLOR_NORMAL    = "#3b82f633"
-_COLOR_CORRIDOR  = "#22c55e33"
-_COLOR_STORAGE   = "#f59e0b33"
-
-_VALID_COLORS = {_COLOR_HIGH_RISK, _COLOR_NORMAL, _COLOR_CORRIDOR, _COLOR_STORAGE}
-
-_STORAGE_KEYWORDS  = ["storage", "warehouse", "stock", "pantry", "laundry", "closet", "utility"]
-_CORRIDOR_KEYWORDS = ["corridor", "hallway", "exit", "lobby", "entrance", "aisle", "passage"]
-
-
-def _apply_fallback_colors(zones: list[dict]) -> None:
-    """
-    Overwrite missing, empty, or unrecognised color values with a deterministic
-    color derived from is_high_risk and zone name keywords.
-    """
+def _apply_risk_colours(zones: list[dict]) -> None:
+    """Map risk_level to color and is_high_risk for each zone."""
     for zone in zones:
-        color = zone.get("color", "")
-        if color in _VALID_COLORS:
-            continue
-        name = zone.get("name", "").lower()
-        if zone.get("is_high_risk"):
-            zone["color"] = _COLOR_HIGH_RISK
-        elif any(k in name for k in _CORRIDOR_KEYWORDS):
-            zone["color"] = _COLOR_CORRIDOR
-        elif any(k in name for k in _STORAGE_KEYWORDS):
-            zone["color"] = _COLOR_STORAGE
-        else:
-            zone["color"] = _COLOR_NORMAL
+        risk = zone.get("risk_level", "moderate").lower()
+        if risk not in RISK_COLOURS:
+            risk = "moderate"
+        zone["risk_level"] = risk
+        zone["color"] = RISK_COLOURS[risk]
+        zone["is_high_risk"] = (risk == "high")
+
+
+ZONE_DETECTION_PROMPT = """
+Analyse this industrial facility floor plan image.
+
+Identify all distinct zones or areas visible in the floor plan.
+
+The coordinate origin (0.0, 0.0) is the TOP-LEFT corner.
+(1.0, 1.0) is the BOTTOM-RIGHT corner.
+Express ALL coordinates as fractions of the image dimensions (0.0 to 1.0).
+
+For each zone, return:
+- name: descriptive zone name
+- risk_level: one of "high", "moderate", or "low"
+  - high: machinery areas, chemical storage, electrical rooms, loading docks, forklift paths
+  - moderate: corridors, stairwells, storage rooms, server rooms
+  - low: offices, reception, break rooms, toilets
+- x_min, x_max, y_min, y_max: bounding box as percentage (0.0 to 1.0) of image dimensions
+- reasoning: one sentence explaining the risk classification
+
+Return ONLY a valid JSON array. No markdown, no preamble.
+
+Example:
+[
+  {"name": "Forklift Bay", "risk_level": "high", "x_min": 0.1, "x_max": 0.4, "y_min": 0.2, "y_max": 0.6, "reasoning": "Active forklift movement zone with blind corners."},
+  {"name": "Office Area", "risk_level": "low", "x_min": 0.6, "x_max": 0.9, "y_min": 0.1, "y_max": 0.4, "reasoning": "Administrative area with no heavy machinery."}
+]
+"""
 
 
 def detect_zones_from_image(image_url: str, scale_pixels_per_meter: float) -> list[dict]:
@@ -72,8 +86,7 @@ def detect_zones_from_image(image_url: str, scale_pixels_per_meter: float) -> li
     image = {"mime_type": "image/jpeg", "data": image_bytes}
 
     # The calibration scale was measured on the original image. After resizing,
-    # the compressed image has fewer pixels per metre — adjust accordingly so
-    # the conversion formula Gemini receives matches what it actually sees.
+    # the compressed image has fewer pixels per metre — adjust accordingly.
     compression_ratio = img_width_px / orig.width
     compressed_scale = scale_pixels_per_meter * compression_ratio
     real_width_m = img_width_px / compressed_scale
@@ -84,49 +97,7 @@ def detect_zones_from_image(image_url: str, scale_pixels_per_meter: float) -> li
         img_width_px, img_height_px, len(image_bytes) / 1024, compressed_scale, real_width_m, real_height_m,
     )
 
-    prompt = f"""Analyse this floor plan image carefully.
-
-The image is {img_width_px} x {img_height_px} pixels.
-
-The coordinate origin (0.0, 0.0) is the TOP-LEFT corner.
-(1.0, 1.0) is the BOTTOM-RIGHT corner.
-Express ALL coordinates as fractions of the image dimensions (0.0 to 1.0).
-
-Example: a zone covering the left half of the image =
-  x_min: 0.0, x_max: 0.5, y_min: 0.0, y_max: 1.0
-
-Identify every distinct room and zone visible in the floor plan.
-First determine the building type, then name zones appropriately.
-
-For industrial/factory buildings use names like:
-  Loading Bay, Control Room, Assembly Floor, Forklift Zone,
-  Storage Area, Exit Corridor, Warehouse, etc.
-For office buildings: Meeting Room, Open Office, Reception, Server Room, etc.
-For residential buildings: Master Bedroom, Kitchen, Living Room, etc.
-
-High-risk zones (machinery, forklifts, electrical, hazardous):
-  is_high_risk: true
-
-Color guide:
-  High risk:     "#ef444433"
-  Normal work:   "#3b82f633"
-  Exit/corridor: "#22c55e33"
-  Storage:       "#f59e0b33"
-
-Respond with ONLY a valid JSON array. No explanation. No markdown.
-
-[
-  {{
-    "name": "Zone Name",
-    "x_min": 0.0,
-    "x_max": 0.45,
-    "y_min": 0.0,
-    "y_max": 0.5,
-    "is_high_risk": false,
-    "color": "#3b82f633"
-  }}
-]
-"""
+    prompt = f"The image is {img_width_px} x {img_height_px} pixels.\n" + ZONE_DETECTION_PROMPT
 
     genai.configure(api_key=settings.GEMINI_API_KEY)
     model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
@@ -171,7 +142,7 @@ Respond with ONLY a valid JSON array. No explanation. No markdown.
             zone.get("name", "?"), zone["x_min"], zone["y_min"], zone["x_max"], zone["y_max"],
         )
 
-    _apply_fallback_colors(zones)
+    _apply_risk_colours(zones)
 
     valid_zones = []
     for zone in zones:
@@ -184,7 +155,8 @@ Respond with ONLY a valid JSON array. No explanation. No markdown.
         zone.setdefault("x_max", real_width_m)
         zone.setdefault("y_max", real_height_m)
         zone.setdefault("is_high_risk", False)
-        zone.setdefault("color", "#3b82f633")
+        zone.setdefault("risk_level", "moderate")
+        zone.setdefault("color", RISK_COLOURS["moderate"])
 
         zone["x_min"] = max(0.0, min(float(zone["x_min"]), real_width_m))
         zone["x_max"] = max(0.0, min(float(zone["x_max"]), real_width_m))

@@ -6,6 +6,7 @@ class ZoneCreateRequest(BaseModel):
     name: str
     color: str = "#3b82f633"
     is_high_risk: bool = False
+    risk_level: str = "moderate"
     x_min: float
     x_max: float
     y_min: float
@@ -16,6 +17,7 @@ class ZoneUpdateRequest(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     is_high_risk: Optional[bool] = None
+    risk_level: Optional[str] = None
     x_min: Optional[float] = None
     x_max: Optional[float] = None
     y_min: Optional[float] = None

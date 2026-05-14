@@ -102,7 +102,7 @@ export default function FloorMapArea() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="h-full flex flex-col gap-2">
       {/* Building + floor selectors */}
       <div className="flex items-center gap-2">
         {buildings.length > 1 && (
@@ -140,11 +140,13 @@ export default function FloorMapArea() {
         )}
       </div>
 
-      <FloorMap
-        positions={positionList}
-        buildingId={selectedBuildingId}
-        activeFloor={displayedFloor ?? null}
-      />
+      <div className="flex-1 min-h-0">
+        <FloorMap
+          positions={positionList}
+          buildingId={selectedBuildingId}
+          activeFloor={displayedFloor ?? null}
+        />
+      </div>
     </div>
   );
 }

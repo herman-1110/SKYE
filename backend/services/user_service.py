@@ -93,6 +93,13 @@ class UserService:
         firebase_auth.delete_user(uid)
         user_repository.delete(uid)
 
+    def create_user_doc(self, uid: str, email: str, display_name: str, person_id: str = "") -> UserRecord:
+        """Create Firestore user doc for an existing Firebase Auth user. Idempotent."""
+        existing = user_repository.get_by_uid(uid)
+        if existing:
+            return existing
+        return user_repository.create(uid, email, display_name, person_id)
+
     def register_google(self, uid: str, email: str, display_name: str) -> UserRecord:
         """Upsert via Google sign-in: return existing record if found, else create new one."""
         existing = user_repository.get_by_uid(uid)

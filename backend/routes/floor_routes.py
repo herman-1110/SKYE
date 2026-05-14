@@ -1,9 +1,30 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from middleware.auth_middleware import require_admin, require_auth
+from models.ap import AccessPoint
+from models.cctv import CCTV
 from models.user import UserRecord
+from repositories.ap_repository import ap_repository
+from repositories.cctv_repository import cctv_repository
 from schemas.floor_schema import FloorCreateRequest, FloorScaleRequest, FloorUpdateRequest
 from services.floor_service import floor_service
+from utils.timestamp_utils import utcnow_iso
+
+
+class APCreateRequest(BaseModel):
+    name: str
+    mac: str
+    x_pct: float
+    y_pct: float
+
+
+class CCTVCreateRequest(BaseModel):
+    name: str
+    x_pct: float
+    y_pct: float
 
 router = APIRouter(prefix="/buildings/{building_id}/floors", tags=["floors"])
 
@@ -77,4 +98,91 @@ def delete_floor(
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
     floor_service.delete(building_id, floor_id)
+    return {"status": "ok"}
+
+
+# ── Access Points ──────────────────────────────────────────────────────────────
+
+@router.get("/{floor_id}/aps")
+def list_aps(
+    building_id: str,
+    floor_id: str,
+    caller: UserRecord = Depends(require_auth),
+) -> list:
+    aps = ap_repository.get_all(building_id, floor_id)
+    return [ap.__dict__ for ap in aps]
+
+
+@router.post("/{floor_id}/aps")
+def create_ap(
+    building_id: str,
+    floor_id: str,
+    body: APCreateRequest,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    ap = AccessPoint(
+        id=str(uuid.uuid4()),
+        floor_id=floor_id,
+        building_id=building_id,
+        name=body.name,
+        mac=body.mac,
+        x_pct=body.x_pct,
+        y_pct=body.y_pct,
+        created_at=utcnow_iso(),
+    )
+    ap_repository.save(building_id, floor_id, ap)
+    return ap.__dict__
+
+
+@router.delete("/{floor_id}/aps/{ap_id}")
+def delete_ap(
+    building_id: str,
+    floor_id: str,
+    ap_id: str,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    ap_repository.delete(building_id, floor_id, ap_id)
+    return {"status": "ok"}
+
+
+# ── CCTVs ──────────────────────────────────────────────────────────────────────
+
+@router.get("/{floor_id}/cctvs")
+def list_cctvs(
+    building_id: str,
+    floor_id: str,
+    caller: UserRecord = Depends(require_auth),
+) -> list:
+    cctvs = cctv_repository.get_all(building_id, floor_id)
+    return [c.__dict__ for c in cctvs]
+
+
+@router.post("/{floor_id}/cctvs")
+def create_cctv(
+    building_id: str,
+    floor_id: str,
+    body: CCTVCreateRequest,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    cctv = CCTV(
+        id=str(uuid.uuid4()),
+        floor_id=floor_id,
+        building_id=building_id,
+        name=body.name,
+        x_pct=body.x_pct,
+        y_pct=body.y_pct,
+        created_at=utcnow_iso(),
+    )
+    cctv_repository.save(building_id, floor_id, cctv)
+    return cctv.__dict__
+
+
+@router.delete("/{floor_id}/cctvs/{cctv_id}")
+def delete_cctv(
+    building_id: str,
+    floor_id: str,
+    cctv_id: str,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    cctv_repository.delete(building_id, floor_id, cctv_id)
     return {"status": "ok"}

@@ -1,6 +1,7 @@
 from fastapi import Depends, Header, HTTPException
 
 import firebase_admin.auth
+import hmac
 from config.settings import settings
 from models.user import UserRecord
 from repositories.user_repository import user_repository
@@ -8,7 +9,7 @@ from repositories.user_repository import user_repository
 
 async def verify_omada_token(authorization: str = Header(..., alias="Authorization")) -> None:
     """FastAPI dependency that validates the Omada Bearer token on /telemetry."""
-    if authorization != f"Bearer {settings.OMADA_ACCESS_TOKEN}":
+    if not hmac.compare_digest(authorization, f"Bearer {settings.OMADA_ACCESS_TOKEN}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

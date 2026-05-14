@@ -3,8 +3,7 @@ from pydantic import BaseModel
 
 
 class RegisterRequest(BaseModel):
-    email: str
-    password: str
+    id_token: str
     display_name: str
     person_id: Optional[str] = ""
 

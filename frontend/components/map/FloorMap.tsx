@@ -1,9 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { PositionRecord } from "@/types/position";
 import type { FloorRecord } from "@/types/floor";
 import { useZones } from "@/hooks/useZones";
 import WorkerMarker from "./WorkerMarker";
+import { listAPs, listCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
 interface Props {
   positions: PositionRecord[];
@@ -19,18 +21,27 @@ const CANVAS_H = 400;
 export default function FloorMap({ positions, buildingId, activeFloor }: Props) {
   const [showZones, setShowZones] = useState(true);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
-  const { zones } = useZones(buildingId, activeFloor?.id ?? null);
 
+  const [hoveredZone, setHoveredZone] = useState<string | null>(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+
+  const [aps, setAps] = useState<APRecord[]>([]);
+  const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
+  const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
+
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const { zones } = useZones(buildingId, activeFloor?.id ?? null);
   const scale = activeFloor?.scale_pixels_per_meter ?? null;
 
+  useEffect(() => {
+    if (!buildingId || !activeFloor) { setAps([]); setCctvs([]); return; }
+    listAPs(buildingId, activeFloor.id).then(setAps).catch(() => {});
+    listCCTVs(buildingId, activeFloor.id).then(setCctvs).catch(() => {});
+  }, [buildingId, activeFloor?.id]);
+
   const toPixel = (p: PositionRecord): { px: number; py: number } => {
-    if (p.pixel_x != null && p.pixel_y != null) {
-      return { px: p.pixel_x, py: p.pixel_y };
-    }
-    return {
-      px: (p.x / MAP_W_M) * CANVAS_W,
-      py: (p.y / MAP_H_M) * CANVAS_H,
-    };
+    if (p.pixel_x != null && p.pixel_y != null) return { px: p.pixel_x, py: p.pixel_y };
+    return { px: (p.x / MAP_W_M) * CANVAS_W, py: (p.y / MAP_H_M) * CANVAS_H };
   };
 
   const toPct = (metres: number, axis: "x" | "y"): number => {
@@ -40,63 +51,95 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
 
   if (!activeFloor) {
     return (
-      <div className="flex items-center justify-center h-64 rounded-xl bg-s-surface border border-s-border text-s-muted">
+      <div className="flex items-center justify-center h-full rounded-xl bg-s-surface border border-s-border text-s-muted">
         <p className="text-sm">No active floor plan</p>
       </div>
     );
   }
 
   return (
-    <div className="relative w-full rounded-xl overflow-hidden border border-s-border bg-s-elevated shadow-sm">
+    <div className="relative w-full h-full rounded-xl overflow-hidden border border-s-border bg-s-elevated shadow-sm">
       <img
+        ref={imgRef}
         src={activeFloor.url}
         alt={activeFloor.name}
-        className="w-full h-auto"
-        style={{ aspectRatio: "2 / 1" }}
+        className="w-full h-full object-contain"
         onLoad={(e) => {
           const img = e.currentTarget;
           setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
         }}
       />
 
-      {/* Zone overlays — pointer-events: none so markers remain clickable */}
-      {showZones && naturalSize && scale &&
-        zones.map((zone) => (
-          <div
-            key={zone.id}
-            title={`${zone.name}${zone.is_high_risk ? " (High Risk)" : ""}`}
-            style={{
-              position: "absolute",
-              left: `${toPct(zone.x_min, "x")}%`,
-              top: `${toPct(zone.y_min, "y")}%`,
-              width: `${toPct(zone.x_max - zone.x_min, "x")}%`,
-              height: `${toPct(zone.y_max - zone.y_min, "y")}%`,
-              backgroundColor: zone.color,
-              pointerEvents: "none",
-            }}
-          >
-            <span
-              className="absolute top-1 left-1 font-mono text-[9px] tracking-widest px-1.5 py-0.5 rounded"
-              style={{
-                backgroundColor: "rgba(0,0,0,0.45)",
-                color: "#fff",
-                pointerEvents: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {zone.name}
-              {zone.is_high_risk && <span className="ml-1 text-red-400">⚠</span>}
-            </span>
-          </div>
-        ))
-      }
+      {/* Zone overlays */}
+      {showZones && naturalSize && scale && zones.map((zone) => (
+        <div
+          key={zone.id}
+          style={{
+            position: "absolute",
+            left: `${toPct(zone.x_min, "x")}%`,
+            top: `${toPct(zone.y_min, "y")}%`,
+            width: `${toPct(zone.x_max - zone.x_min, "x")}%`,
+            height: `${toPct(zone.y_max - zone.y_min, "y")}%`,
+            backgroundColor: zone.color,
+            pointerEvents: "auto",
+            cursor: "default",
+          }}
+          onMouseEnter={(e) => { setHoveredZone(`${zone.name}${zone.is_high_risk ? " ⚠" : ""}`); setTooltipPos({ x: e.clientX, y: e.clientY }); }}
+          onMouseMove={(e) => setTooltipPos({ x: e.clientX, y: e.clientY })}
+          onMouseLeave={() => setHoveredZone(null)}
+        />
+      ))}
+
+      {/* AP markers (read-only) */}
+      {aps.map((ap) => (
+        <div
+          key={ap.id}
+          className="absolute"
+          style={{ left: `${ap.x_pct * 100}%`, top: `${ap.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10 }}
+          onMouseEnter={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
+          onMouseMove={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
+          onMouseLeave={() => setHoveredMarker(null)}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+          </svg>
+        </div>
+      ))}
+
+      {/* CCTV markers (read-only) */}
+      {cctvs.map((cctv) => (
+        <div
+          key={cctv.id}
+          className="absolute"
+          style={{ left: `${cctv.x_pct * 100}%`, top: `${cctv.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10 }}
+          onMouseEnter={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
+          onMouseMove={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
+          onMouseLeave={() => setHoveredMarker(null)}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+        </div>
+      ))}
+
+      {/* Zone tooltip */}
+      {hoveredZone && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", left: tooltipPos.x + 12, top: tooltipPos.y - 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-primary)", padding: "4px 10px", borderRadius: "6px", fontSize: "12px", pointerEvents: "none", zIndex: 9999, fontFamily: "IBM Plex Mono, monospace", whiteSpace: "nowrap" }}>
+          {hoveredZone}
+        </div>,
+        document.body
+      )}
+
+      {/* Marker tooltip */}
+      {hoveredMarker && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", left: hoveredMarker.x + 12, top: hoveredMarker.y - 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-primary)", padding: "4px 10px", borderRadius: "6px", fontSize: "12px", pointerEvents: "none", zIndex: 9999, fontFamily: "IBM Plex Mono, monospace", whiteSpace: "nowrap" }}>
+          {hoveredMarker.label}
+        </div>,
+        document.body
+      )}
 
       {/* Worker markers */}
-      <svg
-        viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
-        className="absolute inset-0 w-full h-full"
-        aria-label="Worker positions overlay"
-      >
+      <svg viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`} className="absolute inset-0 w-full h-full" aria-label="Worker positions overlay" style={{ pointerEvents: "none" }}>
         {positions.map((p) => {
           const { px, py } = toPixel(p);
           return <WorkerMarker key={p.beacon_mac} position={p} px={px} py={py} />;
@@ -106,19 +149,14 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
       {/* Zone toggle */}
       {zones.length > 0 && (
         <button
-          onClick={() => setShowZones((v) => !v)}
+          onClick={(e) => { e.stopPropagation(); setShowZones((v) => !v); }}
           className="absolute top-2 right-2 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-[10px] tracking-widest transition-colors"
-          style={{
-            backgroundColor: showZones ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.45)",
-            color: showZones ? "#f59e0b" : "rgba(255,255,255,0.7)",
-          }}
+          style={{ backgroundColor: showZones ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.45)", color: showZones ? "#f59e0b" : "rgba(255,255,255,0.7)" }}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {showZones ? (
-              <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
-            ) : (
-              <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></>
-            )}
+            {showZones
+              ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
+              : <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></>}
           </svg>
           ZONES
         </button>
@@ -132,8 +170,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
             <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           <p className="font-mono text-[10px] text-s-muted tracking-wide">
-            Floor plan not calibrated — worker positions may be inaccurate.
-            Set scale in the <span className="text-s-text">Floor Plans</span> tab.
+            Floor plan not calibrated — worker positions may be inaccurate. Set scale in the <span className="text-s-text">Floor Plans</span> tab.
           </p>
         </div>
       )}

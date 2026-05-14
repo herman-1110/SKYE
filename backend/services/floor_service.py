@@ -17,11 +17,14 @@ class FloorService:
     def create(
         self,
         building_id: str,
-        name: str,
+        name: Optional[str],
         floor_number: int,
         url: str,
         storage_path: str,
     ) -> FloorRecord:
+        if not name or not name.strip():
+            existing = floor_repository.get_all(building_id)
+            name = f"Level {len(existing) + 1}"
         floor = FloorRecord(
             id=str(uuid.uuid4()),
             building_id=building_id,

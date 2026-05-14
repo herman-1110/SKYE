@@ -26,6 +26,7 @@ class ZoneService:
             name=data["name"],
             color=data.get("color", "#3b82f633"),
             is_high_risk=bool(data.get("is_high_risk", False)),
+            risk_level=str(data.get("risk_level", "moderate")),
             x_min=float(data["x_min"]),
             x_max=float(data["x_max"]),
             y_min=float(data["y_min"]),

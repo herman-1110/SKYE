@@ -3,7 +3,7 @@ from typing import Optional
 
 
 class FloorCreateRequest(BaseModel):
-    name: str
+    name: Optional[str] = None
     floor_number: int = 1
     url: str
     storage_path: str

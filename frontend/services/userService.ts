@@ -1,5 +1,6 @@
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { fsdb } from "@/config/firebase";
+import { registerWithEmail } from "@/services/authService";
 import type { UserRecord, UserRole, UserStatus } from "@/types/user";
 
 export async function getUserRecord(uid: string): Promise<UserRecord | null> {
@@ -13,10 +14,11 @@ export async function registerUser(
   displayName: string,
   personId = ""
 ): Promise<{ uid: string; role: string; status: string }> {
+  const { idToken } = await registerWithEmail(email, password);
   const res = await fetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, display_name: displayName, person_id: personId }),
+    body: JSON.stringify({ id_token: idToken, display_name: displayName, person_id: personId }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

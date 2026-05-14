@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -14,3 +14,4 @@ class ZoneRecord:
     y_max: float
     created_at: str
     created_by: str
+    risk_level: str = field(default="moderate")   # "high" | "moderate" | "low"

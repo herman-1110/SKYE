@@ -1,6 +1,8 @@
 import {
   GoogleAuthProvider,
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as _signOut,
@@ -11,6 +13,21 @@ import { auth } from "@/config/firebase";
 export async function signIn(email: string, password: string): Promise<User> {
   const cred = await signInWithEmailAndPassword(auth, email, password);
   return cred.user;
+}
+
+export async function registerWithEmail(
+  email: string,
+  password: string,
+): Promise<{ user: User; idToken: string }> {
+  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+  await sendEmailVerification(userCredential.user);
+  const idToken = await userCredential.user.getIdToken();
+  return { user: userCredential.user, idToken };
+}
+
+export async function resendVerificationEmail(): Promise<void> {
+  const user = auth.currentUser;
+  if (user) await sendEmailVerification(user);
 }
 
 export async function signOut(): Promise<void> {

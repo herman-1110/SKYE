@@ -16,15 +16,15 @@ export default function DashboardPage() {
     <div className="space-y-4 max-w-[1600px]">
       <StatsRow />
 
-      <div className="grid grid-cols-12 gap-4 items-start">
+      <div className="grid grid-cols-12 gap-4 items-stretch">
         {/* Map — 8 cols */}
-        <div className="col-span-12 lg:col-span-8">
+        <div className="col-span-12 lg:col-span-8" style={{ height: '520px' }}>
           <FloorMapArea />
         </div>
 
-        {/* Alerts panel — 4 cols */}
-        <div className="col-span-12 lg:col-span-4 bento-card flex flex-col gap-3" style={{ minHeight: 320 }}>
-          <h2 className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+        {/* Alerts panel — 4 cols, same height, scrollable */}
+        <div className="col-span-12 lg:col-span-4 bento-card flex flex-col gap-3 overflow-y-auto">
+          <h2 className="font-mono text-[10px] text-s-muted tracking-widest uppercase shrink-0">
             Active Alerts ({activeAlerts.length})
           </h2>
           <AlertList

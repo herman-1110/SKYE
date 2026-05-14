@@ -123,3 +123,52 @@ export async function deleteFloor(
   await deleteObject(ref(storage, storagePath));
   await req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}`);
 }
+
+// ── AP / CCTV ─────────────────────────────────────────────────────────────────
+
+export interface APRecord {
+  id: string;
+  floor_id: string;
+  building_id: string;
+  name: string;
+  mac: string;
+  x_pct: number;
+  y_pct: number;
+  created_at: string;
+}
+
+export interface CCTVRecord {
+  id: string;
+  floor_id: string;
+  building_id: string;
+  name: string;
+  x_pct: number;
+  y_pct: number;
+  created_at: string;
+}
+
+export const listAPs = (buildingId: string, floorId: string): Promise<APRecord[]> =>
+  req("GET", `/api/buildings/${buildingId}/floors/${floorId}/aps`);
+
+export const createAP = (
+  buildingId: string,
+  floorId: string,
+  body: { name: string; mac: string; x_pct: number; y_pct: number },
+): Promise<APRecord> =>
+  req("POST", `/api/buildings/${buildingId}/floors/${floorId}/aps`, body);
+
+export const deleteAP = (buildingId: string, floorId: string, apId: string): Promise<void> =>
+  req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}`);
+
+export const listCCTVs = (buildingId: string, floorId: string): Promise<CCTVRecord[]> =>
+  req("GET", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`);
+
+export const createCCTV = (
+  buildingId: string,
+  floorId: string,
+  body: { name: string; x_pct: number; y_pct: number },
+): Promise<CCTVRecord> =>
+  req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`, body);
+
+export const deleteCCTV = (buildingId: string, floorId: string, cctvId: string): Promise<void> =>
+  req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`);

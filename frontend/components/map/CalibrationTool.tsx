@@ -207,7 +207,7 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
           style={{ background: "rgba(255,255,255,0.25)", backdropFilter: "blur(8px)", whiteSpace: "nowrap" }}
         >
           <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-          <span className="font-mono text-[11px] text-white/90">{stepLabel}</span>
+          <span className="font-mono text-[11px] text-s-text">{stepLabel}</span>
         </div>
       )}
 
@@ -368,7 +368,7 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
         >
           {/* Title */}
           <div>
-            <p className="font-mono text-[9px] text-white/40 tracking-widest uppercase mb-1">
+            <p className="font-mono text-[9px] text-s-muted tracking-widest uppercase mb-1">
               {floor.name}
             </p>
             <h3 className="text-sm font-semibold text-s-text">Floor Calibration</h3>
@@ -404,32 +404,37 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
           {step === 3 && (
             <div className="flex flex-col gap-3 pt-1">
               <div>
-                <p className="font-mono text-[9px] text-white/40 tracking-widest uppercase mb-1">Pixel distance</p>
+                <p className="font-mono text-[9px] text-s-muted tracking-widest uppercase mb-1">Pixel distance</p>
                 <p className="font-mono text-sm font-bold text-s-text">{pixelDistance.toFixed(0)} px</p>
               </div>
 
               <div>
-                <p className="font-mono text-[9px] text-white/40 tracking-widest uppercase mb-1.5">Real-world distance</p>
+                <p className="font-mono text-[9px] text-s-muted tracking-widest uppercase mb-1.5">Real-world distance</p>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
-                    min="0.1"
-                    step="0.1"
-                    placeholder="e.g. 10.0"
+                    min="1"
+                    step="1"
+                    placeholder="e.g. 10"
                     value={realDistance}
                     onChange={(e) => setRealDistance(e.target.value)}
+                    onWheel={(e) => {
+                      e.preventDefault();
+                      const current = parseFloat(realDistance) || 0;
+                      setRealDistance(String(Math.max(1, e.deltaY < 0 ? current + 1 : current - 1)));
+                    }}
                     autoFocus
-                    className="flex-1 bg-s-surface border border-s-border rounded-lg px-3 py-1.5 text-sm font-mono text-s-text placeholder:text-white/25 focus:outline-none focus:border-s-accent transition-colors"
+                    className="flex-1 bg-s-surface border border-s-border rounded-lg px-3 py-1.5 text-sm font-mono text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors"
                   />
-                  <span className="font-mono text-[11px] text-white/40">m</span>
+                  <span className="font-mono text-[11px] text-s-muted">m</span>
                 </div>
               </div>
 
               <div>
-                <p className="font-mono text-[9px] text-white/40 tracking-widest uppercase mb-1">Scale</p>
+                <p className="font-mono text-[9px] text-s-muted tracking-widest uppercase mb-1">Scale</p>
                 <p
                   className="font-mono text-sm font-bold"
-                  style={{ color: calculatedScale ? "#f59e0b" : "rgba(255,255,255,0.2)" }}
+                  style={{ color: calculatedScale ? "#f59e0b" : "var(--text-secondary)" }}
                 >
                   {calculatedScale ? `${calculatedScale.toFixed(2)} px/m` : "— px/m"}
                 </p>
