@@ -8,6 +8,22 @@ import {
   type APRecord, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
+import { useAPHeartbeats, type APStatus } from "@/hooks/useAPHeartbeats";
+import MacAddressInput from "@/components/shared/MacAddressInput";
+import { isCompleteMac, isValidMac } from "@/utils/macUtils";
+
+function StatusDot({ status }: { status: APStatus }) {
+  const color =
+    status === "online"  ? "var(--success, #22c55e)" :
+    status === "offline" ? "var(--danger,  #ef4444)" :
+                           "var(--text-secondary)";
+  return (
+    <span
+      style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }}
+      title={status}
+    />
+  );
+}
 
 type PlacementMode = "ap" | "cctv" | null;
 
@@ -24,7 +40,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [pendingPct, setPendingPct] = useState<{ x: number; y: number } | null>(null);
   const [apName, setApName] = useState("");
   const [apMac, setApMac] = useState("");
+  const [macError, setMacError] = useState("");
   const [cctvName, setCctvName] = useState("");
+  const apStatuses = useAPHeartbeats();
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
@@ -45,18 +63,28 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
   const handleSaveAP = async () => {
     if (!pendingPct) return;
+    if (!isCompleteMac(apMac)) { setMacError("Please complete all 6 MAC address segments"); return; }
+    if (!isValidMac(apMac))    { setMacError("Invalid MAC address format"); return; }
+    setMacError("");
     setSaving(true);
     try {
       const ap = await createAP(buildingId, floor.id, {
         name: apName.trim() || "AP",
-        mac: apMac.trim(),
+        mac: apMac,
         x_pct: pendingPct.x,
         y_pct: pendingPct.y,
       });
       setAps((prev) => [...prev, ap]);
       toast.success(`AP "${ap.name}" placed`);
       setPendingPct(null); setApName(""); setApMac(""); setPlacementMode(null);
-    } catch { toast.error("Failed to place AP"); }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("409") || msg.toLowerCase().includes("already exists")) {
+        setMacError("An AP with this MAC is already on this floor");
+      } else {
+        toast.error("Failed to place AP");
+      }
+    }
     finally { setSaving(false); }
   };
 
@@ -91,7 +119,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   };
 
   const cancelPlacement = () => {
-    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setCctvName("");
+    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setCctvName("");
   };
 
   return (
@@ -207,25 +235,29 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
               </tr>
             </thead>
             <tbody>
-              {aps.map((ap) => (
+              {aps.map((ap) => {
+                const status = apStatuses[ap.mac.toUpperCase()] ?? "unknown";
+                return (
                 <tr key={ap.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
+                      <StatusDot status={status} />
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
                       </svg>
                       <span className="text-s-text font-medium">{ap.name}</span>
-                      {ap.mac && <span className="font-mono text-[10px] text-s-muted">{ap.mac}</span>}
+                      <span className="font-mono text-[10px] text-s-muted">{ap.mac}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted">Access Point</td>
+                  <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted capitalize">{status === "unknown" ? "Access Point" : status}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button onClick={() => handleDeleteAP(ap.id)} disabled={deletingId === ap.id} className="text-s-muted hover:text-s-danger transition-colors disabled:opacity-40">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {cctvs.map((cctv) => (
                 <tr key={cctv.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
                   <td className="px-4 py-2.5">
@@ -268,8 +300,14 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 <input autoFocus type="text" placeholder="e.g. EAP725-Outdoor" value={apName} onChange={(e) => setApName(e.target.value)} className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors" />
               </div>
               <div className="space-y-1">
-                <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">MAC Address</label>
-                <input type="text" placeholder="e.g. CC:BA:BD:81:9D:CD" value={apMac} onChange={(e) => setApMac(e.target.value)} className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm text-s-text font-mono placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors" />
+                <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+                  MAC Address <span className="text-s-danger">*</span>
+                </label>
+                <MacAddressInput
+                  value={apMac}
+                  onChange={(mac) => { setApMac(mac); setMacError(""); }}
+                  error={macError}
+                />
               </div>
             </div>
             <div className="flex gap-2 px-5 py-4 border-t border-s-border">

@@ -17,8 +17,8 @@ export default function DashboardPage() {
       <StatsRow />
 
       <div className="grid grid-cols-12 gap-4 items-stretch">
-        {/* Map — 8 cols */}
-        <div className="col-span-12 lg:col-span-8" style={{ height: '520px' }}>
+        {/* Map — 8 cols, height driven by floor plan image aspect ratio */}
+        <div className="col-span-12 lg:col-span-8">
           <FloorMapArea />
         </div>
 

@@ -1,7 +1,8 @@
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from middleware.auth_middleware import require_admin, require_auth
 from models.ap import AccessPoint
@@ -14,11 +15,21 @@ from services.floor_service import floor_service
 from utils.timestamp_utils import utcnow_iso
 
 
+_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
+
+
 class APCreateRequest(BaseModel):
     name: str
     mac: str
     x_pct: float
     y_pct: float
+
+    @field_validator("mac")
+    @classmethod
+    def validate_mac(cls, v: str) -> str:
+        if not _MAC_RE.match(v.strip()):
+            raise ValueError("MAC must be in format XX:XX:XX:XX:XX:XX")
+        return v.strip().upper()
 
 
 class CCTVCreateRequest(BaseModel):
@@ -120,6 +131,9 @@ def create_ap(
     body: APCreateRequest,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
+    existing = ap_repository.get_all(building_id, floor_id)
+    if any(a.mac.upper() == body.mac for a in existing):
+        raise HTTPException(status_code=409, detail=f"AP with MAC {body.mac} already exists on this floor")
     ap = AccessPoint(
         id=str(uuid.uuid4()),
         floor_id=floor_id,

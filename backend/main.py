@@ -19,6 +19,7 @@ from routes.building_routes import router as building_router
 from routes.floor_routes import router as floor_router
 from routes.report_routes import router as report_router
 from routes.telemetry_routes import router as telemetry_router
+from routes.simulation_routes import router as simulation_router
 from routes.user_routes import router as user_router
 from routes.zone_routes import router as zone_router
 from utils.limiter import limiter
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(zone_router)
     app.include_router(report_router)
     app.include_router(user_router)
+    app.include_router(simulation_router)
 
     return app
 

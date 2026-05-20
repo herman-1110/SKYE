@@ -1,4 +1,7 @@
+import time
+
 from fastapi import APIRouter, Depends, Request
+from firebase_admin import db
 
 from middleware.auth_middleware import verify_omada_token
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
@@ -8,6 +11,17 @@ from services.safety_service import safety_service
 from utils.limiter import limiter
 
 router = APIRouter(tags=["telemetry"])
+
+
+def _write_ap_heartbeats(readings: list[APRssiReading]) -> None:
+    """Write last-seen unix timestamp for every AP that reported in this payload."""
+    now = int(time.time())
+    for r in readings:
+        key = r.ap_mac.replace(":", "_")
+        db.reference(f"/ap_heartbeats/{key}").set({
+            "mac":       r.ap_mac,
+            "last_seen": now,
+        })
 
 
 @router.post("/telemetry", dependencies=[Depends(verify_omada_token)])
@@ -25,6 +39,7 @@ async def ingest_telemetry(request: Request, body: TelemetryRequest) -> dict:
         person_id=body.person_id,
         person_type=body.person_type,
     )
+    _write_ap_heartbeats(readings)
     position = positioning_service.compute_position(payload)
     if position:
         safety_service.run_all_checks(position)

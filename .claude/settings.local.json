@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(xargs ls *)",
-      "Bash(pip install *)",
-      "Bash(D:/DOWNLOAD/Y3S2/FYP/SKYE/backend/venv/Scripts/pip.exe install *)"
-    ]
-  }
-}
