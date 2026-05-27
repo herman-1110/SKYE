@@ -17,9 +17,14 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  function validateEmail(v: string) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  }
 
   useEffect(() => {
     const unsub = onAuthChanged(async (u) => {
@@ -111,11 +116,19 @@ export default function LoginPage() {
                   <polyline points="22,6 12,13 2,6"/>
                 </svg>
                 <input
-                  type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                  type="email" required value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (emailError && validateEmail(e.target.value)) setEmailError(null);
+                  }}
+                  onBlur={() => {
+                    if (email && !validateEmail(email)) setEmailError("Enter a valid email address");
+                  }}
                   placeholder="manager@facility.com"
-                  className="w-full bg-s-surface border border-s-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors"
+                  className={`w-full bg-s-surface border rounded-lg pl-9 pr-3 py-2.5 text-sm text-s-text placeholder:text-s-muted focus:outline-none transition-colors ${emailError ? "border-s-danger focus:border-s-danger" : "border-s-border focus:border-s-accent"}`}
                 />
               </div>
+              {emailError && <p className="text-xs text-s-danger font-mono">{emailError}</p>}
             </div>
 
             {/* Password */}

@@ -71,5 +71,9 @@ export async function deleteUser(uid: string, token: string): Promise<void> {
 
 export function subscribeToPendingCount(callback: (count: number) => void): () => void {
   const q = query(collection(fsdb, "users"), where("status", "==", "pending"));
-  return onSnapshot(q, (snap) => callback(snap.size));
+  return onSnapshot(q, (snap) => {
+    // Only count users who have verified their email — matches what the table shows
+    const count = snap.docs.filter((d) => d.data().email_verified === true).length;
+    callback(count);
+  });
 }

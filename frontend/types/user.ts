@@ -9,4 +9,5 @@ export interface UserRecord {
   status: UserStatus;
   person_id: string;
   created_at: string;
+  email_verified?: boolean;
 }

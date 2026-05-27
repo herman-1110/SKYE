@@ -30,6 +30,22 @@ export async function resendVerificationEmail(): Promise<void> {
   if (user) await sendEmailVerification(user);
 }
 
+export async function syncEmailVerified(): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("No authenticated user");
+  // Force-refresh so the token reflects the latest emailVerified claim
+  const token = await user.getIdToken(true);
+  console.log(`[verify-email] Token obtained: len=${token.length}, starts=${token.substring(0, 20)}`);
+  const res = await fetch("/api/auth/verify-email", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? "Sync failed");
+  }
+}
+
 export async function signOut(): Promise<void> {
   await _signOut(auth);
 }

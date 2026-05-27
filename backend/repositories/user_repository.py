@@ -14,7 +14,7 @@ class UserRepository:
     def _col(self):
         return firestore.client().collection("users")
 
-    def create(self, uid: str, email: str, display_name: str, person_id: str = "") -> UserRecord:
+    def create(self, uid: str, email: str, display_name: str, person_id: str = "", email_verified: bool = False) -> UserRecord:
         """Create a user doc. The first user ever gets role=admin and status=approved automatically."""
         existing = list(self._col().limit(1).stream())
         is_first = len(existing) == 0
@@ -31,6 +31,7 @@ class UserRepository:
             status=status,
             person_id=person_id,
             created_at=utcnow_iso(),
+            email_verified=email_verified,
         )
         self._col().document(uid).set(asdict(record))
         return record
@@ -68,6 +69,10 @@ class UserRepository:
     def update_person_id(self, uid: str, person_id: str) -> None:
         """Update the BLE person_id mapping for this user."""
         self._col().document(uid).update({"person_id": person_id})
+
+    def update_email_verified(self, uid: str, value: bool) -> None:
+        """Mark a user's email as verified in Firestore."""
+        self._col().document(uid).update({"email_verified": value})
 
     def delete(self, uid: str) -> None:
         """Delete the Firestore users/{uid} document."""

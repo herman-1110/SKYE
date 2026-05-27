@@ -17,7 +17,7 @@ async def require_auth(authorization: str = Header(..., alias="Authorization")) 
     """Verify Firebase ID token. Returns UserRecord. Raises 401/403 if invalid or suspended."""
     try:
         token = authorization.removeprefix("Bearer ").strip()
-        decoded = firebase_admin.auth.verify_id_token(token)
+        decoded = firebase_admin.auth.verify_id_token(token, clock_skew_seconds=60)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 

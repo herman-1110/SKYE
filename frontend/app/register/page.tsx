@@ -20,8 +20,13 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  function validateEmail(v: string) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  }
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const strength = checkPasswordStrength(password);
@@ -117,10 +122,18 @@ export default function RegisterPage() {
             <div className="space-y-1.5">
               <label className="text-xs font-mono text-s-muted tracking-widest uppercase">Email</label>
               <input
-                type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                type="email" required value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (emailError && validateEmail(e.target.value)) setEmailError(null);
+                }}
+                onBlur={() => {
+                  if (email && !validateEmail(email)) setEmailError("Enter a valid email address");
+                }}
                 placeholder="pikapika@gmail.com"
-                className="w-full bg-s-surface border border-s-border rounded-lg px-3 py-2.5 text-sm text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors"
+                className={`w-full bg-s-surface border rounded-lg px-3 py-2.5 text-sm text-s-text placeholder:text-s-muted focus:outline-none transition-colors ${emailError ? "border-s-danger focus:border-s-danger" : "border-s-border focus:border-s-accent"}`}
               />
+              {emailError && <p className="text-xs text-s-danger font-mono">{emailError}</p>}
             </div>
 
             {/* Password */}

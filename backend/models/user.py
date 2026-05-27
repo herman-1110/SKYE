@@ -10,3 +10,4 @@ class UserRecord:
     status: str        # "pending" | "approved" | "suspended"
     person_id: str     # BLE beacon person_id that maps this account to a position track
     created_at: str    # ISO 8601
+    email_verified: bool = False

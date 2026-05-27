@@ -1,23 +1,42 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { collection, onSnapshot, query } from "firebase/firestore";
+import { fsdb } from "@/config/firebase";
 import { useAuth } from "@/hooks/useAuth";
-import { getUsers, updateUserStatus, updateUserRole, deleteUser } from "@/services/userService";
+import { updateUserStatus, deleteUser } from "@/services/userService";
 import { signOut } from "@/services/authService";
 import { toast } from "@/store/toastStore";
-import type { UserRecord, UserStatus, UserRole } from "@/types/user";
+import type { UserRecord, UserStatus } from "@/types/user";
 import { useDashboardStore } from "@/store/dashboardStore";
 
-const STATUS_COLOURS: Record<UserStatus, string> = {
-  approved: "bg-s-success/20 text-s-success",
-  pending:  "bg-s-accent/20 text-s-accent",
-  suspended:"bg-s-danger/20 text-s-danger",
-};
+const GRID = "200px 280px 100px 120px 160px 180px";
+const CELL = { display: "flex", alignItems: "center", padding: "10px 12px" } as const;
 
-const ROLE_COLOURS: Record<UserRole, string> = {
-  admin: "bg-s-accent/20 text-s-accent",
-  user:  "bg-s-muted/20 text-s-muted",
-};
+function badge(color: string) {
+  return {
+    color,
+    background: `color-mix(in srgb, ${color} 15%, transparent)`,
+    fontFamily: "IBM Plex Mono, monospace",
+    fontSize: 10,
+    padding: "2px 8px",
+    borderRadius: 9999,
+    whiteSpace: "nowrap",
+  } as const;
+}
+
+function actionBtn(color: string) {
+  return {
+    color,
+    background: `color-mix(in srgb, ${color} 15%, transparent)`,
+    fontFamily: "IBM Plex Mono, monospace",
+    fontSize: 10,
+    padding: "3px 8px",
+    borderRadius: 4,
+    border: "none",
+    cursor: "pointer",
+  } as const;
+}
 
 function DeleteModal({ target, isSelf, onCancel, onConfirm, loading }: {
   target: UserRecord;
@@ -82,22 +101,27 @@ export default function UsersPage() {
   const router = useRouter();
   const { cachedUsers, setCachedUsers } = useDashboardStore();
   const [users, setUsers] = useState<UserRecord[]>(cachedUsers);
-  const [loading, setLoading] = useState(cachedUsers.length === 0);
+  const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<UserRecord | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [loadingUserId, setLoadingUserId] = useState<string | null>(null);
 
-  async function load() {
-    if (!user) return;
-    const token = await user.getIdToken();
-    const data = await getUsers(token);
-    setUsers(data);
-    setCachedUsers(data);
-    setLoading(false);
-  }
-
+  // Real-time listener — updates instantly when email_verified flips in Firestore
   useEffect(() => {
-    if (cachedUsers.length === 0) load();
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+    const unsubscribe = onSnapshot(
+      query(collection(fsdb, "users")),
+      (snap) => {
+        const all = snap.docs.map((d) => d.data() as UserRecord);
+        const filtered = all
+          .filter((u) => u.email_verified === true || u.status !== "pending")
+          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+        setUsers(filtered);
+        setCachedUsers(filtered);
+        setLoading(false);
+      },
+      () => setLoading(false),
+    );
+    return () => unsubscribe();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStatus(uid: string, status: UserStatus) {
     if (!user) return;
@@ -105,27 +129,14 @@ export default function UsersPage() {
       const token = await user.getIdToken();
       await updateUserStatus(uid, status, token);
       toast.success(`User ${status}`);
-      await load();
     } catch {
       toast.error("Failed to update status");
     }
   }
 
-  async function handleRole(uid: string, role: UserRole) {
-    if (!user) return;
-    try {
-      const token = await user.getIdToken();
-      await updateUserRole(uid, role, token);
-      toast.success("Role updated");
-      await load();
-    } catch {
-      toast.error("Failed to update role");
-    }
-  }
-
   async function handleDelete() {
     if (!user || !deleteTarget) return;
-    setDeleteLoading(true);
+    setLoadingUserId(deleteTarget.uid);
     const isSelf = deleteTarget.uid === user.uid;
     try {
       const token = await user.getIdToken();
@@ -136,27 +147,27 @@ export default function UsersPage() {
       } else {
         toast.success(`${deleteTarget.display_name} removed`);
         setDeleteTarget(null);
-        await load();
       }
     } catch {
       toast.error("Failed to remove user");
-      setDeleteLoading(false);
       setDeleteTarget(null);
+    } finally {
+      setLoadingUserId(null);
     }
   }
 
   if (loading) return (
     <div className="max-w-[1200px] mx-auto px-10 py-8 space-y-4">
       <div className="h-3 bg-s-elevated rounded w-36 animate-pulse" />
-      <div className="bg-s-surface border border-s-border rounded-lg overflow-hidden">
+      <div className="bg-s-surface border border-s-border rounded-lg overflow-hidden overflow-x-auto">
         {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="flex gap-4 px-4 py-3.5 border-b border-s-border/50 animate-pulse last:border-0">
-            <div className="h-3 bg-s-elevated rounded flex-1" />
-            <div className="h-3 bg-s-elevated rounded flex-1" />
-            <div className="h-3 bg-s-elevated rounded w-16" />
-            <div className="h-3 bg-s-elevated rounded w-20" />
-            <div className="h-3 bg-s-elevated rounded w-16" />
-            <div className="h-3 bg-s-elevated rounded w-24" />
+          <div key={i} style={{ display: "grid", gridTemplateColumns: GRID }} className="border-b border-s-border/50 animate-pulse last:border-0">
+            <div style={CELL}><div className="h-3 bg-s-elevated rounded w-full" /></div>
+            <div style={CELL}><div className="h-3 bg-s-elevated rounded w-full" /></div>
+            <div style={CELL}><div className="h-3 bg-s-elevated rounded w-12" /></div>
+            <div style={CELL}><div className="h-3 bg-s-elevated rounded w-16" /></div>
+            <div style={CELL}><div className="h-3 bg-s-elevated rounded w-20" /></div>
+            <div style={CELL}><div className="h-3 bg-s-elevated rounded w-24" /></div>
           </div>
         ))}
       </div>
@@ -171,7 +182,7 @@ export default function UsersPage() {
           isSelf={deleteTarget.uid === user?.uid}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={handleDelete}
-          loading={deleteLoading}
+          loading={loadingUserId === deleteTarget?.uid}
         />
       )}
 
@@ -180,110 +191,78 @@ export default function UsersPage() {
           User Management ({users.length})
         </h1>
 
-        <div className="bg-s-surface border border-s-border rounded-lg overflow-hidden">
-          <table className="w-full text-xs" style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-            <colgroup>
-              <col style={{ width: '200px' }} />
-              <col style={{ width: '240px' }} />
-              <col style={{ width: '100px' }} />
-              <col style={{ width: '100px' }} />
-              <col style={{ width: '140px' }} />
-              <col style={{ minWidth: '200px' }} />
-            </colgroup>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {["Name", "Email", "Role", "Status", "Person ID", "Actions"].map((h) => (
-                  <th key={h} style={{ textAlign: 'left', color: 'var(--text-secondary)', padding: '8px 12px', fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => {
-                const isSelf = u.uid === user?.uid;
-                return (
-                  <tr key={u.uid} style={{ borderBottom: '1px solid var(--border)' }} className="hover:bg-s-elevated transition-colors">
-                    <td style={{ padding: '10px 12px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="font-medium">
-                      {u.display_name}
-                      {isSelf && <span className="ml-2 font-mono text-[9px] text-s-muted">(you)</span>}
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="font-mono">{u.email}</td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <span className={`font-mono text-[10px] px-2 py-0.5 rounded-full ${ROLE_COLOURS[u.role]}`}>
-                        {u.role.toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <span className={`font-mono text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLOURS[u.status]}`}>
-                        {u.status.toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="font-mono">{u.person_id || "—"}</td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <div className="flex gap-2 flex-wrap">
-                        {/* Approve pending */}
-                        {u.status === "pending" && (
-                          <button
-                            onClick={() => handleStatus(u.uid, "approved")}
-                            className="px-2 py-1 rounded bg-s-success/20 text-s-success font-mono text-[10px] hover:bg-s-success/30 transition-colors"
-                          >
-                            Approve
-                          </button>
-                        )}
+        <div className="bg-s-surface border border-s-border rounded-lg overflow-hidden overflow-x-auto">
+          {/* Header */}
+          <div style={{ display: "grid", gridTemplateColumns: GRID, borderBottom: "1px solid var(--border)" }}>
+            {["Name", "Email", "Role", "Status", "Person ID", "Actions"].map((h) => (
+              <div key={h} style={{ ...CELL, color: "var(--text-secondary)", fontFamily: "IBM Plex Mono, monospace", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                {h}
+              </div>
+            ))}
+          </div>
 
-                        {/* Suspend / Unsuspend — hidden for self */}
-                        {!isSelf && (
-                          u.status === "suspended" ? (
-                            <button
-                              onClick={() => handleStatus(u.uid, "approved")}
-                              className="px-2 py-1 rounded bg-s-success/20 text-s-success font-mono text-[10px] hover:bg-s-success/30 transition-colors"
-                            >
-                              Unsuspend
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleStatus(u.uid, "suspended")}
-                              className="px-2 py-1 rounded bg-s-danger/20 text-s-danger font-mono text-[10px] hover:bg-s-danger/30 transition-colors"
-                            >
-                              Suspend
-                            </button>
-                          )
-                        )}
+          {/* Rows */}
+          {users.map((u) => {
+            const isSelf = u.uid === user?.uid;
+            const statusColor = u.status === "approved" ? "var(--success)" : u.status === "suspended" ? "var(--danger)" : "var(--text-secondary)";
+            const roleColor = u.role === "admin" ? "var(--accent)" : "var(--text-secondary)";
+            return (
+              <div
+                key={u.uid}
+                style={{ display: "grid", gridTemplateColumns: GRID, borderBottom: "1px solid var(--border)" }}
+                className="hover:bg-s-elevated transition-colors"
+              >
+                {/* Name */}
+                <div style={{ ...CELL, minWidth: 0 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-primary)", fontWeight: 500, fontSize: 14 }}>
+                    {u.display_name}
+                  </span>
+                  {isSelf && (
+                    <span style={{ marginLeft: 8, fontFamily: "IBM Plex Mono, monospace", fontSize: 9, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                      (you)
+                    </span>
+                  )}
+                </div>
 
-                        {/* Role toggle — Demote hidden for self */}
-                        {u.role === "user" ? (
-                          <button
-                            onClick={() => handleRole(u.uid, "admin")}
-                            className="px-2 py-1 rounded bg-s-accent/20 text-s-accent font-mono text-[10px] hover:bg-s-accent/30 transition-colors"
-                          >
-                            Make Admin
-                          </button>
-                        ) : (
-                          !isSelf && (
-                            <button
-                              onClick={() => handleRole(u.uid, "user")}
-                              className="px-2 py-1 rounded bg-s-muted/20 text-s-muted font-mono text-[10px] hover:bg-s-muted/30 transition-colors"
-                            >
-                              Demote
-                            </button>
-                          )
-                        )}
+                {/* Email */}
+                <div style={{ ...CELL, minWidth: 0 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-secondary)", fontFamily: "IBM Plex Mono, monospace", fontSize: 14 }}>
+                    {u.email}
+                  </span>
+                </div>
 
-                        {/* Remove (other users) / Delete Account (self) */}
-                        <button
-                          onClick={() => setDeleteTarget(u)}
-                          className="px-2 py-1 rounded bg-s-danger/20 text-s-danger font-mono text-[10px] hover:bg-s-danger/30 transition-colors"
-                        >
-                          {isSelf ? "Delete Account" : "Remove"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                {/* Role */}
+                <div style={CELL}>
+                  <span style={badge(roleColor)}>{u.role.toUpperCase()}</span>
+                </div>
+
+                {/* Status */}
+                <div style={CELL}>
+                  <span style={badge(statusColor)}>{u.status.toUpperCase()}</span>
+                </div>
+
+                {/* Person ID */}
+                <div style={{ ...CELL, minWidth: 0 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-secondary)", fontFamily: "IBM Plex Mono, monospace" }}>
+                    {u.person_id || "—"}
+                  </span>
+                </div>
+
+                {/* Actions */}
+                <div style={{ ...CELL, gap: 6, flexWrap: "nowrap", whiteSpace: "nowrap" }}>
+                  {u.status === "pending" && (
+                    <button onClick={() => handleStatus(u.uid, "approved")} style={actionBtn("var(--success)")} className="hover:opacity-80 transition-opacity">
+                      Approve
+                    </button>
+                  )}
+                  <button onClick={() => setDeleteTarget(u)} style={actionBtn("var(--danger)")} className="hover:opacity-80 transition-opacity">
+                    {isSelf ? "Delete Account" : "Remove"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
           {users.length === 0 && (
             <div className="text-center py-12 text-s-muted text-sm">No users found.</div>
           )}
