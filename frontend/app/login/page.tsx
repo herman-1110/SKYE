@@ -44,9 +44,9 @@ export default function LoginPage() {
       const user = await signIn(email, password);
       const record = await getUserRecord(user.uid);
       router.push(getRedirectPath(record?.role ?? "user", record?.status ?? "approved"));
+      // keep spinner alive — navigation is non-blocking and may take time on cold start
     } catch {
       setError("Invalid credentials. Contact your administrator.");
-    } finally {
       setLoading(false);
     }
   };
@@ -57,9 +57,9 @@ export default function LoginPage() {
     try {
       const { role, status } = await signInWithGoogle();
       router.push(getRedirectPath(role, status));
+      // keep spinner alive through navigation
     } catch {
       setError("Google sign-in failed. Please try again.");
-    } finally {
       setGoogleLoading(false);
     }
   };

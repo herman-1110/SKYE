@@ -206,3 +206,88 @@ body {
   background-clip: padding-box !important;
 }
 /* ============ END SCROLLBAR ============ */
+
+/* ─── Number input spinners — theme-aware rendering, no white box ────────── */
+/* color-scheme tells the browser to render native controls in dark/light mode */
+:root,
+:root.dark {
+  color-scheme: dark;
+}
+:root.light {
+  color-scheme: light;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield; /* Firefox: hide spinners (can't style them) */
+}
+
+/* ─── Floor selector dropdown ────────────────────────────────────────────── */
+.floor-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+  white-space: nowrap;
+}
+
+.floor-trigger:hover {
+  border-color: var(--accent);
+  background: var(--bg-surface);
+}
+
+.floor-trigger:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.floor-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  margin: 0;
+  list-style: none;
+  z-index: 9999;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: dropdownFadeIn 120ms ease;
+}
+
+.floor-dropdown-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.floor-dropdown-item:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.floor-dropdown-item.active {
+  color: var(--accent);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
