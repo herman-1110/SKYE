@@ -125,6 +125,17 @@ export const activateFloor = (buildingId: string, floorId: string): Promise<void
 export const deactivateFloor = (buildingId: string, floorId: string): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/deactivate`);
 
+export const savePatrolConfig = (
+  buildingId: string,
+  floorId: string,
+  patrolEnabled: boolean,
+  patrolRoute: string[],
+): Promise<void> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/patrol`, {
+    patrol_enabled: patrolEnabled,
+    patrol_route: patrolRoute,
+  });
+
 export const renameFloor = (buildingId: string, floorId: string, name: string): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}`, { name });
 

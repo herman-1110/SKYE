@@ -31,15 +31,15 @@ from models.patrol_log import PatrolLogRecord
 from repositories.ap_repository import ap_repository
 from repositories.floor_repository import floor_repository
 from repositories.patrol_log_repository import patrol_log_repository
-from services.safety_service import safety_service
+from models.alert import AlertRecord
 from utils.timestamp_utils import utcnow_iso
 
 # ── Constants ─────────────────────────────────────────────────────────────
-TICK_INTERVAL_S  = 2.0
+TICK_INTERVAL_S  = 1.0
 BACKEND_URL      = "http://localhost:8000"
 TELEMETRY_ENDPOINT = f"{BACKEND_URL}/telemetry"
-WANDER_TICKS_MIN = 8
-WANDER_TICKS_MAX = 12
+WANDER_TICKS_MIN = 2
+WANDER_TICKS_MAX = 4
 WANDER_RADIUS_M  = 2.5
 
 SIMULATED_CCTVS: List[Dict] = [
@@ -49,14 +49,14 @@ SIMULATED_CCTVS: List[Dict] = [
 # ── Scenario timeline ──────────────────────────────────────────────────────
 # (segment_name, duration_ticks)
 SEGMENTS = [
-    ("normal_patrol",     90),
-    ("man_down",         180),
-    ("normal_patrol",     60),
-    ("collision_warning", 60),
-    ("normal_patrol",     60),
-    ("ghost_patrol",      60),
-    ("normal_patrol",     60),
-    ("missed_checkpoint", 60),
+    ("normal_patrol",     15),   # 15s  — establish baseline
+    ("man_down",          20),   # 20s  — worker stationary, alert fires at tick 12
+    ("normal_patrol",     10),   # 10s
+    ("collision_warning", 25),   # 25s  — forklift + worker converge
+    ("normal_patrol",     10),   # 10s
+    ("ghost_patrol",      15),   # 15s  — BLE no VIGI, fires at tick 10
+    ("normal_patrol",     10),   # 10s
+    ("missed_checkpoint", 10),   # 10s  — guard skips AP, fires almost immediately
 ]
 
 # ── Beacons ────────────────────────────────────────────────────────────────
@@ -101,6 +101,25 @@ _segment_idx: int = 0
 _segment_tick: int = 0
 _event_fired: bool = False       # reset each segment
 _mandown_seeded: bool = False
+_safety_svc = None
+_alert_repo = None
+
+# ── Runtime AP removal (called by floor_service on AP delete) ─────────────
+def remove_ap(mac: str) -> None:
+    global _floor_aps
+    idx = next((i for i, ap in enumerate(_floor_aps) if ap["mac"] == mac), None)
+    if idx is None:
+        return
+    _floor_aps = [ap for ap in _floor_aps if ap["mac"] != mac]
+    for beacon in SIMULATED_BEACONS:
+        beacon["ap_order"] = [
+            i if i < idx else i - 1
+            for i in beacon["ap_order"] if i != idx
+        ]
+        if beacon["ap_order"]:
+            beacon["current_ap_idx"] = beacon["current_ap_idx"] % len(beacon["ap_order"])
+        else:
+            beacon["current_ap_idx"] = 0
 
 # ── Firebase init ──────────────────────────────────────────────────────────
 def _init_firebase_if_needed() -> None:
@@ -137,7 +156,7 @@ def _move_toward(beacon: Dict, tx: float, ty: float, speed: float) -> bool:
     dx = tx - beacon["x_m"]
     dy = ty - beacon["y_m"]
     d = math.sqrt(dx * dx + dy * dy)
-    if d < 0.5:
+    if d < 0.3:
         beacon["vx"] = 0.0
         beacon["vy"] = 0.0
         return True
@@ -156,7 +175,7 @@ def _scale_speed(base: float) -> float:
     w = max(xs) - min(xs) + WANDER_RADIUS_M * 2
     h = max(ys) - min(ys) + WANDER_RADIUS_M * 2
     scale = math.sqrt((w * h) / (12.0 * 10.0))
-    return min(base * scale, base * 4.0)
+    return min(base * scale, base * 1.5)
 
 def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
     """
@@ -169,7 +188,7 @@ def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
             ap["y_m"] + random.uniform(-WANDER_RADIUS_M, WANDER_RADIUS_M),
         )
     tx, ty = beacon["wander_target"]
-    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.6))
+    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.3))
     if arrived:
         beacon["wander_target"] = None
 
@@ -197,7 +216,7 @@ def _tick_patrol(beacon: Dict, skip_ap_idx: int = -1) -> Optional[str]:
 
     if beacon["state"] == "moving":
         arrived = _move_toward(beacon, current_ap["x_m"], current_ap["y_m"],
-                               speed=_scale_speed(0.8))
+                               speed=_scale_speed(0.4))
         if arrived:
             beacon["state"] = "wandering"
             beacon["wander_ticks"] = random.randint(WANDER_TICKS_MIN, WANDER_TICKS_MAX)
@@ -225,7 +244,7 @@ def _write_patrol_log(beacon: Dict, cp_id: str, cp_name: str,
         checkpoint_id=cp_id,
         checkpoint_name=cp_name,
         expected_arrival=utcnow_iso(),
-        actual_arrival=utcnow_iso(),
+        actual_arrival=utcnow_iso() if compliant else None,
         dwell_time_seconds=dwell,
         min_dwell_required=settings.MIN_DWELL_SECONDS,
         ble_detected=True,
@@ -234,8 +253,9 @@ def _write_patrol_log(beacon: Dict, cp_id: str, cp_name: str,
         shift_id=_shift_id,
     )
     patrol_log_repository.save(record)
-    safety_service.check_patrol_compliance(record)
-    safety_service.verify_multimodal(record, ble_detected=True, vigi_detected=vigi_detected)
+    if _safety_svc:
+        _safety_svc.check_patrol_compliance(record)
+        _safety_svc.verify_multimodal(record, ble_detected=True, vigi_detected=vigi_detected)
 
 # ── RSSI / payload ─────────────────────────────────────────────────────────
 def _rssi_from_distance(d: float) -> int:
@@ -270,11 +290,6 @@ def _tick_normal_patrol() -> None:
     _tick_patrol(forklift)
 
 def _tick_man_down(tick: int) -> None:
-    """
-    Worker moves to far corner of floor and stays stationary.
-    Guards continue patrol. Forklift moves slowly.
-    Man-down alert fires after worker has been stationary for 150 ticks (~5 min).
-    """
     global _mandown_seeded
     guard_a, guard_b, worker, forklift = SIMULATED_BEACONS
 
@@ -293,16 +308,18 @@ def _tick_man_down(tick: int) -> None:
 
     _tick_patrol(guard_a)
     _tick_patrol(guard_b)
-    _move_toward(forklift, _floor_bounds["x_min"] + _floor_bounds["w"] * 0.3,
+    _move_toward(forklift,
+                 _floor_bounds["x_min"] + _floor_bounds["w"] * 0.3,
                  _floor_bounds["y_min"] + _floor_bounds["h"] * 0.5,
                  speed=_scale_speed(0.3))
 
-    if tick == 150 and not _mandown_seeded:
+    if tick == 12 and not _mandown_seeded:
         _mandown_seeded = True
         print(f"[SIM] man_down: seeding backdated position for worker")
 
 def _tick_collision_warning(tick: int) -> None:
-    """Forklift and worker converge toward floor centre. Guards continue patrol."""
+    """Forklift and worker converge toward floor centre. Direct alert at close range."""
+    global _event_fired
     guard_a, guard_b, worker, forklift = SIMULATED_BEACONS
     centre_x = _floor_bounds["x_min"] + _floor_bounds["w"] * 0.50
     centre_y = _floor_bounds["y_min"] + _floor_bounds["h"] * 0.45
@@ -311,6 +328,25 @@ def _tick_collision_warning(tick: int) -> None:
     _move_toward(worker,   centre_x, centre_y, speed=_scale_speed(0.6))
     _tick_patrol(guard_a)
     _tick_patrol(guard_b)
+
+    if not _event_fired and _alert_repo:
+        dist = _dist(worker["x_m"], worker["y_m"], forklift["x_m"], forklift["y_m"])
+        if dist < settings.MAN_DOWN_MOVEMENT_THRESHOLD * 2:
+            _event_fired = True
+            zone_desc = f"({worker['x_m']:.1f}m, {worker['y_m']:.1f}m)"
+            record = AlertRecord(
+                alert_id=str(uuid.uuid4()),
+                alert_type="collision",
+                person_id=worker["person_id"],
+                zone=zone_desc,
+                timestamp=utcnow_iso(),
+            )
+            _alert_repo.save(record)
+            print(
+                f"[SIM] Collision alert fired — "
+                f"{worker['label']} & {forklift['label']} "
+                f"within {dist:.2f}m at {zone_desc}"
+            )
 
 def _tick_ghost_patrol(tick: int) -> None:
     """Guard Alpha freezes (BLE present, VIGI no confirm). Others keep moving."""
@@ -322,10 +358,15 @@ def _tick_ghost_patrol(tick: int) -> None:
 
     if tick == 10 and not _event_fired:
         _event_fired = True
-        fake_cp = {"id": "cp-ghost", "name": "Patrol Zone"}
-        _write_patrol_log(guard_a, fake_cp["id"], fake_cp["name"],
-                          compliant=False, vigi_detected=False)
-        print(f"[SIM] Ghost patrol event fired for {guard_a['label']}")
+        cp_ap = _floor_aps[0]
+        _write_patrol_log(
+            guard_a,
+            cp_id=cp_ap["mac"],
+            cp_name=cp_ap["name"],
+            compliant=False,
+            vigi_detected=False,
+        )
+        print(f"[SIM] Ghost patrol event fired for {guard_a['label']} at {cp_ap['name']}")
 
     _tick_patrol(guard_b)
     _tick_patrol(worker)
@@ -340,8 +381,15 @@ def _tick_missed_checkpoint(tick: int) -> None:
     if result and result.startswith("SKIPPED:") and not _event_fired:
         _event_fired = True
         skipped_name = result.replace("SKIPPED:", "")
-        _write_patrol_log(guard_a, "cp-missed", skipped_name,
-                          compliant=False, vigi_detected=False, dwell_s=0)
+        skipped_ap = _floor_aps[1] if len(_floor_aps) > 1 else _floor_aps[0]
+        _write_patrol_log(
+            guard_a,
+            cp_id=skipped_ap["mac"],
+            cp_name=skipped_name,
+            compliant=False,
+            vigi_detected=False,
+            dwell_s=0,
+        )
         print(f"[SIM] Missed checkpoint event fired: {skipped_name}")
 
     _tick_patrol(guard_b)
@@ -351,11 +399,14 @@ def _tick_missed_checkpoint(tick: int) -> None:
 # ── Reset actors between segments ─────────────────────────────────────────
 def _reset_actors() -> None:
     """Reset all beacon states for a clean normal_patrol segment."""
-    for beacon in SIMULATED_BEACONS:
+    n = len(_floor_aps)
+    mid = n // 2
+    for i, beacon in enumerate(SIMULATED_BEACONS):
         beacon["state"] = "moving"
         beacon["wander_ticks"] = 0
-        beacon["current_ap_idx"] = 0
         beacon["wander_target"] = None
+        # Guard Beta (index 1) restarts at mid-route to stay offset from Guard Alpha
+        beacon["current_ap_idx"] = mid if i == 1 else 0
 
 # ── Main loop ──────────────────────────────────────────────────────────────
 async def run_simulation() -> None:
@@ -363,6 +414,13 @@ async def run_simulation() -> None:
     global _segment_idx, _segment_tick, _event_fired, _mandown_seeded
 
     _init_firebase_if_needed()
+
+    # Import after Firebase is initialized to avoid early DB call failures
+    from services.safety_service import safety_service as _safety_service
+    from repositories.alert_repository import alert_repository as _alert_repository
+    global _safety_svc, _alert_repo
+    _safety_svc = _safety_service
+    _alert_repo = _alert_repository
 
     active_floor = floor_repository.get_any_active()
     if not active_floor:
@@ -374,8 +432,28 @@ async def run_simulation() -> None:
         print("[SIM] Need at least 2 APs on the active floor")
         return
 
-    _floor_aps = [{"mac": ap.mac, "name": ap.name, "x_m": ap.x_m, "y_m": ap.y_m}
-                  for ap in fetched_aps]
+    ap_by_id = {ap.id: ap for ap in fetched_aps}
+
+    if active_floor.patrol_enabled and active_floor.patrol_route:
+        ordered_aps = []
+        for ap_id in active_floor.patrol_route:
+            ap = ap_by_id.get(ap_id)
+            if ap:
+                ordered_aps.append(ap)
+        if len(ordered_aps) >= 2:
+            _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
+                           "x_m": ap.x_m, "y_m": ap.y_m} for ap in ordered_aps]
+            print(f"[SIM] Using configured patrol route ({len(_floor_aps)} APs)")
+        else:
+            print("[SIM] WARNING: patrol_route has < 2 valid APs — falling back to coordinate sort")
+            _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
+                           "x_m": ap.x_m, "y_m": ap.y_m} for ap in fetched_aps]
+            _floor_aps.sort(key=lambda a: (a["x_m"], a["y_m"]))
+    else:
+        print("[SIM] No patrol route configured — using coordinate sort")
+        _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
+                       "x_m": ap.x_m, "y_m": ap.y_m} for ap in fetched_aps]
+        _floor_aps.sort(key=lambda a: (a["x_m"], a["y_m"]))
 
     xs = [ap["x_m"] for ap in _floor_aps]
     ys = [ap["y_m"] for ap in _floor_aps]
@@ -397,17 +475,23 @@ async def run_simulation() -> None:
     n = len(_floor_aps)
     _shift_id = f"shift-{uuid.uuid4().hex[:8]}"
 
-    # Assign AP patrol orders
-    SIMULATED_BEACONS[0]["ap_order"] = list(range(n))           # Guard Alpha: forward
-    SIMULATED_BEACONS[1]["ap_order"] = list(range(n-1, -1, -1)) # Guard Beta: reverse
+    mid = n // 2
+
+    # Guards follow the configured patrol route in order
+    SIMULATED_BEACONS[0]["ap_order"] = list(range(n))   # Guard Alpha: route order
+    SIMULATED_BEACONS[0]["x_m"] = _floor_aps[0]["x_m"]
+    SIMULATED_BEACONS[0]["y_m"] = _floor_aps[0]["y_m"]
+    SIMULATED_BEACONS[0]["current_ap_idx"] = 0
+
+    SIMULATED_BEACONS[1]["ap_order"] = list(range(n))   # Guard Beta: same route, offset start
+    SIMULATED_BEACONS[1]["x_m"] = _floor_aps[mid]["x_m"]
+    SIMULATED_BEACONS[1]["y_m"] = _floor_aps[mid]["y_m"]
+    SIMULATED_BEACONS[1]["current_ap_idx"] = mid
+
+    # Worker and forklift are not on patrol — move freely between all APs
     SIMULATED_BEACONS[2]["ap_order"] = list(range(n))           # Worker: forward
     SIMULATED_BEACONS[3]["ap_order"] = list(range(n-1, -1, -1)) # Forklift: reverse
 
-    # Starting positions
-    SIMULATED_BEACONS[0]["x_m"] = _floor_aps[0]["x_m"]
-    SIMULATED_BEACONS[0]["y_m"] = _floor_aps[0]["y_m"]
-    SIMULATED_BEACONS[1]["x_m"] = _floor_aps[n-1]["x_m"]
-    SIMULATED_BEACONS[1]["y_m"] = _floor_aps[n-1]["y_m"]
     SIMULATED_BEACONS[2]["x_m"], SIMULATED_BEACONS[2]["y_m"] = _clamp_position(
         _floor_aps[0]["x_m"] + WANDER_RADIUS_M,
         _floor_aps[0]["y_m"] + WANDER_RADIUS_M,
@@ -426,6 +510,19 @@ async def run_simulation() -> None:
     _segment_tick = 0
     _event_fired = False
     _mandown_seeded = False
+
+    # Clear stale positions for ALL simulated beacons (guards + worker + forklift)
+    # so switching between simulation modes never leaves ghost markers on the map
+    ALL_SIMULATED_MACS = [
+        "AA:BB:CC:DD:EE:01",  # Guard Alpha
+        "AA:BB:CC:DD:EE:04",  # Guard Beta
+        "AA:BB:CC:DD:EE:02",  # Worker 1
+        "AA:BB:CC:DD:EE:03",  # Forklift 1
+    ]
+    print("[SIM] Clearing stale RTDB positions…")
+    for mac in ALL_SIMULATED_MACS:
+        rtdb.reference(f"/positions/{mac}").delete()
+    print("[SIM] Stale positions cleared.")
 
     async with httpx.AsyncClient() as client:
         while True:
@@ -454,8 +551,8 @@ async def run_simulation() -> None:
             elif segment == "missed_checkpoint":
                 _tick_missed_checkpoint(_segment_tick)
 
-            # man_down: send backdated seed payload at tick 150
-            if segment == "man_down" and _segment_tick == 150 and _mandown_seeded:
+            # man_down: send backdated seed payload at tick 30
+            if segment == "man_down" and _segment_tick == 12 and _mandown_seeded:
                 worker = SIMULATED_BEACONS[2]
                 seed_ts = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
                 seed_payload = _build_payload(worker, seed_ts)

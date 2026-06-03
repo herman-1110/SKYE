@@ -1,6 +1,6 @@
 import re
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
@@ -11,6 +11,7 @@ from models.cctv import CCTV
 from models.user import UserRecord
 from repositories.ap_repository import ap_repository
 from repositories.cctv_repository import cctv_repository
+from repositories.floor_repository import floor_repository
 from schemas.floor_schema import FloorCreateRequest, FloorScaleRequest, FloorUpdateRequest
 from services.floor_service import floor_service
 from utils.timestamp_utils import utcnow_iso
@@ -112,6 +113,25 @@ def deactivate_floor(
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
     floor_service.deactivate(building_id, floor_id)
+    return {"status": "ok"}
+
+
+class PatrolConfigRequest(BaseModel):
+    patrol_enabled: bool
+    patrol_route: List[str]
+
+
+@router.patch("/{floor_id}/patrol")
+def update_patrol_config(
+    building_id: str,
+    floor_id: str,
+    body: PatrolConfigRequest,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    """Save patrol enabled flag and ordered AP route for this floor. Admin only."""
+    floor_repository.update_patrol_config(
+        building_id, floor_id, body.patrol_enabled, body.patrol_route
+    )
     return {"status": "ok"}
 
 

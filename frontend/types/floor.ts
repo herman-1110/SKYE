@@ -10,4 +10,6 @@ export interface FloorRecord {
   uploaded_at: string;
   image_width_px?: number | null;
   image_height_px?: number | null;
+  patrol_enabled?: boolean;
+  patrol_route?: string[];
 }

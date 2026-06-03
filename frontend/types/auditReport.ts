@@ -1,6 +1,7 @@
 export interface AuditReportRecord {
   report_id: string;
   shift_id: string;
+  guard_id: string;
   generated_at: string;     // ISO 8601
   patrol_summary: string;
   alert_summary: string;

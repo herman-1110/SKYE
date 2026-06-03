@@ -43,7 +43,7 @@ export async function fetchReportableShifts(): Promise<ReportableShift[]> {
   return data.shifts ?? [];
 }
 
-export async function generateReport(params: { log_id: string }): Promise<AuditReportRecord> {
+export async function generateReport(params: { log_id: string; guard_id: string }): Promise<AuditReportRecord> {
   const res = await authFetch("/api/reports/generate", {
     method: "POST",
     body: JSON.stringify(params),

@@ -23,15 +23,17 @@ export default function DashboardPage() {
         </div>
 
         {/* Alerts panel — 4 cols, same height, scrollable */}
-        <div className="col-span-12 lg:col-span-4 bento-card flex flex-col gap-3 overflow-y-auto">
+        <div className="col-span-12 lg:col-span-4 bento-card flex flex-col gap-3 min-h-0 max-h-[600px]">
           <h2 className="font-mono text-[10px] text-s-muted tracking-widest uppercase shrink-0">
             Active Alerts ({activeAlerts.length})
           </h2>
-          <AlertList
-            alerts={activeAlerts}
-            selectedId={null}
-            onSelectAlert={(a) => router.push(`/dashboard/alerts?id=${a.alert_id}`)}
-          />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <AlertList
+              alerts={activeAlerts}
+              selectedId={null}
+              onSelectAlert={(a) => router.push(`/dashboard/alerts?id=${a.alert_id}`)}
+            />
+          </div>
         </div>
       </div>
     </div>

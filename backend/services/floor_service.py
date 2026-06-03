@@ -100,6 +100,18 @@ class FloorService:
         mac = ap_repository.delete(building_id, floor_id, ap_id)
         if mac:
             position_repository.delete_ap_heartbeat(mac)
+            from services.simulation_patrol import remove_ap as patrol_remove_ap
+            from services.simulation_events import remove_ap as events_remove_ap
+            patrol_remove_ap(mac)
+            events_remove_ap(mac)
+
+        floor = floor_repository.get_by_id(building_id, floor_id)
+        if floor and floor.patrol_route:
+            cleaned_route = [pid for pid in floor.patrol_route if pid != ap_id]
+            if len(cleaned_route) != len(floor.patrol_route):
+                floor_repository.update_patrol_config(
+                    building_id, floor_id, floor.patrol_enabled or False, cleaned_route
+                )
 
 
 floor_service = FloorService()

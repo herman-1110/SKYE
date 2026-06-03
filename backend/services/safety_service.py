@@ -1,6 +1,6 @@
 import math
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from config.settings import settings
 from models.alert import AlertRecord
@@ -13,13 +13,19 @@ from utils.timestamp_utils import utcnow_iso, seconds_between
 from utils.zone_utils import is_high_risk
 
 
+_last_man_down: Dict[str, str] = {}  # person_id → ISO timestamp of last alert
+
+
 class SafetyService:
 
     # ------------------------------------------------------------------
     # FR3 / UC4 — Man-down detection
     # ------------------------------------------------------------------
     def check_man_down(self, current: PositionRecord) -> Optional[AlertRecord]:
-        """Alert if a beacon has not moved more than the threshold in a high-risk zone for > MAN_DOWN_MINUTES."""
+        """Alert if a worker has not moved in a high-risk zone for > MAN_DOWN_MINUTES."""
+        if current.person_type != "worker":
+            return None
+
         floor = floor_repository.get_any_active()
         building_id: str = floor.building_id if floor else ""
         floor_id: str = floor.id if floor else ""
@@ -39,6 +45,10 @@ class SafetyService:
         if math.hypot(dx, dy) >= settings.MAN_DOWN_MOVEMENT_THRESHOLD:
             return None
 
+        last_ts = _last_man_down.get(current.person_id)
+        if last_ts and seconds_between(last_ts, utcnow_iso()) < 30:
+            return None
+
         record = AlertRecord(
             alert_id=str(uuid.uuid4()),
             alert_type="man_down",
@@ -47,6 +57,7 @@ class SafetyService:
             timestamp=utcnow_iso(),
         )
         alert_repository.save(record)
+        _last_man_down[current.person_id] = record.timestamp
         return record
 
     # ------------------------------------------------------------------

@@ -20,6 +20,7 @@ import { toast } from "@/store/toastStore";
 import CalibrationTool from "@/components/map/CalibrationTool";
 import ZoneEditor from "@/components/map/ZoneEditor";
 import APCCTVEditor from "@/components/map/APCCTVEditor";
+import PatrolConfigPanel from "@/components/map/PatrolConfigPanel";
 import type { BuildingRecord } from "@/types/building";
 import type { FloorRecord } from "@/types/floor";
 
@@ -364,8 +365,10 @@ function FloorCard({
   isAdmin,
   zonesOpenForId,
   devicesOpenForId,
+  patrolOpenForId,
   onToggleZones,
   onToggleDevices,
+  onTogglePatrol,
   onCalibrate,
   onActivate,
   onDeactivate,
@@ -377,8 +380,10 @@ function FloorCard({
   isAdmin: boolean;
   zonesOpenForId: string | null;
   devicesOpenForId: string | null;
+  patrolOpenForId: string | null;
   onToggleZones: (id: string) => void;
   onToggleDevices: (id: string) => void;
+  onTogglePatrol: (id: string) => void;
   onCalibrate: (floor: FloorRecord) => void;
   onActivate: (id: string) => void;
   onDeactivate: (id: string) => void;
@@ -441,6 +446,11 @@ function FloorCard({
     onToggleDevices(floor.id);
   };
 
+  const handleManagePatrol = () => {
+    setMenuOpen(false);
+    onTogglePatrol(floor.id);
+  };
+
   return (
     <div className="bento-card space-y-0 p-0" style={{ overflow: "visible" }}>
       <div className="flex items-center gap-3 px-4 py-3">
@@ -470,6 +480,11 @@ function FloorCard({
             {floor.scale_pixels_per_meter
               ? `Calibrated: ${floor.scale_pixels_per_meter} px/m`
               : <span className="text-s-accent">⚠ Not calibrated</span>}
+          </p>
+          <p className="font-mono text-[10px] mt-0.5">
+            {floor.patrol_enabled
+              ? <span className="text-s-success">● Patrol enabled ({floor.patrol_route?.length ?? 0} APs)</span>
+              : <span className="text-s-muted">○ No patrol configured</span>}
           </p>
         </div>
 
@@ -501,6 +516,21 @@ function FloorCard({
       {devicesOpenForId === floor.id && (
         <div className="border-t border-s-border px-4 py-4">
           <APCCTVEditor buildingId={building.id} floor={floor} onClose={() => onToggleDevices(floor.id)} />
+        </div>
+      )}
+
+      {/* Patrol config — expands inline */}
+      {patrolOpenForId === floor.id && (
+        <div className="border-t border-s-border px-4 py-4">
+          <PatrolConfigPanel
+            buildingId={building.id}
+            floor={floor}
+            onClose={() => onTogglePatrol(floor.id)}
+            onSaved={(enabled, route) => {
+              floor.patrol_enabled = enabled;
+              floor.patrol_route = route;
+            }}
+          />
         </div>
       )}
 
@@ -548,6 +578,10 @@ function FloorCard({
             <button onClick={handleManageDevices} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-text hover:bg-s-elevated transition-colors flex items-center gap-2">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
               {devicesOpenForId === floor.id ? "Close Devices" : "Manage Devices"}
+            </button>
+            <button onClick={handleManagePatrol} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-text hover:bg-s-elevated transition-colors flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0"/><path d="M12 8v4l3 3"/></svg>
+              {patrolOpenForId === floor.id ? "Close Patrol" : "Manage Patrol"}
             </button>
             <div className="border-t border-s-border my-1" />
             <button
@@ -651,6 +685,7 @@ export default function FloorPlansPage() {
   const [calibratingFloor, setCalibratingFloor] = useState<FloorRecord | null>(null);
   const [zonesOpenForId, setZonesOpenForId] = useState<string | null>(null);
   const [devicesOpenForId, setDevicesOpenForId] = useState<string | null>(null);
+  const [patrolOpenForId, setPatrolOpenForId] = useState<string | null>(null);
   const [deletingBuildingId, setDeletingBuildingId] = useState<string | null>(null);
   const [buildingMenuId, setBuildingMenuId] = useState<string | null>(null);
   const [buildingMenuPos, setBuildingMenuPos] = useState({ top: 0, left: 0 });
@@ -719,6 +754,10 @@ export default function FloorPlansPage() {
 
   const toggleDevices = (floorId: string) => {
     setDevicesOpenForId((prev) => (prev === floorId ? null : floorId));
+  };
+
+  const togglePatrol = (floorId: string) => {
+    setPatrolOpenForId((prev) => (prev === floorId ? null : floorId));
   };
 
   if (buildingsLoading) return <PageSkeleton />;
@@ -923,8 +962,10 @@ export default function FloorPlansPage() {
                         isAdmin={isAdmin}
                         zonesOpenForId={zonesOpenForId}
                         devicesOpenForId={devicesOpenForId}
+                        patrolOpenForId={patrolOpenForId}
                         onToggleZones={toggleZones}
                         onToggleDevices={toggleDevices}
+                        onTogglePatrol={togglePatrol}
                         onCalibrate={setCalibratingFloor}
                         onActivate={handleActivateFloor}
                         onDeactivate={handleDeactivateFloor}

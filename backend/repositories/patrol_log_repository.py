@@ -41,27 +41,37 @@ class PatrolLogRepository:
         docs = self._db().collection(self._COL).where("guard_id", "==", guard_id).stream()
         return [doc.to_dict() for doc in docs]
 
+    def get_by_shift_and_guard(self, shift_id: str, guard_id: str) -> List[Dict[str, Any]]:
+        """Query patrol logs matching both shift_id and guard_id."""
+        docs = (
+            self._db().collection(self._COL)
+            .where("shift_id", "==", shift_id)
+            .where("guard_id", "==", guard_id)
+            .stream()
+        )
+        return [doc.to_dict() for doc in docs]
+
     def get_reportable_shifts(self) -> List[Dict[str, Any]]:
-        """Aggregate individual checkpoint records by shift_id.
-        Returns one entry per shift that has at least one checkpoint, newest first."""
-        # Each PatrolLogRecord document is one checkpoint visit.
-        # Group them by shift_id so the frontend sees one selectable entry per shift.
+        """Aggregate checkpoint records by (shift_id, guard_id).
+        Returns one entry per guard per shift, newest first."""
         buckets: Dict[str, Dict] = {}
         for doc in self._db().collection(self._COL).stream():
             data = doc.to_dict()
             sid = data.get("shift_id")
+            gid = data.get("guard_id", "unknown")
             if not sid:
                 continue
-            if sid not in buckets:
-                buckets[sid] = {
+            key = f"{sid}|{gid}"
+            if key not in buckets:
+                buckets[key] = {
                     "log_id": sid,
-                    "guard_id": data.get("guard_id", "Unknown"),
-                    "guard_label": data.get("guard_id", "Unknown Guard"),
+                    "guard_id": gid,
+                    "guard_label": gid,
                     "arrivals": [],
                 }
             arr = data.get("actual_arrival")
             if arr:
-                buckets[sid]["arrivals"].append(arr)
+                buckets[key]["arrivals"].append(arr)
 
         result = []
         for info in buckets.values():
@@ -69,7 +79,7 @@ class PatrolLogRepository:
             if not arrivals:
                 continue
             info["shift_start"] = _iso_to_unix(arrivals[0])
-            info["shift_end"]   = _iso_to_unix(arrivals[-1])
+            info["shift_end"] = _iso_to_unix(arrivals[-1])
             result.append(info)
 
         result.sort(key=lambda x: x.get("shift_start") or 0, reverse=True)

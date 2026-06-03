@@ -28,6 +28,8 @@ class FloorRepository:
             scale_pixels_per_meter=data.get("scale_pixels_per_meter"),
             image_width_px=int(data["image_width_px"]) if data.get("image_width_px") else None,
             image_height_px=int(data["image_height_px"]) if data.get("image_height_px") else None,
+            patrol_enabled=bool(data.get("patrol_enabled", False)),
+            patrol_route=list(data.get("patrol_route", [])),
         )
 
     def save(self, floor: FloorRecord) -> FloorRecord:
@@ -88,6 +90,18 @@ class FloorRepository:
 
     def delete(self, building_id: str, floor_id: str) -> None:
         self._col(building_id).document(floor_id).delete()
+
+    def update_patrol_config(
+        self,
+        building_id: str,
+        floor_id: str,
+        patrol_enabled: bool,
+        patrol_route: List[str],
+    ) -> None:
+        self._col(building_id).document(floor_id).update({
+            "patrol_enabled": patrol_enabled,
+            "patrol_route": patrol_route,
+        })
 
 
 floor_repository = FloorRepository()

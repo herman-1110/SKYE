@@ -45,8 +45,8 @@ export default function AlertList({ alerts, selectedId, onSelectAlert, onDelete,
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-hidden">
-        <div className="divide-y divide-s-border/50 overflow-y-auto h-full">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="divide-y divide-s-border/50">
           {filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center h-40 text-s-muted">
               <p className="text-sm">No alerts</p>

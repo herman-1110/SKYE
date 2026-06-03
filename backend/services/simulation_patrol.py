@@ -33,13 +33,13 @@ from repositories.patrol_log_repository import patrol_log_repository
 from utils.timestamp_utils import utcnow_iso
 
 # ── Constants ─────────────────────────────────────────────────────────────
-TICK_INTERVAL_S    = 2.0
+TICK_INTERVAL_S    = 1.0
 BACKEND_URL        = "http://localhost:8000"
 TELEMETRY_ENDPOINT = f"{BACKEND_URL}/telemetry"
 
 # How long (in ticks) a guard wanders within an AP zone before moving on
-WANDER_TICKS_MIN = 8    # 16 seconds
-WANDER_TICKS_MAX = 12   # 24 seconds
+WANDER_TICKS_MIN = 2
+WANDER_TICKS_MAX = 2
 
 # Wander radius around each AP in metres
 WANDER_RADIUS_M = 2.5
@@ -76,6 +76,23 @@ SIMULATED_BEACONS: List[Dict] = [
     },
 ]
 
+# ── Runtime AP removal (called by floor_service on AP delete) ─────────────
+def remove_ap(mac: str) -> None:
+    global _floor_aps
+    idx = next((i for i, ap in enumerate(_floor_aps) if ap["mac"] == mac), None)
+    if idx is None:
+        return
+    _floor_aps = [ap for ap in _floor_aps if ap["mac"] != mac]
+    for beacon in SIMULATED_BEACONS:
+        beacon["ap_order"] = [
+            i if i < idx else i - 1
+            for i in beacon["ap_order"] if i != idx
+        ]
+        if beacon["ap_order"]:
+            beacon["current_ap_idx"] = beacon["current_ap_idx"] % len(beacon["ap_order"])
+        else:
+            beacon["current_ap_idx"] = 0
+
 # ── Firebase init ─────────────────────────────────────────────────────────
 def _init_firebase_if_needed() -> None:
     if not firebase_admin._apps:
@@ -108,11 +125,11 @@ def _clamp_position(x: float, y: float) -> tuple[float, float]:
     )
 
 def _move_toward(beacon: Dict, tx: float, ty: float, speed: float) -> bool:
-    """Move beacon toward target. Returns True when arrived (within 0.5m)."""
+    """Move beacon toward target. Returns True when arrived (within 0.3m)."""
     dx = tx - beacon["x_m"]
     dy = ty - beacon["y_m"]
     d = math.sqrt(dx * dx + dy * dy)
-    if d < 0.5:
+    if d < 0.3:
         beacon["vx"] = 0.0
         beacon["vy"] = 0.0
         return True
@@ -132,7 +149,7 @@ def _scale_speed(base: float) -> float:
     w = max(xs) - min(xs) + WANDER_RADIUS_M * 2
     h = max(ys) - min(ys) + WANDER_RADIUS_M * 2
     scale = math.sqrt((w * h) / (12.0 * 10.0))
-    return min(base * scale, base * 4.0)
+    return min(base * scale, base * 1.5)
 
 def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
     """
@@ -146,7 +163,7 @@ def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
             ap["y_m"] + random.uniform(-WANDER_RADIUS_M, WANDER_RADIUS_M),
         )
     tx, ty = beacon["wander_target"]
-    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.6))
+    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.3))
     if arrived:
         beacon["wander_target"] = None
 
@@ -207,7 +224,7 @@ def _tick_guard(beacon: Dict) -> None:
     if beacon["state"] == "moving":
         arrived = _move_toward(
             beacon, current_ap["x_m"], current_ap["y_m"],
-            speed=_scale_speed(0.8)
+            speed=_scale_speed(0.4)
         )
         if arrived:
             beacon["state"] = "wandering"
@@ -241,7 +258,30 @@ async def run_simulation() -> None:
         print("[SIM] Need at least 2 APs on the active floor")
         return
 
-    _floor_aps = [{"mac": ap.mac, "name": ap.name, "x_m": ap.x_m, "y_m": ap.y_m} for ap in fetched_aps]
+    # Build AP lookup by ID
+    ap_by_id = {ap.id: ap for ap in fetched_aps}
+
+    # Use admin-configured patrol route if available
+    if active_floor.patrol_enabled and active_floor.patrol_route:
+        ordered_aps = []
+        for ap_id in active_floor.patrol_route:
+            ap = ap_by_id.get(ap_id)
+            if ap:
+                ordered_aps.append(ap)
+        if len(ordered_aps) >= 2:
+            _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
+                           "x_m": ap.x_m, "y_m": ap.y_m} for ap in ordered_aps]
+            print(f"[SIM] Using configured patrol route ({len(_floor_aps)} APs)")
+        else:
+            print("[SIM] WARNING: patrol_route has < 2 valid APs — falling back to coordinate sort")
+            _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
+                           "x_m": ap.x_m, "y_m": ap.y_m} for ap in fetched_aps]
+            _floor_aps.sort(key=lambda a: (a["x_m"], a["y_m"]))
+    else:
+        print("[SIM] No patrol route configured — using coordinate sort")
+        _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
+                       "x_m": ap.x_m, "y_m": ap.y_m} for ap in fetched_aps]
+        _floor_aps.sort(key=lambda a: (a["x_m"], a["y_m"]))
     print(f"[SIM] Loaded {len(_floor_aps)} AP(s) from floor '{active_floor.name}':")
     for ap in _floor_aps:
         print(f"[SIM]   {ap['name']:20s}  {ap['mac']}  ({ap['x_m']:.1f}m, {ap['y_m']:.1f}m)")
@@ -260,24 +300,41 @@ async def run_simulation() -> None:
 
     n = len(_floor_aps)
 
-    # Guard Alpha: forward order 0 → 1 → 2 → ... → 0
+    # Both guards follow the configured route in order.
+    # Guard Beta starts mid-route so they are offset and don't overlap.
+    mid = n // 2
     SIMULATED_BEACONS[0]["ap_order"] = list(range(n))
     SIMULATED_BEACONS[0]["x_m"] = _floor_aps[0]["x_m"]
     SIMULATED_BEACONS[0]["y_m"] = _floor_aps[0]["y_m"]
+    SIMULATED_BEACONS[0]["current_ap_idx"] = 0
 
-    # Guard Beta: reverse order n-1 → n-2 → ... → 0 → n-1
-    SIMULATED_BEACONS[1]["ap_order"] = list(range(n - 1, -1, -1))
-    SIMULATED_BEACONS[1]["x_m"] = _floor_aps[n - 1]["x_m"]
-    SIMULATED_BEACONS[1]["y_m"] = _floor_aps[n - 1]["y_m"]
+    SIMULATED_BEACONS[1]["ap_order"] = list(range(n))   # same route
+    SIMULATED_BEACONS[1]["x_m"] = _floor_aps[mid]["x_m"]
+    SIMULATED_BEACONS[1]["y_m"] = _floor_aps[mid]["y_m"]
+    SIMULATED_BEACONS[1]["current_ap_idx"] = mid         # start mid-route
 
-    print(f"[SIM] Guard Alpha: {' → '.join(_floor_aps[i]['name'] for i in SIMULATED_BEACONS[0]['ap_order'])} → loop")
-    print(f"[SIM] Guard Beta:  {' → '.join(_floor_aps[i]['name'] for i in SIMULATED_BEACONS[1]['ap_order'])} → loop")
+    route_str = " → ".join(_floor_aps[i]["name"] for i in range(n))
+    print(f"[SIM] Guard Alpha: {route_str} → loop (start: AP 1)")
+    print(f"[SIM] Guard Beta:  {route_str} → loop (start: AP {mid + 1})")
     _shift_id = f"shift-{uuid.uuid4().hex[:8]}"
     print(f"[SIM] Pure Patrol simulation started  shift={_shift_id}. Ctrl+C to stop.")
 
     token = settings.OMADA_ACCESS_TOKEN
     headers = {"Authorization": f"Bearer {token}"}
     tick = 0
+
+    # Clear stale positions for ALL simulated beacons (guards + worker + forklift)
+    # so switching between simulation modes never leaves ghost markers on the map
+    ALL_SIMULATED_MACS = [
+        "AA:BB:CC:DD:EE:01",  # Guard Alpha
+        "AA:BB:CC:DD:EE:04",  # Guard Beta
+        "AA:BB:CC:DD:EE:02",  # Worker 1
+        "AA:BB:CC:DD:EE:03",  # Forklift 1
+    ]
+    print("[SIM] Clearing stale RTDB positions…")
+    for mac in ALL_SIMULATED_MACS:
+        rtdb.reference(f"/positions/{mac}").delete()
+    print("[SIM] Stale positions cleared.")
 
     async with httpx.AsyncClient() as client:
         while True:

@@ -49,11 +49,10 @@ class LLMService:
     def get_reportable_shifts(self) -> List[Dict[str, Any]]:
         return patrol_log_repository.get_reportable_shifts()
 
-    def generate_report(self, log_id: str) -> AuditReportRecord:
-        # log_id is the shift_id — fetch all checkpoint records for that shift
-        checkpoints = patrol_log_repository.get_by_shift(log_id)
+    def generate_report(self, log_id: str, guard_id: str) -> AuditReportRecord:
+        checkpoints = patrol_log_repository.get_by_shift_and_guard(log_id, guard_id)
         if not checkpoints:
-            raise ValueError(f"No patrol data found for shift {log_id!r}")
+            raise ValueError(f"No patrol data found for shift {log_id!r} guard {guard_id!r}")
 
         shift_id = log_id
         rag_context = rag_service.get_context(f"shift {shift_id} safety audit")
@@ -64,6 +63,7 @@ class LLMService:
         record = AuditReportRecord(
             report_id=str(uuid.uuid4()),
             shift_id=shift_id,
+            guard_id=guard_id,
             generated_at=utcnow_iso(),
             patrol_summary=str(checkpoints),
             alert_summary="[]",
