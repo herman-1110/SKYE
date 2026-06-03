@@ -1,9 +1,12 @@
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+
 from config.settings import settings
 from models.position import PositionRecord
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
 from models.zone import ZoneRecord
+from repositories.ap_repository import ap_repository
 from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
 from repositories.zone_repository import zone_repository
@@ -25,6 +28,11 @@ class PositioningService:
         self._cached_building_id: Optional[str] = None
         self._cached_floor_id: Optional[str] = None
         self._cached_zones: List[ZoneRecord] = []
+        # Floor bounds for Kalman clamping — populated by _refresh_cache
+        self._cached_x_min: float = 0.0
+        self._cached_x_max: float = 100.0
+        self._cached_y_min: float = 0.0
+        self._cached_y_max: float = 100.0
 
     def _get_filter(self, beacon_mac: str) -> KalmanService:
         if beacon_mac not in self._filters:
@@ -42,13 +50,38 @@ class PositioningService:
                 self._cached_zones = zone_repository.get_all(
                     self._cached_building_id, self._cached_floor_id
                 )
+                # Load AP positions to derive floor bounds for Kalman clamping
+                aps = ap_repository.get_all(
+                    self._cached_building_id, self._cached_floor_id
+                )
+                if aps:
+                    xs = [ap.x_m for ap in aps]
+                    ys = [ap.y_m for ap in aps]
+                    pad = 3.0
+                    self._cached_x_min = max(0.0, min(xs) - pad)
+                    self._cached_x_max = max(xs) + pad
+                    self._cached_y_min = max(0.0, min(ys) - pad)
+                    self._cached_y_max = max(ys) + pad
+                else:
+                    self._cached_x_min = 0.0
+                    self._cached_x_max = 100.0
+                    self._cached_y_min = 0.0
+                    self._cached_y_max = 100.0
             else:
                 self._cached_zones = []
+                self._cached_x_min = 0.0
+                self._cached_x_max = 100.0
+                self._cached_y_min = 0.0
+                self._cached_y_max = 100.0
         else:
             self._cached_scale = None
             self._cached_building_id = None
             self._cached_floor_id = None
             self._cached_zones = []
+            self._cached_x_min = 0.0
+            self._cached_x_max = 100.0
+            self._cached_y_min = 0.0
+            self._cached_y_max = 100.0
 
     def _get_scale(self) -> Optional[float]:
         if self._cached_scale is None and self._cached_building_id is None:
@@ -67,6 +100,10 @@ class PositioningService:
         self._cached_building_id = None
         self._cached_floor_id = None
         self._cached_zones = []
+        self._cached_x_min = 0.0
+        self._cached_x_max = 100.0
+        self._cached_y_min = 0.0
+        self._cached_y_max = 100.0
 
     def compute_position(self, payload: OmadaTelemetryPayload) -> Optional[PositionRecord]:
         """Full pipeline: returns smoothed PositionRecord, or None if < 3 AP readings."""
@@ -86,6 +123,15 @@ class PositioningService:
 
         kf = self._get_filter(payload.reporter_mac)
         sx, sy = kf.update(raw[0], raw[1])
+
+        # Clamp Kalman internal state so bad measurements cannot corrupt future predictions
+        kf.clamp_state(
+            self._cached_x_min, self._cached_x_max,
+            self._cached_y_min, self._cached_y_max,
+        )
+        sx = float(np.clip(sx, self._cached_x_min, self._cached_x_max))
+        sy = float(np.clip(sy, self._cached_y_min, self._cached_y_max))
+
         px, py = kf.predict_ahead(seconds=float(settings.COLLISION_ALERT_SECONDS))
 
         scale = self._get_scale()
@@ -104,6 +150,9 @@ class PositioningService:
             predicted_y=py,
             pixel_x=pixel_x,
             pixel_y=pixel_y,
+            floor_id=self._cached_floor_id or "",
+            building_id=self._cached_building_id or "",
+            label=payload.label,
         )
         position_repository.save(record)
         return record

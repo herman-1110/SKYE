@@ -16,3 +16,6 @@ class PositionRecord:
     pixel_x: Optional[float] = None   # metres × scale_pixels_per_meter from active floor plan
     pixel_y: Optional[float] = None
     is_stationary: bool = False
+    floor_id: str = ""
+    building_id: str = ""
+    label: str = ""

@@ -5,15 +5,15 @@ import { db } from "@/config/firebase";
 
 const ONLINE_THRESHOLD_MS = 10_000;
 
-export type APStatus = "online" | "offline" | "unknown";
+export type CCTVStatus = "online" | "offline" | "unknown";
 
-export function useAPHeartbeats(): Record<string, APStatus> {
+export function useCCTVHeartbeats(): Record<string, CCTVStatus> {
   const rawRef = useRef<Record<string, number>>({});
-  const [statuses, setStatuses] = useState<Record<string, APStatus>>({});
+  const [statuses, setStatuses] = useState<Record<string, CCTVStatus>>({});
 
   const recompute = () => {
     const now = Date.now();
-    const result: Record<string, APStatus> = {};
+    const result: Record<string, CCTVStatus> = {};
     for (const [mac, last_seen] of Object.entries(rawRef.current)) {
       const age = now - last_seen * 1000;
       result[mac] = age < ONLINE_THRESHOLD_MS ? "online" : "offline";
@@ -22,7 +22,7 @@ export function useAPHeartbeats(): Record<string, APStatus> {
   };
 
   useEffect(() => {
-    const r = ref(db, "/ap_heartbeats");
+    const r = ref(db, "/cctv_heartbeats");
     const unsub = onValue(r, (snap) => {
       const data = snap.val() ?? {};
       const raw: Record<string, number> = {};

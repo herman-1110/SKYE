@@ -11,4 +11,7 @@ export interface PositionRecord {
   pixel_x: number | null;   // metres × scale_pixels_per_meter; null until floor plan is calibrated
   pixel_y: number | null;
   is_stationary: boolean;
+  floor_id: string;
+  building_id: string;
+  label: string;
 }

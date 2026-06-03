@@ -1,37 +1,68 @@
-import asyncio
-from fastapi import APIRouter
+"""
+Simulation routes — start/stop/status for patrol and events simulations.
 
-from services.simulation_service import run_simulation
+POST /simulation/start?mode=patrol   → runs simulation_patrol.py
+POST /simulation/start?mode=events   → runs simulation_events.py (default)
+POST /simulation/stop                → stops whichever is running
+GET  /simulation/status              → returns running/stopped + current mode
+"""
+import asyncio
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query
+
+from services.simulation_patrol import run_simulation as run_patrol
+from services.simulation_events import run_simulation as run_events
 
 router = APIRouter(tags=["simulation"])
 
-_sim_task: asyncio.Task | None = None
+_task: Optional[asyncio.Task] = None
+_current_mode: Optional[str] = None
+
+
+def _is_running() -> bool:
+    return _task is not None and not _task.done()
 
 
 @router.post("/simulation/start")
-async def start_simulation() -> dict:
-    global _sim_task
-    if _sim_task is not None and not _sim_task.done():
-        return {"status": "already_running"}
-    _sim_task = asyncio.create_task(run_simulation())
-    return {"status": "started"}
+async def start_simulation(mode: str = Query(default="events", pattern="^(patrol|events)$")):
+    global _task, _current_mode
+
+    if _is_running():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Simulation already running in '{_current_mode}' mode. Stop it first.",
+        )
+
+    _current_mode = mode
+    runner = run_patrol if mode == "patrol" else run_events
+    _task = asyncio.create_task(runner())
+
+    return {"status": "started", "mode": mode}
 
 
 @router.post("/simulation/stop")
-async def stop_simulation() -> dict:
-    global _sim_task
-    if _sim_task is not None and not _sim_task.done():
-        _sim_task.cancel()
-        _sim_task = None
-        return {"status": "stopped"}
-    return {"status": "not_running"}
+async def stop_simulation():
+    global _task, _current_mode
+
+    if not _is_running():
+        raise HTTPException(status_code=400, detail="No simulation is currently running.")
+
+    _task.cancel()
+    try:
+        await _task
+    except asyncio.CancelledError:
+        pass
+
+    stopped_mode = _current_mode
+    _task = None
+    _current_mode = None
+
+    return {"status": "stopped", "mode": stopped_mode}
 
 
 @router.get("/simulation/status")
-async def simulation_status() -> dict:
-    if _sim_task is None:
-        return {"status": "not_started"}
-    if _sim_task.done():
-        exc = _sim_task.exception() if not _sim_task.cancelled() else None
-        return {"status": "stopped", "error": str(exc) if exc else None}
-    return {"status": "running"}
+async def simulation_status():
+    return {
+        "running": _is_running(),
+        "mode": _current_mode if _is_running() else None,
+    }

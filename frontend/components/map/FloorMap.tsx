@@ -5,6 +5,7 @@ import type { PositionRecord } from "@/types/position";
 import type { FloorRecord } from "@/types/floor";
 import { useZones } from "@/hooks/useZones";
 import { useAPHeartbeats } from "@/hooks/useAPHeartbeats";
+import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import WorkerMarker from "./WorkerMarker";
 import { listAPs, listCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
@@ -14,10 +15,61 @@ interface Props {
   activeFloor: FloorRecord | null;
 }
 
-const MAP_W_M = 80;
-const MAP_H_M = 40;
-const CANVAS_W = 800;
-const CANVAS_H = 400;
+
+const WORKER_TYPE_LABEL: Record<string, string> = {
+  guard:    "Guard",
+  worker:   "Worker",
+  forklift: "Forklift",
+};
+
+const WORKER_TYPE_COLOUR: Record<string, string> = {
+  guard:    "var(--success)",
+  worker:   "var(--accent)",
+  forklift: "var(--warning)",
+};
+
+function WorkerTooltip({ position, x, y }: { position: PositionRecord; x: number; y: number }) {
+  const displayName = position.label || position.person_id;
+  const typeLabel   = WORKER_TYPE_LABEL[position.person_type] ?? position.person_type;
+  const fill        = WORKER_TYPE_COLOUR[position.person_type] ?? "var(--text-secondary)";
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: x + 14,
+        top: y - 48,
+        zIndex: 9999,
+        pointerEvents: "none",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border)",
+        borderRadius: "10px",
+        padding: "8px 12px",
+        minWidth: 160,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+        fontFamily: "IBM Plex Sans, sans-serif",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: fill, flexShrink: 0, display: "inline-block" }} />
+        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>
+          {displayName}
+        </span>
+        <span style={{ flexShrink: 0, padding: "1px 7px", borderRadius: 99, fontSize: 10, fontFamily: "IBM Plex Mono, monospace", background: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-secondary)", marginLeft: "auto" }}>
+          {typeLabel}
+        </span>
+      </div>
+      {position.zone && (
+        <div style={{ fontSize: 11, fontFamily: "IBM Plex Mono, monospace", color: "var(--text-secondary)", marginBottom: 2 }}>
+          {position.zone}
+        </div>
+      )}
+      <div style={{ fontSize: 10, fontFamily: "IBM Plex Mono, monospace", color: "var(--text-secondary)", opacity: 0.7 }}>
+        {position.x.toFixed(1)}m, {position.y.toFixed(1)}m
+      </div>
+    </div>
+  );
+}
 
 export default function FloorMap({ positions, buildingId, activeFloor }: Props) {
   const [showZones, setShowZones] = useState(true);
@@ -30,10 +82,12 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   const [aps, setAps] = useState<APRecord[]>([]);
   const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
+  const [hoveredWorker, setHoveredWorker] = useState<{ position: PositionRecord; x: number; y: number } | null>(null);
 
   const outerRef = useRef<HTMLDivElement>(null);
   const { zones } = useZones(buildingId, activeFloor?.id ?? null);
   const apStatuses = useAPHeartbeats();
+  const cctvStatuses = useCCTVHeartbeats();
   const scale = activeFloor?.scale_pixels_per_meter ?? null;
 
   useEffect(() => {
@@ -77,7 +131,8 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
 
   const toPixel = (p: PositionRecord): { px: number; py: number } => {
     if (p.pixel_x != null && p.pixel_y != null) return { px: p.pixel_x, py: p.pixel_y };
-    return { px: (p.x / MAP_W_M) * CANVAS_W, py: (p.y / MAP_H_M) * CANVAS_H };
+    if (naturalSize && scale) return { px: p.x * scale, py: p.y * scale };
+    return { px: 0, py: 0 };
   };
 
   if (!activeFloor) {
@@ -168,30 +223,46 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
           })}
 
           {/* CCTV markers */}
-          {cctvs.map((cctv) => (
-            <div
-              key={cctv.id}
-              className="absolute"
-              style={{ left: `${cctv.x_pct * 100}%`, top: `${cctv.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10 }}
-              onMouseEnter={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
-              onMouseMove={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
-              onMouseLeave={() => setHoveredMarker(null)}
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-              </svg>
-            </div>
-          ))}
+          {cctvs.map((cctv) => {
+            const status = cctv.mac ? (cctvStatuses[cctv.mac.toUpperCase()] ?? "offline") : null;
+            const dotColor = status === "online" ? "#22c55e" : status === "offline" ? "#ef4444" : null;
+            const label = cctv.mac ? `${cctv.name} — ${cctv.mac} — ${status}` : cctv.name;
+            return (
+              <div
+                key={cctv.id}
+                className="absolute"
+                style={{ left: `${cctv.x_pct * 100}%`, top: `${cctv.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10 }}
+                onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
+                onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
+                onMouseLeave={() => setHoveredMarker(null)}
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
+                {dotColor && (
+                  <span style={{ position: "absolute", bottom: -2, right: -2, width: 7, height: 7, borderRadius: "50%", background: dotColor, border: "1.5px solid var(--bg-base, #111)", display: "block" }} />
+                )}
+              </div>
+            );
+          })}
 
           {/* Worker markers */}
           <svg
-            viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
+            viewBox={naturalSize ? `0 0 ${naturalSize.w} ${naturalSize.h}` : "0 0 1 1"}
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
             aria-label="Worker positions overlay"
           >
-            {positions.map((p) => {
+            {naturalSize && positions.map((p) => {
               const { px, py } = toPixel(p);
-              return <WorkerMarker key={p.beacon_mac} position={p} px={px} py={py} />;
+              return (
+                <WorkerMarker
+                  key={p.beacon_mac}
+                  position={p}
+                  px={px}
+                  py={py}
+                  onHover={setHoveredWorker}
+                />
+              );
             })}
           </svg>
 
@@ -223,6 +294,12 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
         <div style={{ position: "fixed", left: hoveredMarker.x + 12, top: hoveredMarker.y - 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-primary)", padding: "4px 10px", borderRadius: "6px", fontSize: "12px", pointerEvents: "none", zIndex: 9999, fontFamily: "IBM Plex Mono, monospace", whiteSpace: "nowrap" }}>
           {hoveredMarker.label}
         </div>,
+        document.body
+      )}
+
+      {/* Worker tooltip */}
+      {hoveredWorker && typeof document !== "undefined" && createPortal(
+        <WorkerTooltip position={hoveredWorker.position} x={hoveredWorker.x} y={hoveredWorker.y} />,
         document.body
       )}
     </div>

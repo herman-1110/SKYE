@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useBuildings } from "@/hooks/useBuildings";
 import { useFloors } from "@/hooks/useFloors";
@@ -7,6 +7,7 @@ import { useDashboardStore } from "@/store/dashboardStore";
 import { activateFloor } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
 import FloorMap from "@/components/map/FloorMap";
+import DeviceStatusPanel from "@/components/dashboard/DeviceStatusPanel";
 import type { PositionRecord } from "@/types/position";
 import type { BuildingRecord } from "@/types/building";
 
@@ -21,7 +22,12 @@ export default function FloorMapArea() {
   const [floorDropdownOpen, setFloorDropdownOpen] = useState(false);
   const positions = useDashboardStore((s) => s.positions);
 
-  const positionList = Object.values(positions) as PositionRecord[];
+  const positionList = useMemo(() => {
+    const all = Object.values(positions) as PositionRecord[];
+    const floorId = (floors.find((f) => f.id === selectedFloorId) ?? activeFloor)?.id;
+    if (!floorId) return [];
+    return all.filter((p) => p.floor_id === floorId);
+  }, [positions, selectedFloorId, floors, activeFloor]);
 
   // Auto-select the first building + its active floor
   useEffect(() => {
@@ -176,6 +182,11 @@ export default function FloorMapArea() {
           activeFloor={displayedFloor ?? null}
         />
       </div>
+
+      <DeviceStatusPanel
+        buildingId={selectedBuildingId}
+        floorId={displayedFloor?.id ?? null}
+      />
     </div>
   );
 }

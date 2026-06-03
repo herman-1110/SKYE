@@ -22,5 +22,10 @@ class PositionRepository:
         """Remove a position entry by beacon MAC."""
         db.reference(f"{self._PATH}/{beacon_mac}").delete()
 
+    def delete_ap_heartbeat(self, mac: str) -> None:
+        """Remove /ap_heartbeats/{mac_underscores} from RTDB."""
+        key = mac.replace(":", "_")
+        db.reference(f"/ap_heartbeats/{key}").delete()
+
 
 position_repository = PositionRepository()

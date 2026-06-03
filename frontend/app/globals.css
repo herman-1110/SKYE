@@ -291,3 +291,102 @@ input[type='number'] {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ─── Device Status Panel ────────────────────────────────────────────────── */
+.device-status-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.device-status-title {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 14px;
+}
+
+.device-status-section {
+  margin-bottom: 14px;
+}
+
+.device-status-section:last-child {
+  margin-bottom: 0;
+}
+
+.device-status-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.device-status-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.device-status-row:last-child {
+  border-bottom: none;
+}
+
+.device-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.device-status-dot.online  { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.device-status-dot.offline { background: var(--danger); }
+.device-status-dot.unknown { background: var(--text-secondary); }
+
+.device-status-name {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-status-mac {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.device-status-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.device-status-badge.online  { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+.device-status-badge.offline { background: rgba(239, 68,  68,  0.12); color: var(--danger);  }
+.device-status-badge.unknown { background: var(--bg-elevated); color: var(--text-secondary); }
+
+/* ─── Calibration Warning ────────────────────────────────────────────────── */
+.calibration-warning {
+  background: rgba(245, 158, 11, 0.10);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  color: var(--accent);
+  margin-bottom: 10px;
+}

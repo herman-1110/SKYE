@@ -1,9 +1,11 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from models.audit_report import AuditReportRecord
 from providers.llm_factory import get_llm_provider
 from repositories.audit_report_repository import audit_report_repository
+from repositories.patrol_log_repository import patrol_log_repository
 from services.rag_service import rag_service
 from utils.timestamp_utils import utcnow_iso
 
@@ -19,6 +21,8 @@ class LLMService:
         alert_summaries: List[Dict[str, Any]],
         rag_context: str,
     ) -> str:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
         patrol_lines = "\n".join(
             f"- Guard {p.get('guard_id')}: {p.get('checkpoint_name')} | "
             f"compliant={p.get('compliant')} | dwell={p.get('dwell_time_seconds')}s"
@@ -33,6 +37,7 @@ class LLMService:
 
         return (
             "You are an industrial safety audit AI.\n"
+            f"Today's date is {today}. Use this exact date as the Audit Date in your report.\n"
             f"Generate a structured audit report for shift {shift_id}.\n\n"
             f"## Patrol Log\n{patrol_lines}\n\n"
             f"## Safety Alerts\n{alert_lines}\n\n"
@@ -41,14 +46,18 @@ class LLMService:
             "(2) key risk findings, (3) recommended corrective actions."
         )
 
-    def generate_report(
-        self,
-        shift_id: str,
-        patrol_summaries: List[Dict[str, Any]],
-        alert_summaries: List[Dict[str, Any]],
-    ) -> AuditReportRecord:
+    def get_reportable_shifts(self) -> List[Dict[str, Any]]:
+        return patrol_log_repository.get_reportable_shifts()
+
+    def generate_report(self, log_id: str) -> AuditReportRecord:
+        # log_id is the shift_id — fetch all checkpoint records for that shift
+        checkpoints = patrol_log_repository.get_by_shift(log_id)
+        if not checkpoints:
+            raise ValueError(f"No patrol data found for shift {log_id!r}")
+
+        shift_id = log_id
         rag_context = rag_service.get_context(f"shift {shift_id} safety audit")
-        prompt = self._build_prompt(shift_id, patrol_summaries, alert_summaries, rag_context)
+        prompt = self._build_prompt(shift_id, checkpoints, [], rag_context)
 
         report_text = provider.generate(prompt)
 
@@ -56,12 +65,13 @@ class LLMService:
             report_id=str(uuid.uuid4()),
             shift_id=shift_id,
             generated_at=utcnow_iso(),
-            patrol_summary=str(patrol_summaries),
-            alert_summary=str(alert_summaries),
+            patrol_summary=str(checkpoints),
+            alert_summary="[]",
             rag_examples_used=[rag_context],
             report_text=report_text,
             model_used=provider.get_model_name(),
         )
+
         audit_report_repository.save(record)
         return record
 

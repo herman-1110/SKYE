@@ -24,8 +24,21 @@ class APRepository:
         docs = self._col(building_id, floor_id).stream()
         return [AccessPoint(**d.to_dict()) for d in docs]
 
-    def delete(self, building_id: str, floor_id: str, ap_id: str) -> None:
-        self._col(building_id, floor_id).document(ap_id).delete()
+    def update_coordinates(self, building_id: str, floor_id: str, ap_id: str, x_m: float, y_m: float) -> None:
+        self._col(building_id, floor_id).document(ap_id).update({
+            "x_m": round(x_m, 4),
+            "y_m": round(y_m, 4),
+        })
+
+    def delete(self, building_id: str, floor_id: str, ap_id: str) -> str | None:
+        """Delete AP document from Firestore. Returns the AP's MAC address, or None if not found."""
+        doc_ref = self._col(building_id, floor_id).document(ap_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return None
+        mac = (doc.to_dict() or {}).get("mac")
+        doc_ref.delete()
+        return mac
 
 
 ap_repository = APRepository()

@@ -8,4 +8,6 @@ export interface FloorRecord {
   scale_pixels_per_meter: number | null;
   is_active: boolean;
   uploaded_at: string;
+  image_width_px?: number | null;
+  image_height_px?: number | null;
 }

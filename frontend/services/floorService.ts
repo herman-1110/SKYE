@@ -58,6 +58,19 @@ export async function uploadFloor(
   if (file.size > MAX_BYTES) throw new Error("File too large — maximum 10MB");
   if (!ALLOWED_TYPES.includes(file.type)) throw new Error("Invalid file type — PNG, JPG, PDF only");
 
+  // Read natural pixel dimensions before upload (images only; PDFs → null)
+  let image_width_px: number | null = null;
+  let image_height_px: number | null = null;
+  if (file.type.startsWith("image/")) {
+    const dims = await new Promise<{ w: number; h: number } | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(img.src); };
+      img.onerror = () => resolve(null);
+      img.src = URL.createObjectURL(file);
+    });
+    if (dims) { image_width_px = dims.w; image_height_px = dims.h; console.log("[uploadFloor] image dimensions:", dims.w, "×", dims.h); }
+  }
+
   if (!auth.currentUser) {
     await new Promise<void>((resolve) => {
       const unsub = onAuthStateChanged(auth, (u) => {
@@ -88,7 +101,7 @@ export async function uploadFloor(
         const res = await fetch(`/api/buildings/${buildingId}/floors`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${freshToken}` },
-          body: JSON.stringify({ name, floor_number: floorNumber, url, storage_path: storagePath }),
+          body: JSON.stringify({ name, floor_number: floorNumber, url, storage_path: storagePath, image_width_px, image_height_px }),
         });
         if (!res.ok) { reject(new Error(`Floor creation failed: ${res.status}`)); return; }
         resolve(await res.json());
@@ -135,6 +148,8 @@ export interface APRecord {
   x_pct: number;
   y_pct: number;
   created_at: string;
+  x_m: number;
+  y_m: number;
 }
 
 export interface CCTVRecord {
@@ -145,6 +160,7 @@ export interface CCTVRecord {
   x_pct: number;
   y_pct: number;
   created_at: string;
+  mac?: string | null;
 }
 
 export const listAPs = (buildingId: string, floorId: string): Promise<APRecord[]> =>
@@ -153,7 +169,7 @@ export const listAPs = (buildingId: string, floorId: string): Promise<APRecord[]
 export const createAP = (
   buildingId: string,
   floorId: string,
-  body: { name: string; mac: string; x_pct: number; y_pct: number },
+  body: { name: string; mac: string; x_pct: number; y_pct: number; x_m: number; y_m: number },
 ): Promise<APRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/aps`, body);
 
@@ -166,7 +182,7 @@ export const listCCTVs = (buildingId: string, floorId: string): Promise<CCTVReco
 export const createCCTV = (
   buildingId: string,
   floorId: string,
-  body: { name: string; x_pct: number; y_pct: number },
+  body: { name: string; x_pct: number; y_pct: number; mac?: string | null },
 ): Promise<CCTVRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`, body);
 

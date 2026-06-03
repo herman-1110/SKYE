@@ -7,6 +7,8 @@ class FloorCreateRequest(BaseModel):
     floor_number: int = 1
     url: str
     storage_path: str
+    image_width_px: Optional[int] = None
+    image_height_px: Optional[int] = None
 
 
 class FloorUpdateRequest(BaseModel):

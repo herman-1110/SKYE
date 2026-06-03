@@ -1,5 +1,6 @@
 import re
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
@@ -23,6 +24,8 @@ class APCreateRequest(BaseModel):
     mac: str
     x_pct: float
     y_pct: float
+    x_m: float = 0.0
+    y_m: float = 0.0
 
     @field_validator("mac")
     @classmethod
@@ -36,6 +39,16 @@ class CCTVCreateRequest(BaseModel):
     name: str
     x_pct: float
     y_pct: float
+    mac: Optional[str] = None
+
+    @field_validator("mac")
+    @classmethod
+    def validate_mac(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v.strip() == "":
+            return None
+        if not _MAC_RE.match(v.strip()):
+            raise ValueError("MAC must be in format XX:XX:XX:XX:XX:XX")
+        return v.strip().upper()
 
 router = APIRouter(prefix="/buildings/{building_id}/floors", tags=["floors"])
 
@@ -52,7 +65,7 @@ def create_floor(
     body: FloorCreateRequest,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    floor = floor_service.create(building_id, body.name, body.floor_number, body.url, body.storage_path)
+    floor = floor_service.create(building_id, body.name, body.floor_number, body.url, body.storage_path, body.image_width_px, body.image_height_px)
     return floor.__dict__
 
 
@@ -143,6 +156,8 @@ def create_ap(
         x_pct=body.x_pct,
         y_pct=body.y_pct,
         created_at=utcnow_iso(),
+        x_m=body.x_m,
+        y_m=body.y_m,
     )
     ap_repository.save(building_id, floor_id, ap)
     return ap.__dict__
@@ -155,7 +170,7 @@ def delete_ap(
     ap_id: str,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    ap_repository.delete(building_id, floor_id, ap_id)
+    floor_service.delete_ap(building_id, floor_id, ap_id)
     return {"status": "ok"}
 
 
@@ -186,6 +201,7 @@ def create_cctv(
         x_pct=body.x_pct,
         y_pct=body.y_pct,
         created_at=utcnow_iso(),
+        mac=body.mac,
     )
     cctv_repository.save(building_id, floor_id, cctv)
     return cctv.__dict__

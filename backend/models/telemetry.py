@@ -17,3 +17,4 @@ class OmadaTelemetryPayload:
     readings: List[APRssiReading] = field(default_factory=list)
     person_id: str = ""
     person_type: str = "worker"   # "guard" | "worker" | "forklift"
+    label: str = ""

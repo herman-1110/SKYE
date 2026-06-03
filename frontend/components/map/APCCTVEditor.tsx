@@ -42,6 +42,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [apMac, setApMac] = useState("");
   const [macError, setMacError] = useState("");
   const [cctvName, setCctvName] = useState("");
+  const [cctvMac, setCctvMac] = useState("");
+  const [cctvMacError, setCctvMacError] = useState("");
   const apStatuses = useAPHeartbeats();
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -67,12 +69,18 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     if (!isValidMac(apMac))    { setMacError("Invalid MAC address format"); return; }
     setMacError("");
     setSaving(true);
+    const scale = floor.scale_pixels_per_meter;
+    const img = imgRef.current;
+    const x_m = scale && img ? (pendingPct.x * img.naturalWidth)  / scale : 0;
+    const y_m = scale && img ? (pendingPct.y * img.naturalHeight) / scale : 0;
     try {
       const ap = await createAP(buildingId, floor.id, {
         name: apName.trim() || "AP",
         mac: apMac,
         x_pct: pendingPct.x,
         y_pct: pendingPct.y,
+        x_m,
+        y_m,
       });
       setAps((prev) => [...prev, ap]);
       toast.success(`AP "${ap.name}" placed`);
@@ -90,16 +98,21 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
   const handleSaveCCTV = async () => {
     if (!pendingPct) return;
+    const hasHex = cctvMac.replace(/[^0-9A-Fa-f]/g, "").length > 0;
+    if (hasHex && !isCompleteMac(cctvMac)) { setCctvMacError("Please complete all 6 MAC address segments"); return; }
+    if (hasHex && !isValidMac(cctvMac))    { setCctvMacError("Invalid MAC address format"); return; }
+    setCctvMacError("");
     setSaving(true);
     try {
       const cctv = await createCCTV(buildingId, floor.id, {
         name: cctvName.trim() || "CCTV",
         x_pct: pendingPct.x,
         y_pct: pendingPct.y,
+        mac: hasHex ? cctvMac : null,
       });
       setCctvs((prev) => [...prev, cctv]);
       toast.success(`CCTV "${cctv.name}" placed`);
-      setPendingPct(null); setCctvName(""); setPlacementMode(null);
+      setPendingPct(null); setCctvName(""); setCctvMac(""); setCctvMacError(""); setPlacementMode(null);
     } catch { toast.error("Failed to place CCTV"); }
     finally { setSaving(false); }
   };
@@ -119,17 +132,25 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   };
 
   const cancelPlacement = () => {
-    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setCctvName("");
+    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setCctvName(""); setCctvMac(""); setCctvMacError("");
   };
 
   return (
     <div className="space-y-4">
+      {/* Calibration guard */}
+      {!floor.scale_pixels_per_meter && (
+        <div className="calibration-warning">
+          ⚠ This floor is not calibrated. Calibrate before placing APs or CCTVs.
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-mono text-[10px] text-s-muted tracking-widest uppercase mr-1">Devices</span>
         <button
           onClick={() => setPlacementMode(placementMode === "ap" ? null : "ap")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors ${placementMode === "ap" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
+          disabled={!floor.scale_pixels_per_meter}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "ap" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
@@ -138,7 +159,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         </button>
         <button
           onClick={() => setPlacementMode(placementMode === "cctv" ? null : "cctv")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors ${placementMode === "cctv" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
+          disabled={!floor.scale_pixels_per_meter}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "cctv" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
@@ -333,6 +355,16 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
               <div className="space-y-1">
                 <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">Camera Name</label>
                 <input autoFocus type="text" placeholder="e.g. VIGI-C540" value={cctvName} onChange={(e) => setCctvName(e.target.value)} className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors" />
+              </div>
+              <div className="space-y-1">
+                <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+                  MAC Address <span className="text-s-muted">(optional)</span>
+                </label>
+                <MacAddressInput
+                  value={cctvMac}
+                  onChange={(mac) => { setCctvMac(mac); setCctvMacError(""); }}
+                  error={cctvMacError}
+                />
               </div>
             </div>
             <div className="flex gap-2 px-5 py-4 border-t border-s-border">

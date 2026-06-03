@@ -13,3 +13,5 @@ class FloorRecord:
     is_active: bool
     uploaded_at: str
     scale_pixels_per_meter: Optional[float] = None
+    image_width_px: Optional[int] = None
+    image_height_px: Optional[int] = None

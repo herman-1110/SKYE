@@ -17,9 +17,11 @@ interface Props {
   alerts: AlertRecord[];
   selectedId: string | null;
   onSelectAlert: (alert: AlertRecord) => void;
+  onDelete?: (id: string) => void;
+  deletingId?: string | null;
 }
 
-export default function AlertList({ alerts, selectedId, onSelectAlert }: Props) {
+export default function AlertList({ alerts, selectedId, onSelectAlert, onDelete, deletingId }: Props) {
   const [filter, setFilter] = useState<Filter>("all");
 
   const filtered = filter === "all" ? alerts : alerts.filter((a) => a.alert_type === filter);
@@ -56,6 +58,8 @@ export default function AlertList({ alerts, selectedId, onSelectAlert }: Props) 
               alert={a}
               selected={a.alert_id === selectedId}
               onClick={() => onSelectAlert(a)}
+              onDelete={onDelete}
+              deletingId={deletingId}
             />
           ))}
         </div>

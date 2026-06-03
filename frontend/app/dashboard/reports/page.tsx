@@ -1,25 +1,63 @@
 "use client";
-import { useEffect, useState } from "react";
-import { subscribeToReports, unsubscribeFromReports, generateReport } from "@/services/reportService";
-import { getDistinctShifts, type ShiftOption } from "@/services/patrolLogService";
+import React, { useEffect, useState } from "react";
+import { subscribeToReports, unsubscribeFromReports, generateReport, fetchReportableShifts, type ReportableShift } from "@/services/reportService";
 import type { AuditReportRecord } from "@/types/auditReport";
 import ReportCard from "@/components/reports/ReportCard";
 import { toast } from "@/store/toastStore";
 import { useDashboardStore } from "@/store/dashboardStore";
 
+function inlineParse(line: string): React.ReactNode {
+  const parts = line.split("**");
+  return parts.map((part, i) =>
+    i % 2 === 1
+      ? <strong key={i} className="font-semibold text-s-text">{part}</strong>
+      : <span key={i}>{part}</span>
+  );
+}
+
 function SimpleMarkdown({ text }: { text: string }) {
   return (
-    <div className="space-y-1.5 text-sm text-s-text leading-relaxed">
+    <div className="space-y-2 text-sm text-s-text leading-relaxed">
       {text.split("\n").map((line, i) => {
+        if (line.startsWith("# "))
+          return (
+            <h1 key={i} className="font-bold text-s-text text-lg mt-4 mb-2 leading-snug">
+              {inlineParse(line.slice(2))}
+            </h1>
+          );
         if (line.startsWith("## "))
-          return <h2 key={i} className="font-bold text-s-accent font-mono text-xs tracking-widest uppercase mt-4 mb-1">{line.slice(3)}</h2>;
+          return (
+            <h2 key={i} className="font-bold text-s-accent font-mono text-xs tracking-widest uppercase mt-5 mb-2 border-b border-s-border pb-1">
+              {line.slice(3)}
+            </h2>
+          );
         if (line.startsWith("### "))
-          return <h3 key={i} className="font-semibold text-s-text text-xs mt-3 mb-0.5">{line.slice(4)}</h3>;
+          return (
+            <h3 key={i} className="font-semibold text-s-text text-sm mt-3 mb-1">
+              {inlineParse(line.slice(4))}
+            </h3>
+          );
+        if (line.trim() === "---")
+          return <hr key={i} className="border-s-border my-3" />;
         if (line.startsWith("- ") || line.startsWith("* "))
-          return <li key={i} className="ml-4 list-disc text-s-muted text-xs">{line.slice(2)}</li>;
+          return (
+            <li key={i} className="ml-5 list-disc text-s-text text-sm leading-relaxed">
+              {inlineParse(line.slice(2))}
+            </li>
+          );
+        if (/^\d+\.\s/.test(line))
+          return (
+            <p key={i} className="ml-2 text-s-text text-sm leading-relaxed">
+              {inlineParse(line)}
+            </p>
+          );
         if (line.trim() === "")
-          return <div key={i} className="h-1" />;
-        return <p key={i} className="text-xs text-s-muted">{line}</p>;
+          return <div key={i} className="h-2" />;
+        return (
+          <p key={i} className="text-s-text text-sm leading-relaxed">
+            {inlineParse(line)}
+          </p>
+        );
       })}
     </div>
   );
@@ -29,8 +67,9 @@ export default function ReportsPage() {
   const { cachedReports, setCachedReports } = useDashboardStore();
   const [reports, setReports] = useState<AuditReportRecord[]>(cachedReports);
   const [selected, setSelected] = useState<AuditReportRecord | null>(null);
-  const [shifts, setShifts] = useState<ShiftOption[]>([]);
-  const [shiftId, setShiftId] = useState("");
+  const [shifts, setShifts] = useState<ReportableShift[]>([]);
+  const [selectedLogId, setSelectedLogId] = useState("");
+  const [loadingShifts, setLoadingShifts] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(cachedReports.length === 0);
@@ -41,15 +80,16 @@ export default function ReportsPage() {
       setCachedReports(data);
       setIsLoading(false);
     });
-    getDistinctShifts().then(setShifts).catch(() => {});
+    setLoadingShifts(true);
+    fetchReportableShifts().then(setShifts).catch(() => {}).finally(() => setLoadingShifts(false));
     return () => unsubscribeFromReports();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleGenerate() {
-    if (!shiftId.trim()) return;
+    if (!selectedLogId) return;
     setGenerating(true);
     try {
-      await generateReport({ shift_id: shiftId.trim(), patrol_summaries: [], alert_summaries: [] });
+      await generateReport({ log_id: selectedLogId });
       toast.success("Report generated successfully");
     } catch {
       toast.error("Failed to generate report");
@@ -91,31 +131,32 @@ export default function ReportsPage() {
 
         {/* Shift selector + generate */}
         <div className="flex gap-2">
-          {shifts.length > 0 ? (
+          {loadingShifts ? (
+            <p className="flex-1 text-s-muted text-xs font-mono px-3 py-2">Loading shifts…</p>
+          ) : shifts.length === 0 ? (
+            <p className="flex-1 text-s-muted text-xs font-mono px-3 py-2">No completed patrol shifts available. Run a simulation first.</p>
+          ) : (
             <select
-              value={shiftId}
-              onChange={(e) => setShiftId(e.target.value)}
+              value={selectedLogId}
+              onChange={(e) => setSelectedLogId(e.target.value)}
               className="flex-1 bg-s-surface border border-s-border rounded-lg px-3 py-2 text-xs text-s-text font-mono focus:outline-none focus:border-s-accent"
             >
-              <option value="">Select shift…</option>
-              {shifts.map((s) => (
-                <option key={s.shift_id} value={s.shift_id}>
-                  {s.shift_id} · {s.guard_id} · {s.date}
-                </option>
-              ))}
+              <option value="">Select a shift…</option>
+              {shifts.map((s) => {
+                const start = s.shift_start
+                  ? new Date(s.shift_start * 1000).toLocaleString()
+                  : "Unknown start";
+                return (
+                  <option key={s.log_id} value={s.log_id}>
+                    {s.guard_label} — {start}
+                  </option>
+                );
+              })}
             </select>
-          ) : (
-            <input
-              type="text"
-              value={shiftId}
-              onChange={(e) => setShiftId(e.target.value)}
-              placeholder="Enter shift ID…"
-              className="flex-1 bg-s-surface border border-s-border rounded-lg px-3 py-2 text-xs text-s-text font-mono placeholder:text-s-muted focus:outline-none focus:border-s-accent"
-            />
           )}
           <button
             onClick={handleGenerate}
-            disabled={!shiftId.trim() || generating}
+            disabled={!selectedLogId || generating}
             className="px-3 py-2 bg-s-accent text-s-base rounded-lg text-xs font-bold font-mono disabled:opacity-40 hover:opacity-90 transition-opacity flex items-center gap-1.5 whitespace-nowrap"
           >
             {generating && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
@@ -149,9 +190,9 @@ export default function ReportsPage() {
             {/* Header */}
             <div className="flex items-start justify-between p-4 border-b border-s-border">
               <div>
-                <p className="font-mono text-xs text-s-accent tracking-widest">Shift {selected.shift_id}</p>
-                <p className="font-mono text-[10px] text-s-muted mt-0.5">{selected.generated_at}</p>
-                <p className="font-mono text-[10px] text-s-muted">{selected.model_used}</p>
+                <p className="font-mono text-sm text-s-accent tracking-widest font-semibold">Shift {selected.shift_id}</p>
+                <p className="font-mono text-xs text-s-muted mt-0.5">{selected.generated_at}</p>
+                <p className="font-mono text-xs text-s-muted">{selected.model_used}</p>
               </div>
               <button
                 onClick={handleCopy}

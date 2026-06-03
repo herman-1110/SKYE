@@ -2,7 +2,9 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from models.floor import FloorRecord
+from repositories.ap_repository import ap_repository
 from repositories.floor_repository import floor_repository
+from repositories.position_repository import position_repository
 from repositories.zone_repository import zone_repository
 from services.positioning_service import positioning_service
 from firebase_admin import storage
@@ -21,6 +23,8 @@ class FloorService:
         floor_number: int,
         url: str,
         storage_path: str,
+        image_width_px: Optional[int] = None,
+        image_height_px: Optional[int] = None,
     ) -> FloorRecord:
         if not name or not name.strip():
             existing = floor_repository.get_all(building_id)
@@ -34,6 +38,8 @@ class FloorService:
             storage_path=storage_path,
             is_active=False,
             uploaded_at=utcnow_iso(),
+            image_width_px=image_width_px,
+            image_height_px=image_height_px,
         )
         return floor_repository.save(floor)
 
@@ -42,6 +48,19 @@ class FloorService:
             raise ValueError("scale_pixels_per_meter must be positive")
         floor_repository.update_scale(building_id, floor_id, scale)
         positioning_service.invalidate_scale_cache()
+        self._recalculate_ap_coordinates(building_id, floor_id, scale)
+
+    def _recalculate_ap_coordinates(self, building_id: str, floor_id: str, scale: float) -> None:
+        floor = floor_repository.get_by_id(building_id, floor_id)
+        if not floor or not floor.image_width_px or not floor.image_height_px:
+            print(f"[CALIBRATION] Floor {floor_id} missing image dimensions — AP coordinates not recalculated")
+            return
+        aps = ap_repository.get_all(building_id, floor_id)
+        for ap in aps:
+            new_x_m = ap.x_pct * floor.image_width_px  / scale
+            new_y_m = ap.y_pct * floor.image_height_px / scale
+            ap_repository.update_coordinates(building_id, floor_id, ap.id, new_x_m, new_y_m)
+        print(f"[CALIBRATION] Recalculated coordinates for {len(aps)} AP(s) on floor '{floor.name}' → {scale} px/m")
 
     def set_active(self, building_id: str, floor_id: str) -> None:
         floor_repository.set_active(building_id, floor_id)
@@ -76,6 +95,11 @@ class FloorService:
                 
         # 3. Delete floor document
         floor_repository.delete(building_id, floor_id)
+
+    def delete_ap(self, building_id: str, floor_id: str, ap_id: str) -> None:
+        mac = ap_repository.delete(building_id, floor_id, ap_id)
+        if mac:
+            position_repository.delete_ap_heartbeat(mac)
 
 
 floor_service = FloorService()

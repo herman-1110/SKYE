@@ -26,6 +26,8 @@ class FloorRepository:
             is_active=bool(data.get("is_active", False)),
             uploaded_at=data["uploaded_at"],
             scale_pixels_per_meter=data.get("scale_pixels_per_meter"),
+            image_width_px=int(data["image_width_px"]) if data.get("image_width_px") else None,
+            image_height_px=int(data["image_height_px"]) if data.get("image_height_px") else None,
         )
 
     def save(self, floor: FloorRecord) -> FloorRecord:

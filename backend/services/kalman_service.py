@@ -34,15 +34,53 @@ class KalmanService:
         kf.P = np.eye(4) * 10.0
         return kf
 
-    def update(self, x: float, y: float) -> Tuple[float, float]:
-        """Apply a new (x, y) measurement and return the Kalman-smoothed position."""
+    def update(
+        self,
+        x: float,
+        y: float,
+        outlier_threshold_m: float = 8.0,
+    ) -> Tuple[float, float]:
+        """
+        Apply a new (x, y) measurement and return the Kalman-smoothed position.
+        Measurements further than outlier_threshold_m from the current estimate
+        are rejected to prevent noisy multilateration from corrupting the filter.
+        """
         z = np.array([[x], [y]], dtype=float)
+
         if not self._initialised:
             self._kf.x = np.array([[x], [y], [0.0], [0.0]], dtype=float)
             self._initialised = True
+            self._kf.predict()
+            self._kf.update(z)
+            return float(self._kf.x[0, 0]), float(self._kf.x[1, 0])
+
+        # Outlier rejection — compare against current smoothed position
+        est_x = float(self._kf.x[0, 0])
+        est_y = float(self._kf.x[1, 0])
+        dist = float(np.sqrt((x - est_x) ** 2 + (y - est_y) ** 2))
+        if dist > outlier_threshold_m:
+            # Bad measurement — run predict only, do not corrupt state
+            self._kf.predict()
+            return est_x, est_y
+
         self._kf.predict()
         self._kf.update(z)
         return float(self._kf.x[0, 0]), float(self._kf.x[1, 0])
+
+    def clamp_state(
+        self,
+        x_min: float, x_max: float,
+        y_min: float, y_max: float,
+    ) -> None:
+        """
+        Clamp the Kalman filter's internal position state to floor bounds.
+        Must be called after update() to prevent out-of-bounds values from
+        propagating into future predictions via _kf.x.
+        """
+        if not self._initialised:
+            return
+        self._kf.x[0, 0] = float(np.clip(self._kf.x[0, 0], x_min, x_max))
+        self._kf.x[1, 0] = float(np.clip(self._kf.x[1, 0], y_min, y_max))
 
     def predict_ahead(self, seconds: float = 3.0) -> Tuple[float, float]:
         """Project current state forward by `seconds` for pre-emptive collision alerting (FR4)."""

@@ -6,6 +6,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { fsdb } from "@/config/firebase";
+import { authFetch } from "@/utils/apiClient";
 import type { AuditReportRecord } from "@/types/auditReport";
 
 type Callback = (reports: AuditReportRecord[]) => void;
@@ -27,16 +28,24 @@ export function unsubscribeFromReports(): void {
   _unsubscribe = null;
 }
 
-interface GenerateParams {
-  shift_id: string;
-  patrol_summaries: object[];
-  alert_summaries: object[];
+export interface ReportableShift {
+  log_id: string;
+  guard_id: string;
+  guard_label: string;
+  shift_start: number | null;
+  shift_end: number | null;
 }
 
-export async function generateReport(params: GenerateParams): Promise<AuditReportRecord> {
-  const res = await fetch("/api/reports/generate", {
+export async function fetchReportableShifts(): Promise<ReportableShift[]> {
+  const res = await authFetch("/api/reports/shifts");
+  if (!res.ok) throw new Error(`Failed to fetch shifts: ${res.status}`);
+  const data = await res.json();
+  return data.shifts ?? [];
+}
+
+export async function generateReport(params: { log_id: string }): Promise<AuditReportRecord> {
+  const res = await authFetch("/api/reports/generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   });
   if (!res.ok) throw new Error(`Report generation failed: ${res.status}`);

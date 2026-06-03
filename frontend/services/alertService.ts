@@ -1,6 +1,7 @@
-import { type DataSnapshot, off, onValue, ref } from "firebase/database";
+import { type DataSnapshot, off, onValue, ref, remove } from "firebase/database";
 import { db } from "@/config/firebase";
 import type { AlertRecord, FeedbackValue } from "@/types/alert";
+import { authFetch } from "@/utils/apiClient";
 
 type Callback = (alerts: Record<string, AlertRecord>) => void;
 
@@ -19,15 +20,21 @@ export function unsubscribeFromAlerts(): void {
   _off = null;
 }
 
+export async function deleteAlert(alertId: string): Promise<void> {
+  await remove(ref(db, `alerts/${alertId}`));
+}
+
 export async function submitFeedback(
   alertId: string,
   feedback: FeedbackValue,
   reason: string,
 ): Promise<void> {
-  const res = await fetch(`/api/alerts/${alertId}/feedback`, {
+  const res = await authFetch(`/api/alerts/${alertId}/feedback`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ feedback, reason }),
+    body: JSON.stringify({
+      feedback,
+      reason: reason.trim() === "" ? null : reason.trim(),
+    }),
   });
   if (!res.ok) throw new Error(`Feedback submission failed: ${res.status}`);
 }
