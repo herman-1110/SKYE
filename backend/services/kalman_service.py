@@ -82,6 +82,13 @@ class KalmanService:
         self._kf.x[0, 0] = float(np.clip(self._kf.x[0, 0], x_min, x_max))
         self._kf.x[1, 0] = float(np.clip(self._kf.x[1, 0], y_min, y_max))
 
+    def reset(self) -> None:
+        """Clear internal state so the next measurement re-initialises the filter
+        from scratch. Call this when a beacon reappears after a long gap."""
+        self._initialised = False
+        self._kf.P = np.eye(4) * 10.0
+        self._kf.x = np.zeros((4, 1), dtype=float)
+
     def predict_ahead(self, seconds: float = 3.0) -> Tuple[float, float]:
         """Project current state forward by `seconds` for pre-emptive collision alerting (FR4)."""
         steps = max(1, round(seconds / self._dt))

@@ -38,11 +38,11 @@ BACKEND_URL        = "http://localhost:8000"
 TELEMETRY_ENDPOINT = f"{BACKEND_URL}/telemetry"
 
 # How long (in ticks) a guard wanders within an AP zone before moving on
-WANDER_TICKS_MIN = 2
-WANDER_TICKS_MAX = 2
+WANDER_TICKS_MIN = 5
+WANDER_TICKS_MAX = 8
 
 # Wander radius around each AP in metres
-WANDER_RADIUS_M = 2.5
+WANDER_RADIUS_M = 2.0
 
 SIMULATED_CCTVS: List[Dict] = [
     {"mac": "A8:57:4E:3C:11:01", "name": "VIGI C340 (Sim)"},
@@ -51,7 +51,6 @@ SIMULATED_CCTVS: List[Dict] = [
 # ── Mutable state ─────────────────────────────────────────────────────────
 _floor_aps: List[Dict] = []
 _BOUNDARY: Dict[str, float] = {"x_min": 0.0, "x_max": 12.0, "y_min": 0.0, "y_max": 10.0}
-_shift_id: str = ""
 
 SIMULATED_BEACONS: List[Dict] = [
     {
@@ -63,6 +62,9 @@ SIMULATED_BEACONS: List[Dict] = [
         "wander_ticks": 0,     # ticks remaining in current AP zone
         "state": "moving",     # "moving" | "wandering"
         "wander_target": None,
+        "shift_id": "",        # rotates every time this guard completes a full loop
+        "loops_completed": 0,  # increments on each full loop completion
+        "checkpoints_this_loop": 0,   # counts AP visits in current loop; resets on loop completion
     },
     {
         "mac": "AA:BB:CC:DD:EE:04", "person_id": "guard-002",
@@ -73,6 +75,9 @@ SIMULATED_BEACONS: List[Dict] = [
         "wander_ticks": 0,
         "state": "moving",
         "wander_target": None,
+        "shift_id": "",        # rotates every time this guard completes a full loop
+        "loops_completed": 0,  # increments on each full loop completion
+        "checkpoints_this_loop": 0,   # counts AP visits in current loop; resets on loop completion
     },
 ]
 
@@ -92,6 +97,7 @@ def remove_ap(mac: str) -> None:
             beacon["current_ap_idx"] = beacon["current_ap_idx"] % len(beacon["ap_order"])
         else:
             beacon["current_ap_idx"] = 0
+        beacon["checkpoints_this_loop"] = 0
 
 # ── Firebase init ─────────────────────────────────────────────────────────
 def _init_firebase_if_needed() -> None:
@@ -125,11 +131,11 @@ def _clamp_position(x: float, y: float) -> tuple[float, float]:
     )
 
 def _move_toward(beacon: Dict, tx: float, ty: float, speed: float) -> bool:
-    """Move beacon toward target. Returns True when arrived (within 0.3m)."""
+    """Move beacon toward target. Returns True when arrived (within 0.5m)."""
     dx = tx - beacon["x_m"]
     dy = ty - beacon["y_m"]
     d = math.sqrt(dx * dx + dy * dy)
-    if d < 0.3:
+    if d < 0.5:
         beacon["vx"] = 0.0
         beacon["vy"] = 0.0
         return True
@@ -141,15 +147,21 @@ def _move_toward(beacon: Dict, tx: float, ty: float, speed: float) -> bool:
     return False
 
 def _scale_speed(base: float) -> float:
-    """Scale speed to floor size so movement looks natural on any floor."""
-    if not _floor_aps:
+    """Scale speed proportionally to actual AP spread so movement is
+    visible regardless of floor size. Falls back to base if < 2 APs."""
+    if len(_floor_aps) < 2:
         return base
     xs = [ap["x_m"] for ap in _floor_aps]
     ys = [ap["y_m"] for ap in _floor_aps]
-    w = max(xs) - min(xs) + WANDER_RADIUS_M * 2
-    h = max(ys) - min(ys) + WANDER_RADIUS_M * 2
-    scale = math.sqrt((w * h) / (12.0 * 10.0))
-    return min(base * scale, base * 1.5)
+    w = max(xs) - min(xs)
+    h = max(ys) - min(ys)
+    spread = math.sqrt(w * w + h * h)          # diagonal of AP bounding box
+    if spread < 1.0:
+        return base
+    # Target: cross the full AP spread in ~10 ticks at base speed
+    natural_speed = spread / 10.0
+    # Allow up to 2× the natural speed; never below base
+    return max(base, min(natural_speed, base * 2.0))
 
 def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
     """
@@ -163,7 +175,7 @@ def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
             ap["y_m"] + random.uniform(-WANDER_RADIUS_M, WANDER_RADIUS_M),
         )
     tx, ty = beacon["wander_target"]
-    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.3))
+    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.4))
     if arrived:
         beacon["wander_target"] = None
 
@@ -204,9 +216,22 @@ def _write_patrol_log(beacon: Dict, ap: Dict) -> None:
         ble_detected=True,
         vigi_detected=True,
         compliant=True,
-        shift_id=_shift_id,
+        shift_id=beacon["shift_id"],
     )
     patrol_log_repository.save(record)
+
+# ── Per-guard shift rotation ──────────────────────────────────────────────
+def _rotate_shift(beacon: Dict) -> None:
+    """Assign a new shift_id to this guard after completing a full loop."""
+    old = beacon["shift_id"]
+    beacon["shift_id"] = f"shift-{uuid.uuid4().hex[:8]}"
+    print(
+        f"[SIM] ── {beacon['label']} shift complete "
+        f"(loop {beacon['loops_completed']}) ──────────────────"
+    )
+    print(f"[SIM]    Closed : {old}")
+    print(f"[SIM]    New    : {beacon['shift_id']}")
+    print(f"[SIM] ───────────────────────────────────────────────────────────")
 
 # ── Guard patrol tick ─────────────────────────────────────────────────────
 def _tick_guard(beacon: Dict) -> None:
@@ -219,32 +244,51 @@ def _tick_guard(beacon: Dict) -> None:
     if not ap_order:
         return
 
-    current_ap = _floor_aps[ap_order[beacon["current_ap_idx"] % len(ap_order)]]
+    current_ap = _floor_aps[ap_order[beacon["current_ap_idx"]]]
 
     if beacon["state"] == "moving":
         arrived = _move_toward(
             beacon, current_ap["x_m"], current_ap["y_m"],
-            speed=_scale_speed(0.4)
+            speed=_scale_speed(0.6)
         )
         if arrived:
             beacon["state"] = "wandering"
             beacon["wander_ticks"] = random.randint(WANDER_TICKS_MIN, WANDER_TICKS_MAX)
-            _write_patrol_log(beacon, current_ap)
+            try:
+                _write_patrol_log(beacon, current_ap)
+            except Exception as e:
+                print(f"[SIM] WARNING: patrol log write failed for {beacon['label']} "
+                      f"at {current_ap['name']}: {e}")
             print(f"[SIM] {beacon['label']:12s} arrived at {current_ap['name']} — wandering for {beacon['wander_ticks']} ticks")
 
     elif beacon["state"] == "wandering":
         _wander_within_ap(beacon, current_ap)
         beacon["wander_ticks"] -= 1
         if beacon["wander_ticks"] <= 0:
-            beacon["current_ap_idx"] += 1
+            beacon["checkpoints_this_loop"] += 1
+            n_aps = len(beacon["ap_order"])
+
+            if beacon["checkpoints_this_loop"] >= n_aps:
+                beacon["loops_completed"] += 1
+                beacon["checkpoints_this_loop"] = 0
+                beacon["current_ap_idx"] = 0
+                try:
+                    _rotate_shift(beacon)
+                except Exception as e:
+                    print(f"[SIM] WARNING: shift rotation failed for {beacon['label']}: {e}")
+                    beacon["shift_id"] = f"shift-{uuid.uuid4().hex[:8]}"
+            else:
+                beacon["current_ap_idx"] = (beacon["current_ap_idx"] + 1) % n_aps
+
             beacon["state"] = "moving"
             beacon["wander_target"] = None
-            next_ap = _floor_aps[ap_order[beacon["current_ap_idx"] % len(ap_order)]]
+
+            next_ap = _floor_aps[beacon["ap_order"][beacon["current_ap_idx"]]]
             print(f"[SIM] {beacon['label']:12s} moving to {next_ap['name']}")
 
 # ── Main loop ─────────────────────────────────────────────────────────────
 async def run_simulation() -> None:
-    global _floor_aps, _BOUNDARY, _shift_id
+    global _floor_aps, _BOUNDARY
 
     _init_firebase_if_needed()
 
@@ -303,21 +347,36 @@ async def run_simulation() -> None:
     # Both guards follow the configured route in order.
     # Guard Beta starts mid-route so they are offset and don't overlap.
     mid = n // 2
-    SIMULATED_BEACONS[0]["ap_order"] = list(range(n))
-    SIMULATED_BEACONS[0]["x_m"] = _floor_aps[0]["x_m"]
-    SIMULATED_BEACONS[0]["y_m"] = _floor_aps[0]["y_m"]
-    SIMULATED_BEACONS[0]["current_ap_idx"] = 0
 
-    SIMULATED_BEACONS[1]["ap_order"] = list(range(n))   # same route
-    SIMULATED_BEACONS[1]["x_m"] = _floor_aps[mid]["x_m"]
-    SIMULATED_BEACONS[1]["y_m"] = _floor_aps[mid]["y_m"]
-    SIMULATED_BEACONS[1]["current_ap_idx"] = mid         # start mid-route
+    # Starting AP index per guard
+    start_indices = [0, mid]
+    start_aps     = [_floor_aps[0], _floor_aps[mid]]
+
+    for i, beacon in enumerate(SIMULATED_BEACONS):
+        beacon["ap_order"]        = list(range(n))
+        beacon["current_ap_idx"]  = start_indices[i]
+        beacon["x_m"]             = start_aps[i]["x_m"]
+        beacon["y_m"]             = start_aps[i]["y_m"]
+        beacon["vx"]              = 0.0
+        beacon["vy"]              = 0.0
+        beacon["state"]           = "moving"
+        beacon["wander_ticks"]    = 0
+        beacon["wander_target"]   = None
+        beacon["shift_id"]             = f"shift-{uuid.uuid4().hex[:8]}"
+        beacon["loops_completed"]      = 0
+        # A guard starting at mid-route has already "skipped" start_indices[i] APs.
+        # Pre-fill checkpoints_this_loop so loop completion fires correctly.
+        beacon["checkpoints_this_loop"] = start_indices[i]
 
     route_str = " → ".join(_floor_aps[i]["name"] for i in range(n))
     print(f"[SIM] Guard Alpha: {route_str} → loop (start: AP 1)")
     print(f"[SIM] Guard Beta:  {route_str} → loop (start: AP {mid + 1})")
-    _shift_id = f"shift-{uuid.uuid4().hex[:8]}"
-    print(f"[SIM] Pure Patrol simulation started  shift={_shift_id}. Ctrl+C to stop.")
+
+    print(f"[SIM] Pure Patrol simulation started. Ctrl+C to stop.")
+    for beacon in SIMULATED_BEACONS:
+        print(f"[SIM]   {beacon['label']:12s} initial shift: {beacon['shift_id']}")
+    print(f"[SIM] Computed moving speed : {_scale_speed(0.6):.3f} m/tick")
+    print(f"[SIM] Computed wander speed : {_scale_speed(0.4):.3f} m/tick")
 
     token = settings.OMADA_ACCESS_TOKEN
     headers = {"Authorization": f"Bearer {token}"}
@@ -333,7 +392,8 @@ async def run_simulation() -> None:
     ]
     print("[SIM] Clearing stale RTDB positions…")
     for mac in ALL_SIMULATED_MACS:
-        rtdb.reference(f"/positions/{mac}").delete()
+        key = mac.replace(":", "_")
+        rtdb.reference(f"/positions/{key}").delete()
     print("[SIM] Stale positions cleared.")
 
     async with httpx.AsyncClient() as client:
@@ -341,7 +401,12 @@ async def run_simulation() -> None:
             _write_heartbeats()
 
             for beacon in SIMULATED_BEACONS:
-                _tick_guard(beacon)
+                try:
+                    _tick_guard(beacon)
+                except Exception as e:
+                    print(f"[SIM] ERROR in _tick_guard for {beacon['label']}: {e}")
+                    beacon["state"] = "moving"
+                    beacon["wander_target"] = None
 
             now_ts = utcnow_iso()
             for beacon in SIMULATED_BEACONS:
@@ -350,7 +415,7 @@ async def run_simulation() -> None:
                 try:
                     resp = await client.post(TELEMETRY_ENDPOINT, json=payload,
                                              headers=headers, timeout=5.0)
-                    print(f"[SIM] tick {tick:4d} | {beacon['label']:12s} → {resp.status_code} ({n_readings} APs)")
+                    print(f"[SIM] tick {tick:4d} | {beacon['label']:12s} → {resp.status_code} ({n_readings} APs) | pos=({beacon['x_m']:.2f}m, {beacon['y_m']:.2f}m)")
                 except Exception as e:
                     print(f"[SIM] {beacon['label']} send failed: {e}")
 

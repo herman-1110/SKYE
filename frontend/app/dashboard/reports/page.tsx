@@ -251,7 +251,7 @@ export default function ReportsPage() {
               {/* Header */}
               <div className="flex items-start justify-between p-4 border-b border-s-border">
                 <div>
-                  <p className="font-mono text-sm text-s-accent tracking-widest font-semibold">Shift {selected.shift_id}</p>
+                  <p className="font-mono text-sm text-s-accent tracking-widest font-semibold">{selected.shift_id}</p>
                   {selected.guard_id && (
                     <p className="font-mono text-xs text-s-muted mt-0.5">Guard: {selected.guard_id}</p>
                   )}

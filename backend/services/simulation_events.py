@@ -38,9 +38,9 @@ from utils.timestamp_utils import utcnow_iso
 TICK_INTERVAL_S  = 1.0
 BACKEND_URL      = "http://localhost:8000"
 TELEMETRY_ENDPOINT = f"{BACKEND_URL}/telemetry"
-WANDER_TICKS_MIN = 2
-WANDER_TICKS_MAX = 4
-WANDER_RADIUS_M  = 2.5
+WANDER_TICKS_MIN = 5
+WANDER_TICKS_MAX = 8
+WANDER_RADIUS_M  = 2.0
 
 SIMULATED_CCTVS: List[Dict] = [
     {"mac": "A8:57:4E:3C:11:01", "name": "VIGI C340 (Sim)"},
@@ -156,7 +156,7 @@ def _move_toward(beacon: Dict, tx: float, ty: float, speed: float) -> bool:
     dx = tx - beacon["x_m"]
     dy = ty - beacon["y_m"]
     d = math.sqrt(dx * dx + dy * dy)
-    if d < 0.3:
+    if d < 0.5:
         beacon["vx"] = 0.0
         beacon["vy"] = 0.0
         return True
@@ -168,14 +168,21 @@ def _move_toward(beacon: Dict, tx: float, ty: float, speed: float) -> bool:
     return False
 
 def _scale_speed(base: float) -> float:
-    if not _floor_aps:
+    """Scale speed proportionally to actual AP spread so movement is
+    visible regardless of floor size. Falls back to base if < 2 APs."""
+    if len(_floor_aps) < 2:
         return base
     xs = [ap["x_m"] for ap in _floor_aps]
     ys = [ap["y_m"] for ap in _floor_aps]
-    w = max(xs) - min(xs) + WANDER_RADIUS_M * 2
-    h = max(ys) - min(ys) + WANDER_RADIUS_M * 2
-    scale = math.sqrt((w * h) / (12.0 * 10.0))
-    return min(base * scale, base * 1.5)
+    w = max(xs) - min(xs)
+    h = max(ys) - min(ys)
+    spread = math.sqrt(w * w + h * h)          # diagonal of AP bounding box
+    if spread < 1.0:
+        return base
+    # Target: cross the full AP spread in ~10 ticks at base speed
+    natural_speed = spread / 10.0
+    # Allow up to 2× the natural speed; never below base
+    return max(base, min(natural_speed, base * 2.0))
 
 def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
     """
@@ -188,14 +195,15 @@ def _wander_within_ap(beacon: Dict, ap: Dict) -> None:
             ap["y_m"] + random.uniform(-WANDER_RADIUS_M, WANDER_RADIUS_M),
         )
     tx, ty = beacon["wander_target"]
-    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.3))
+    arrived = _move_toward(beacon, tx, ty, speed=_scale_speed(0.4))
     if arrived:
         beacon["wander_target"] = None
 
-def _tick_patrol(beacon: Dict, skip_ap_idx: int = -1) -> Optional[str]:
+def _tick_patrol(beacon: Dict, skip_ap_idx: int = -1, move_speed: float = 0.6) -> Optional[str]:
     """
     Patrol state machine. Returns checkpoint name when arriving at an AP zone.
     skip_ap_idx: if set, beacon skips that AP index (missed checkpoint scenario).
+    move_speed: base speed passed to _scale_speed; guards use 0.6, worker/forklift use 0.4.
     """
     ap_order = beacon["ap_order"]
     if not ap_order:
@@ -216,7 +224,7 @@ def _tick_patrol(beacon: Dict, skip_ap_idx: int = -1) -> Optional[str]:
 
     if beacon["state"] == "moving":
         arrived = _move_toward(beacon, current_ap["x_m"], current_ap["y_m"],
-                               speed=_scale_speed(0.4))
+                               speed=_scale_speed(move_speed))
         if arrived:
             beacon["state"] = "wandering"
             beacon["wander_ticks"] = random.randint(WANDER_TICKS_MIN, WANDER_TICKS_MAX)
@@ -286,8 +294,8 @@ def _tick_normal_patrol() -> None:
     guard_a, guard_b, worker, forklift = SIMULATED_BEACONS
     _tick_patrol(guard_a)
     _tick_patrol(guard_b)
-    _tick_patrol(worker)
-    _tick_patrol(forklift)
+    _tick_patrol(worker, move_speed=0.4)
+    _tick_patrol(forklift, move_speed=0.4)
 
 def _tick_man_down(tick: int) -> None:
     global _mandown_seeded
@@ -369,8 +377,8 @@ def _tick_ghost_patrol(tick: int) -> None:
         print(f"[SIM] Ghost patrol event fired for {guard_a['label']} at {cp_ap['name']}")
 
     _tick_patrol(guard_b)
-    _tick_patrol(worker)
-    _tick_patrol(forklift)
+    _tick_patrol(worker, move_speed=0.4)
+    _tick_patrol(forklift, move_speed=0.4)
 
 def _tick_missed_checkpoint(tick: int) -> None:
     """Guard Alpha skips one AP zone. Others patrol normally."""
@@ -393,8 +401,8 @@ def _tick_missed_checkpoint(tick: int) -> None:
         print(f"[SIM] Missed checkpoint event fired: {skipped_name}")
 
     _tick_patrol(guard_b)
-    _tick_patrol(worker)
-    _tick_patrol(forklift)
+    _tick_patrol(worker, move_speed=0.4)
+    _tick_patrol(forklift, move_speed=0.4)
 
 # ── Reset actors between segments ─────────────────────────────────────────
 def _reset_actors() -> None:
@@ -471,6 +479,8 @@ async def run_simulation() -> None:
         print(f"[SIM]   {ap['name']:20s}  {ap['mac']}  ({ap['x_m']:.1f}m, {ap['y_m']:.1f}m)")
     print(f"[SIM] Floor bounds: x={_floor_bounds['x_min']:.1f}–{_floor_bounds['x_max']:.1f}m  "
           f"y={_floor_bounds['y_min']:.1f}–{_floor_bounds['y_max']:.1f}m")
+    print(f"[SIM] Computed moving speed : {_scale_speed(0.6):.3f} m/tick")
+    print(f"[SIM] Computed wander speed : {_scale_speed(0.4):.3f} m/tick")
 
     n = len(_floor_aps)
     _shift_id = f"shift-{uuid.uuid4().hex[:8]}"

@@ -1,3 +1,4 @@
+import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -15,6 +16,11 @@ from utils.multilateration import least_squares_position
 from utils.rssi_utils import rssi_to_distance
 from utils.timestamp_utils import utcnow_iso
 
+# If a beacon has not sent telemetry for this many seconds,
+# reset its Kalman filter on the next arrival so it re-initialises
+# from the new position rather than extrapolating from stale state.
+KALMAN_RESET_AFTER_S = 10.0
+
 
 class PositioningService:
     """
@@ -24,6 +30,7 @@ class PositioningService:
 
     def __init__(self) -> None:
         self._filters: Dict[str, KalmanService] = {}
+        self._last_seen: Dict[str, float] = {}   # beacon_mac → unix timestamp of last telemetry
         self._cached_scale: Optional[float] = None
         self._cached_building_id: Optional[str] = None
         self._cached_floor_id: Optional[str] = None
@@ -104,6 +111,7 @@ class PositioningService:
         self._cached_x_max = 100.0
         self._cached_y_min = 0.0
         self._cached_y_max = 100.0
+        self._last_seen.clear()
 
     def compute_position(self, payload: OmadaTelemetryPayload) -> Optional[PositionRecord]:
         """Full pipeline: returns smoothed PositionRecord, or None if < 3 AP readings."""
@@ -121,8 +129,20 @@ class PositioningService:
         if raw is None:
             return None
 
+        # Stale beacon detection — drop filter if beacon was absent too long
+        now_unix = time.time()
+        mac = payload.reporter_mac
+        last = self._last_seen.get(mac)
+        if last is not None and (now_unix - last) > KALMAN_RESET_AFTER_S:
+            self._filters.pop(mac, None)
+        self._last_seen[mac] = now_unix
+
+        # Clamp raw multilateration to floor bounds before feeding Kalman
+        raw_x = float(np.clip(raw[0], self._cached_x_min, self._cached_x_max))
+        raw_y = float(np.clip(raw[1], self._cached_y_min, self._cached_y_max))
+
         kf = self._get_filter(payload.reporter_mac)
-        sx, sy = kf.update(raw[0], raw[1])
+        sx, sy = kf.update(raw_x, raw_y)
 
         # Clamp Kalman internal state so bad measurements cannot corrupt future predictions
         kf.clamp_state(
@@ -154,6 +174,7 @@ class PositioningService:
             building_id=self._cached_building_id or "",
             label=payload.label,
         )
+        print(f"[POS] {payload.reporter_mac} → raw=({raw[0]:.2f},{raw[1]:.2f}) clamped=({raw_x:.2f},{raw_y:.2f}) smooth=({sx:.2f},{sy:.2f}) px=({pixel_x},{pixel_y})")
         position_repository.save(record)
         return record
 
