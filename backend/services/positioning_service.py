@@ -174,7 +174,6 @@ class PositioningService:
             building_id=self._cached_building_id or "",
             label=payload.label,
         )
-        print(f"[POS] {payload.reporter_mac} → raw=({raw[0]:.2f},{raw[1]:.2f}) clamped=({raw_x:.2f},{raw_y:.2f}) smooth=({sx:.2f},{sy:.2f}) px=({pixel_x},{pixel_y})")
         position_repository.save(record)
         return record
 

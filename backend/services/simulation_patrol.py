@@ -70,7 +70,7 @@ SIMULATED_BEACONS: List[Dict] = [
         "mac": "AA:BB:CC:DD:EE:04", "person_id": "guard-002",
         "person_type": "guard", "label": "Guard Beta",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
-        "ap_order": [],        # populated at startup: [2, 1, 0] reverse
+        "ap_order": [],        # populated at startup: same forward route as Alpha, offset start
         "current_ap_idx": 0,
         "wander_ticks": 0,
         "state": "moving",
