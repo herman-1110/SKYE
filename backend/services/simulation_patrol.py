@@ -364,9 +364,7 @@ async def run_simulation() -> None:
         beacon["wander_target"]   = None
         beacon["shift_id"]             = f"shift-{uuid.uuid4().hex[:8]}"
         beacon["loops_completed"]      = 0
-        # A guard starting at mid-route has already "skipped" start_indices[i] APs.
-        # Pre-fill checkpoints_this_loop so loop completion fires correctly.
-        beacon["checkpoints_this_loop"] = start_indices[i]
+        beacon["checkpoints_this_loop"] = 0
 
     route_str = " → ".join(_floor_aps[i]["name"] for i in range(n))
     print(f"[SIM] Guard Alpha: {route_str} → loop (start: AP 1)")

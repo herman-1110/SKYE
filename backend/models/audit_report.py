@@ -13,3 +13,4 @@ class AuditReportRecord:
     rag_examples_used: List[str] = field(default_factory=list)
     report_text: str = ""
     model_used: str = "gemini-2.5-flash"
+    report_type: str = "patrol"          # "patrol" | "safety_event"

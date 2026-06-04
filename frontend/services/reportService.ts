@@ -51,3 +51,29 @@ export async function generateReport(params: { log_id: string; guard_id: string 
   if (!res.ok) throw new Error(`Report generation failed: ${res.status}`);
   return res.json() as Promise<AuditReportRecord>;
 }
+
+export interface SafetyEventGroup {
+  person_id: string;
+  date_str: string;
+  person_type: string;
+  alert_count: number;
+}
+
+export async function fetchSafetyEventGroups(): Promise<SafetyEventGroup[]> {
+  const res = await authFetch("/api/reports/safety-groups");
+  if (!res.ok) throw new Error(`Failed to fetch safety groups: ${res.status}`);
+  const data = await res.json();
+  return data.groups ?? [];
+}
+
+export async function generateSafetyReport(params: {
+  person_id: string;
+  date_str: string;
+}): Promise<AuditReportRecord> {
+  const res = await authFetch("/api/reports/generate-safety", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(`Safety report generation failed: ${res.status}`);
+  return res.json() as Promise<AuditReportRecord>;
+}

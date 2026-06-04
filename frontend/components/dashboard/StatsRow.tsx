@@ -21,19 +21,20 @@ function StatCard({ label, value, pulse }: StatCardProps) {
 
 export default function StatsRow() {
   const positions = useDashboardStore((s) => s.positions);
-  const alerts    = useDashboardStore((s) => s.alerts);
+  const alerts = useDashboardStore((s) => s.alerts);
 
-  const alertList    = Object.values(alerts) as AlertRecord[];
+  const alertList = Object.values(alerts) as AlertRecord[];
   const activeAlerts = alertList.filter((a) => !a.resolved).length;
-  const ghostPatrols = alertList.filter((a) => a.alert_type === "ghost_patrol").length;
-  const personnel    = Object.keys(positions).length;
+  const manDown = alertList.filter((a) => a.alert_type === "man_down").length;
+  const patrolBreaches = alertList.filter((a) => a.alert_type === "patrol_violation").length;
+  const personnel = Object.keys(positions).length;
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <StatCard label="Active Personnel"      value={personnel} />
-      <StatCard label="Active Alerts"         value={activeAlerts} pulse={activeAlerts > 0} />
-      <StatCard label="Patrol Compliance"     value="—" />
-      <StatCard label="Ghost Patrol Detected" value={ghostPatrols} />
+      <StatCard label="Active Personnel" value={personnel} />
+      <StatCard label="Active Alerts" value={activeAlerts} pulse={activeAlerts > 0} />
+      <StatCard label="Patrol Breaches" value={patrolBreaches} pulse={patrolBreaches > 0} />
+      <StatCard label="Man Down" value={manDown} pulse={manDown > 0} />
     </div>
   );
 }

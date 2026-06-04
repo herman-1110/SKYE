@@ -40,7 +40,7 @@ def _load() -> Settings:
         MIN_DWELL_SECONDS=int(os.environ.get("MIN_DWELL_SECONDS", "30")),
         RSSI_NOISE_STD=float(os.environ.get("RSSI_NOISE_STD", "3.0")),
         LLM_PROVIDER=os.environ.get("LLM_PROVIDER", "gemini"),
-        LLM_MODEL_NAME=os.environ.get("LLM_MODEL_NAME", "gemini-2.5-flash"),
+        LLM_MODEL_NAME=os.environ["LLM_MODEL_NAME"],
     )
 
 

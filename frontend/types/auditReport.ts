@@ -8,4 +8,5 @@ export interface AuditReportRecord {
   rag_examples_used: string[];
   report_text: string;
   model_used: string;
+  report_type: "patrol" | "safety_event";
 }
