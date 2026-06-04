@@ -15,13 +15,29 @@ import ReportCard from "@/components/reports/ReportCard";
 import { toast } from "@/store/toastStore";
 import { useDashboardStore } from "@/store/dashboardStore";
 
-function inlineParse(line: string): React.ReactNode {
-  const parts = line.split("**");
-  return parts.map((part, i) =>
-    i % 2 === 1
-      ? <strong key={i} className="font-semibold text-s-text">{part}</strong>
-      : <span key={i}>{part}</span>
-  );
+function inlineParse(raw: string): React.ReactNode {
+  const tokens = raw.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g);
+  return tokens.map((tok, i) => {
+    if (tok.startsWith("**") && tok.endsWith("**"))
+      return (
+        <strong key={i} className="font-semibold text-s-text">
+          {tok.slice(2, -2)}
+        </strong>
+      );
+    if (tok.startsWith("`") && tok.endsWith("`"))
+      return (
+        <code key={i} className="font-mono text-xs text-s-accent bg-s-elevated px-1 py-0.5 rounded">
+          {tok.slice(1, -1)}
+        </code>
+      );
+    if (tok.startsWith("*") && tok.endsWith("*"))
+      return (
+        <em key={i} className="italic text-s-text">
+          {tok.slice(1, -1)}
+        </em>
+      );
+    return <span key={i}>{tok}</span>;
+  });
 }
 
 function SimpleMarkdown({ text }: { text: string }) {
@@ -45,6 +61,18 @@ function SimpleMarkdown({ text }: { text: string }) {
             <h3 key={i} className="font-semibold text-s-text text-sm mt-3 mb-1">
               {inlineParse(line.slice(4))}
             </h3>
+          );
+        if (line.startsWith("#### "))
+          return (
+            <h4 key={i} className="font-semibold text-s-text text-sm mt-3 mb-1">
+              {inlineParse(line.slice(5))}
+            </h4>
+          );
+        if (line.startsWith("##### "))
+          return (
+            <p key={i} className="font-semibold text-s-muted text-xs font-mono uppercase tracking-wide mt-2">
+              {inlineParse(line.slice(6))}
+            </p>
           );
         if (line.trim() === "---")
           return <hr key={i} className="border-s-border my-3" />;

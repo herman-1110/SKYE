@@ -14,5 +14,5 @@ export interface AlertRecord {
   zone: string;
   timestamp: string;    // ISO 8601
   resolved: boolean;
-  // feedback fields removed — feedback lives in Firestore /feedback collection
+  other_person_id?: string;   // collision only: the other party
 }

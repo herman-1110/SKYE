@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -9,4 +10,4 @@ class AlertRecord:
     zone: str
     timestamp: str     # ISO 8601
     resolved: bool = False
-    # Feedback fields removed — feedback lives in Firestore /feedback collection
+    other_person_id: Optional[str] = None   # collision only: the other party

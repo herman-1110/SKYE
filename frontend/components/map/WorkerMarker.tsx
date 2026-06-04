@@ -9,8 +9,8 @@ interface Props {
 }
 
 const TYPE_COLOUR: Record<string, string> = {
-  guard:    "var(--success)",
-  worker:   "var(--accent)",
+  guard: "var(--success)",
+  worker: "var(--info)",
   forklift: "var(--warning)",
 };
 
@@ -27,7 +27,7 @@ export default function WorkerMarker({ position, px, py, onHover }: Props) {
         strokeWidth={2}
         style={{ cursor: "pointer" }}
         onMouseEnter={(e) => onHover({ position, x: e.clientX, y: e.clientY })}
-        onMouseMove={(e)  => onHover({ position, x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => onHover({ position, x: e.clientX, y: e.clientY })}
         onMouseLeave={() => onHover(null)}
       />
     </g>

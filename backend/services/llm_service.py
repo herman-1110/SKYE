@@ -11,6 +11,16 @@ from utils.timestamp_utils import utcnow_iso
 
 provider = get_llm_provider()
 
+_FORMAT_INSTRUCTIONS = (
+    "Format your response using ONLY the following markdown:\n"
+    "- **bold** for section headings and emphasis (use ## prefix for major sections)\n"
+    "- Bullet points starting with '- ' for lists\n"
+    "- Plain numbered lines '1. ' for ordered steps\n"
+    "Do NOT use: #### or any heading level beyond ##, *italic*, "
+    "`backticks`, or any HTML.\n"
+    "Do NOT wrap person IDs or AP names in backticks.\n"
+)
+
 
 class LLMService:
 
@@ -43,7 +53,8 @@ class LLMService:
             f"## Safety Alerts\n{alert_lines}\n\n"
             f"## Historical Context\n{rag_context}\n\n"
             "Provide: (1) overall safety rating 1-10, "
-            "(2) key risk findings, (3) recommended corrective actions."
+            "(2) key risk findings, (3) recommended corrective actions.\n\n"
+            + _FORMAT_INSTRUCTIONS
         )
 
     def _build_safety_prompt(
@@ -72,7 +83,8 @@ class LLMService:
             "(3) Behavioural pattern analysis — recurring times, locations, or sequences\n"
             "(4) Corrective actions — concrete recommendations (retraining, CCTV repositioning, "
             "zone reassignment, etc.)\n"
-            "(5) Safety rating 1–10 based on incident severity and frequency\n"
+            "(5) Safety rating 1–10 based on incident severity and frequency\n\n"
+            + _FORMAT_INSTRUCTIONS
         )
 
     def get_reportable_shifts(self) -> List[Dict[str, Any]]:

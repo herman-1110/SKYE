@@ -34,6 +34,12 @@ const ROLE_COLOUR: Record<string, string> = {
   guard: "text-s-success", worker: "text-blue-400", forklift: "text-s-accent",
 };
 
+const PERSON_TYPE_ORDER: { key: string; label: string }[] = [
+  { key: "guard",    label: "Guards"    },
+  { key: "worker",   label: "Workers"   },
+  { key: "forklift", label: "Forklifts" },
+];
+
 function isRecent(ts: string) {
   return Date.now() - new Date(ts).getTime() < 60_000;
 }
@@ -144,21 +150,40 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
           <p className="px-3 py-1 text-[10px] font-mono text-s-muted tracking-widest uppercase">
             Personnel ({personnel.length})
           </p>
-          <ul className="flex-1 overflow-y-auto px-2 space-y-0.5 pb-2">
+          <ul className="flex-1 overflow-y-auto px-2 pb-2">
             {personnel.length === 0 && (
               <li className="px-3 py-2 text-xs text-s-muted italic">No active personnel</li>
             )}
-            {personnel.map((p) => (
-              <li key={p.beacon_mac} className="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-s-elevated cursor-default">
-                <span className={`h-2 w-2 rounded-full shrink-0 ${isRecent(p.timestamp) ? "bg-s-success" : "bg-s-muted"}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-s-text truncate">{p.person_id}</p>
-                  <p className={`text-[10px] font-mono ${ROLE_COLOUR[p.person_type] ?? "text-s-muted"}`}>
-                    {p.person_type.toUpperCase()}
+            {PERSON_TYPE_ORDER.map(({ key, label }) => {
+              const group = personnel.filter((p) => p.person_type === key);
+              if (group.length === 0) return null;
+              return (
+                <li key={key}>
+                  <p className="px-2 pt-3 pb-1 text-[9px] font-mono text-s-muted tracking-widest uppercase">
+                    {label} ({group.length})
                   </p>
-                </div>
-              </li>
-            ))}
+                  <ul className="space-y-0.5">
+                    {group.map((p) => (
+                      <li
+                        key={p.beacon_mac}
+                        className="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-s-elevated cursor-default"
+                      >
+                        <span
+                          className={`h-2 w-2 rounded-full shrink-0 ${
+                            isRecent(p.timestamp) ? "bg-s-success" : "bg-s-muted"
+                          }`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs truncate ${ROLE_COLOUR[p.person_type] ?? "text-s-text"}`}>
+                            {p.label || p.person_id}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

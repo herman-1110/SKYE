@@ -31,7 +31,6 @@ from models.patrol_log import PatrolLogRecord
 from repositories.ap_repository import ap_repository
 from repositories.floor_repository import floor_repository
 from repositories.patrol_log_repository import patrol_log_repository
-from models.alert import AlertRecord
 from utils.timestamp_utils import utcnow_iso
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -102,7 +101,6 @@ _segment_tick: int = 0
 _event_fired: bool = False       # reset each segment
 _mandown_seeded: bool = False
 _safety_svc = None
-_alert_repo = None
 
 # ── Runtime AP removal (called by floor_service on AP delete) ─────────────
 def remove_ap(mac: str) -> None:
@@ -326,8 +324,7 @@ def _tick_man_down(tick: int) -> None:
         print(f"[SIM] man_down: seeding backdated position for worker")
 
 def _tick_collision_warning(tick: int) -> None:
-    """Forklift and worker converge toward floor centre. Direct alert at close range."""
-    global _event_fired
+    """Forklift and worker converge toward floor centre. Collision alert via Kalman backend."""
     guard_a, guard_b, worker, forklift = SIMULATED_BEACONS
     centre_x = _floor_bounds["x_min"] + _floor_bounds["w"] * 0.50
     centre_y = _floor_bounds["y_min"] + _floor_bounds["h"] * 0.45
@@ -337,24 +334,12 @@ def _tick_collision_warning(tick: int) -> None:
     _tick_patrol(guard_a)
     _tick_patrol(guard_b)
 
-    if not _event_fired and _alert_repo:
-        dist = _dist(worker["x_m"], worker["y_m"], forklift["x_m"], forklift["y_m"])
-        if dist < settings.MAN_DOWN_MOVEMENT_THRESHOLD * 2:
-            _event_fired = True
-            zone_desc = f"({worker['x_m']:.1f}m, {worker['y_m']:.1f}m)"
-            record = AlertRecord(
-                alert_id=str(uuid.uuid4()),
-                alert_type="collision",
-                person_id=worker["person_id"],
-                zone=zone_desc,
-                timestamp=utcnow_iso(),
-            )
-            _alert_repo.save(record)
-            print(
-                f"[SIM] Collision alert fired — "
-                f"{worker['label']} & {forklift['label']} "
-                f"within {dist:.2f}m at {zone_desc}"
-            )
+    dist = _dist(worker["x_m"], worker["y_m"], forklift["x_m"], forklift["y_m"])
+    print(
+        f"[SIM] collision_warning tick {tick:3d} | "
+        f"{worker['label']} ↔ {forklift['label']} dist={dist:.2f}m "
+        f"(backend collision check via Kalman)"
+    )
 
 def _tick_ghost_patrol(tick: int) -> None:
     """Guard Alpha freezes (BLE present, VIGI no confirm). Others keep moving."""
@@ -425,10 +410,8 @@ async def run_simulation() -> None:
 
     # Import after Firebase is initialized to avoid early DB call failures
     from services.safety_service import safety_service as _safety_service
-    from repositories.alert_repository import alert_repository as _alert_repository
-    global _safety_svc, _alert_repo
+    global _safety_svc
     _safety_svc = _safety_service
-    _alert_repo = _alert_repository
 
     active_floor = floor_repository.get_any_active()
     if not active_floor:
@@ -531,7 +514,8 @@ async def run_simulation() -> None:
     ]
     print("[SIM] Clearing stale RTDB positions…")
     for mac in ALL_SIMULATED_MACS:
-        rtdb.reference(f"/positions/{mac}").delete()
+        key = mac.replace(":", "_")
+        rtdb.reference(f"/positions/{key}").delete()
     print("[SIM] Stale positions cleared.")
 
     async with httpx.AsyncClient() as client:
@@ -578,11 +562,25 @@ async def run_simulation() -> None:
             for beacon in SIMULATED_BEACONS:
                 payload = _build_payload(beacon, now_ts)
                 n_readings = len(payload["readings"])
+                # Read back Kalman-smoothed position from RTDB
+                key = beacon["mac"].replace(":", "_")
+                pos_data = rtdb.reference(f"/positions/{key}").get() or {}
+                pred_x = pos_data.get("predicted_x")
+                pred_y = pos_data.get("predicted_y")
+                smooth_x = pos_data.get("x")
+                smooth_y = pos_data.get("y")
+                kal_str = (
+                    f" | smooth=({smooth_x:.2f}m, {smooth_y:.2f}m)"
+                    f" predicted=({pred_x:.2f}m, {pred_y:.2f}m)"
+                    if pred_x is not None and smooth_x is not None else ""
+                )
                 try:
                     resp = await client.post(TELEMETRY_ENDPOINT, json=payload,
                                              headers=headers, timeout=5.0)
                     print(f"[SIM] {segment:20s} tick {_segment_tick:3d} | "
-                          f"{beacon['label']:12s} → {resp.status_code} ({n_readings} APs)")
+                          f"{beacon['label']:12s} → {resp.status_code} ({n_readings} APs)"
+                          f" | pos=({beacon['x_m']:.2f}m, {beacon['y_m']:.2f}m)"
+                          f"{kal_str}")
                 except Exception as e:
                     print(f"[SIM] {beacon['label']} send failed: {e}")
 

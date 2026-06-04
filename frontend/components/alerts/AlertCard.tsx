@@ -38,6 +38,11 @@ export default function AlertCard({ alert, selected, onClick, onDelete, deleting
         </span>
       </div>
       <p className="text-xs text-s-text mt-1.5 font-medium">{alert.person_id}</p>
+      {alert.alert_type === "collision" && alert.other_person_id && (
+        <p className="text-xs text-s-muted font-medium">
+          ↔ {alert.other_person_id}
+        </p>
+      )}
       <p className="text-xs text-s-muted">{alert.zone}</p>
       <p className="font-mono text-[10px] text-s-mono mt-1">{alert.timestamp}</p>
 

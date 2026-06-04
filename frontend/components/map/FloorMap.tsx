@@ -24,7 +24,7 @@ const WORKER_TYPE_LABEL: Record<string, string> = {
 
 const WORKER_TYPE_COLOUR: Record<string, string> = {
   guard:    "var(--success)",
-  worker:   "var(--accent)",
+  worker:   "var(--info)",
   forklift: "var(--warning)",
 };
 

@@ -7,13 +7,12 @@ from models.alert import AlertRecord
 from models.patrol_log import PatrolLogRecord
 from models.position import PositionRecord
 from repositories.alert_repository import alert_repository
-from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
 from utils.timestamp_utils import utcnow_iso, seconds_between
-from utils.zone_utils import is_high_risk
 
 
-_last_man_down: Dict[str, str] = {}  # person_id → ISO timestamp of last alert
+_last_man_down: Dict[str, str] = {}    # person_id → ISO timestamp of last alert
+_last_collision: Dict[str, str] = {}   # "worker_id|forklift_id" → ISO timestamp
 
 
 class SafetyService:
@@ -22,27 +21,13 @@ class SafetyService:
     # FR3 / UC4 — Man-down detection
     # ------------------------------------------------------------------
     def check_man_down(self, current: PositionRecord) -> Optional[AlertRecord]:
-        """Alert if a worker has not moved in a high-risk zone for > MAN_DOWN_MINUTES."""
-        if current.person_type != "worker":
+        """Alert if a worker or guard has not moved for > MAN_DOWN_MINUTES.
+        Forklifts are exempt. Fires regardless of zone."""
+        if current.person_type == "forklift":
             return None
 
-        floor = floor_repository.get_any_active()
-        building_id: str = floor.building_id if floor else ""
-        floor_id: str = floor.id if floor else ""
-        if not is_high_risk(current.x, current.y, building_id, floor_id):
-            return None
-
-        previous = position_repository.get(current.beacon_mac)
-        if previous is None:
-            return None
-
-        elapsed = seconds_between(previous["timestamp"], current.timestamp)
+        elapsed = seconds_between(current.timestamp, utcnow_iso())
         if elapsed < settings.MAN_DOWN_MINUTES * 60:
-            return None
-
-        dx = current.x - float(previous.get("x", current.x))
-        dy = current.y - float(previous.get("y", current.y))
-        if math.hypot(dx, dy) >= settings.MAN_DOWN_MOVEMENT_THRESHOLD:
             return None
 
         last_ts = _last_man_down.get(current.person_id)
@@ -64,8 +49,10 @@ class SafetyService:
     # FR4 / NFR2 / UC5 — Collision prediction
     # ------------------------------------------------------------------
     def check_collision(self, all_positions: List[PositionRecord]) -> List[AlertRecord]:
-        """Alert when a worker's and a forklift's predicted positions converge within COLLISION_ALERT_SECONDS."""
-        workers = [p for p in all_positions if p.person_type == "worker" and p.predicted_x is not None]
+        """Alert when a worker's Kalman-predicted position converges with a forklift's
+        within COLLISION_ALERT_SECONDS. Suppresses repeat alerts for the same pair
+        within 30 seconds."""
+        workers   = [p for p in all_positions if p.person_type == "worker"   and p.predicted_x is not None]
         forklifts = [p for p in all_positions if p.person_type == "forklift" and p.predicted_x is not None]
         alerts: List[AlertRecord] = []
 
@@ -75,16 +62,26 @@ class SafetyService:
                     w.predicted_x - f.predicted_x,  # type: ignore[operator]
                     w.predicted_y - f.predicted_y,  # type: ignore[operator]
                 )
-                if dist < settings.MAN_DOWN_MOVEMENT_THRESHOLD * 2:
-                    record = AlertRecord(
-                        alert_id=str(uuid.uuid4()),
-                        alert_type="collision",
-                        person_id=w.person_id,
-                        zone=w.zone,
-                        timestamp=utcnow_iso(),
-                    )
-                    alert_repository.save(record)
-                    alerts.append(record)
+                if dist >= settings.MAN_DOWN_MOVEMENT_THRESHOLD * 2:
+                    continue
+
+                pair_key = f"{w.person_id}|{f.person_id}"
+                last_ts = _last_collision.get(pair_key)
+                if last_ts and seconds_between(last_ts, utcnow_iso()) < 30:
+                    continue
+
+                record = AlertRecord(
+                    alert_id=str(uuid.uuid4()),
+                    alert_type="collision",
+                    person_id=w.person_id,
+                    zone=w.zone,
+                    timestamp=utcnow_iso(),
+                    other_person_id=f.person_id,
+                )
+                alert_repository.save(record)
+                _last_collision[pair_key] = record.timestamp
+                alerts.append(record)
+
         return alerts
 
     # ------------------------------------------------------------------
