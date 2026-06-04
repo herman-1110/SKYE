@@ -7,6 +7,7 @@ import { useAlerts } from "@/hooks/useAlerts";
 import Navbar from "@/components/layout/Navbar";
 import Sidebar from "@/components/layout/Sidebar";
 import ToastContainer from "@/components/shared/ToastContainer";
+import CriticalAlertBanner from "@/components/shared/CriticalAlertBanner";
 import { FullScreenLoader } from "@/components/shared/LoadingSpinner";
 
 function DataSubscriptions() {
@@ -54,6 +55,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         <div className="p-4">{children}</div>
       </main>
+      <CriticalAlertBanner />
       <ToastContainer />
     </div>
   );
