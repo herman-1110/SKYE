@@ -20,6 +20,14 @@
   --info: #3b82f6;
   --shadow: rgba(0, 0, 0, 0.4);
 
+  /* RGB splits — used by Tailwind opacity modifiers (bg-s-danger/10 etc.) */
+  --bg-elevated-rgb: 26 29 36;
+  --border-rgb: 42 45 53;
+  --accent-rgb: 245 158 11;
+  --success-rgb: 16 185 129;
+  --danger-rgb: 239 68 68;
+  --info-rgb: 59 130 246;
+
   /* RGB splits for rgba() glassmorphism */
   --bg-surface-rgb: 17, 19, 24;
   --bg-base-rgb: 10, 12, 15;
@@ -50,6 +58,14 @@
   --info: #3b82f6;
   --shadow: rgba(0, 0, 0, 0.06);
 
+  /* RGB splits — used by Tailwind opacity modifiers */
+  --bg-elevated-rgb: 240 241 243;
+  --border-rgb: 232 234 237;
+  --accent-rgb: 217 119 6;
+  --success-rgb: 5 150 105;
+  --danger-rgb: 220 38 38;
+  --info-rgb: 59 130 246;
+
   --bg-surface-rgb: 255, 255, 255;
   --bg-base-rgb: 244, 245, 247;
 
@@ -74,8 +90,6 @@ html.theme-transitioning *::after {
 /* ─── Base ───────────────────────────────────────────────────────────────── */
 * {
   box-sizing: border-box;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
 }
 
 html,
@@ -284,8 +298,14 @@ body {
 }
 
 input[type='number'] {
-  -moz-appearance: textfield;
-  /* Firefox: hide spinners (can't style them) */
+  -moz-appearance: textfield; /* Firefox legacy */
+  appearance: textfield;       /* Firefox modern + standard */
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* ─── Floor selector dropdown ────────────────────────────────────────────── */

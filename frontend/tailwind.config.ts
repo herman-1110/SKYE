@@ -9,18 +9,20 @@ const config: Config = {
     extend: {
       colors: {
         s: {
-          base:       "var(--bg-base)",
-          surface:    "var(--bg-surface)",
-          elevated:   "var(--bg-elevated)",
-          border:     "var(--border)",
-          accent:     "var(--accent)",
+          base:         "var(--bg-base)",
+          surface:      "var(--bg-surface)",
+          // rgb() + <alpha-value> enables opacity modifiers: bg-s-elevated/60, border-s-danger/30, etc.
+          elevated:     "rgb(var(--bg-elevated-rgb) / <alpha-value>)",
+          border:       "rgb(var(--border-rgb) / <alpha-value>)",
+          accent:       "rgb(var(--accent-rgb) / <alpha-value>)",
           "accent-dim": "var(--accent-dim)",
-          success:    "var(--success)",
-          danger:     "var(--danger)",
-          warning:    "var(--warning)",
-          text:       "var(--text-primary)",
-          muted:      "var(--text-secondary)",
-          mono:       "var(--text-mono)",
+          success:      "rgb(var(--success-rgb) / <alpha-value>)",
+          danger:       "rgb(var(--danger-rgb) / <alpha-value>)",
+          info:         "rgb(var(--info-rgb) / <alpha-value>)",
+          warning:      "var(--warning)",
+          text:         "var(--text-primary)",
+          muted:        "var(--text-secondary)",
+          mono:         "var(--text-mono)",
         },
       },
       fontFamily: {
