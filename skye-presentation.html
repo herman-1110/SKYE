@@ -1,0 +1,1611 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SKYE Sentinel-AI — FYP Presentation</title>
+
+  <!-- === FONTS === -->
+  <!-- Syne: geometric display with authority -->
+  <!-- DM Sans: readable body -->
+  <!-- DM Mono: data/code labels, matches SKYE's IBM Plex Mono feel -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap"
+    rel="stylesheet" />
+
+  <style>
+    /* ===========================================
+       THEME — mirrors SKYE's own design tokens
+       Change :root to retheme the whole deck
+       =========================================== */
+    :root {
+      --bg-base: #0a0c0f;
+      --bg-surface: #111318;
+      --bg-elevated: #1a1d24;
+      --border: #2a2d35;
+      --accent: #f59e0b;
+      --accent-dim: rgba(245, 158, 11, 0.12);
+      --accent-glow: rgba(245, 158, 11, 0.35);
+      --success: #10b981;
+      --danger: #ef4444;
+      --info: #3b82f6;
+      --text: #f1f5f9;
+      --muted: #64748b;
+      --mono: #94a3b8;
+
+      --font-display: 'Syne', sans-serif;
+      --font-body: 'DM Sans', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+
+      --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+      /* viewport-base.css tokens */
+      --title-size: clamp(2rem, 5.5vw, 4.5rem);
+      --h2-size: clamp(1.4rem, 3.2vw, 2.4rem);
+      --h3-size: clamp(1rem, 2.2vw, 1.6rem);
+      --body-size: clamp(0.78rem, 1.3vw, 1.05rem);
+      --small-size: clamp(0.65rem, 0.9vw, 0.8rem);
+      --slide-padding: clamp(1.5rem, 4.5vw, 5rem);
+      --content-gap: clamp(0.75rem, 2vw, 2rem);
+    }
+
+    /* ===========================================
+       viewport-base.css — MANDATORY, VERBATIM
+       =========================================== */
+    html,
+    body {
+      height: 100%;
+      overflow-x: hidden;
+    }
+
+    html {
+      scroll-snap-type: y mandatory;
+      scroll-behavior: smooth;
+    }
+
+    .slide {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      scroll-snap-align: start;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .slide-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      max-height: 100%;
+      overflow: hidden;
+      padding: var(--slide-padding);
+    }
+
+    .card,
+    .container,
+    .content-box {
+      max-width: min(90vw, 1000px);
+      max-height: min(80vh, 700px);
+    }
+
+    .feature-list,
+    .bullet-list {
+      gap: clamp(0.4rem, 1vh, 1rem);
+    }
+
+    .feature-list li,
+    .bullet-list li {
+      font-size: var(--body-size);
+      line-height: 1.4;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+      gap: clamp(0.5rem, 1.5vw, 1rem);
+    }
+
+    img,
+    .image-container {
+      max-width: 100%;
+      max-height: min(50vh, 400px);
+      object-fit: contain;
+    }
+
+    @media (max-height: 700px) {
+      :root {
+        --slide-padding: clamp(0.75rem, 3vw, 2rem);
+        --content-gap: clamp(0.4rem, 1.5vw, 1rem);
+        --title-size: clamp(1.25rem, 4.5vw, 2.5rem);
+        --h2-size: clamp(1rem, 3vw, 1.75rem);
+      }
+    }
+
+    @media (max-height: 600px) {
+      :root {
+        --slide-padding: clamp(0.5rem, 2.5vw, 1.5rem);
+        --content-gap: clamp(0.3rem, 1vw, 0.75rem);
+        --title-size: clamp(1.1rem, 4vw, 2rem);
+        --body-size: clamp(0.7rem, 1.2vw, 0.95rem);
+      }
+
+      .nav-dots,
+      .keyboard-hint,
+      .decorative {
+        display: none;
+      }
+    }
+
+    @media (max-height: 500px) {
+      :root {
+        --slide-padding: clamp(0.4rem, 2vw, 1rem);
+        --title-size: clamp(1rem, 3.5vw, 1.5rem);
+        --h2-size: clamp(0.9rem, 2.5vw, 1.25rem);
+        --body-size: clamp(0.65rem, 1vw, 0.85rem);
+      }
+    }
+
+    @media (max-width: 600px) {
+      :root {
+        --title-size: clamp(1.25rem, 7vw, 2.5rem);
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.2s !important;
+      }
+
+      html {
+        scroll-behavior: auto;
+      }
+    }
+
+    /* END viewport-base.css */
+
+    /* ===========================================
+       SCROLLBAR — amber ops-centre style
+       =========================================== */
+
+    /* Firefox */
+    html {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(245, 158, 11, 0.5) rgba(26, 29, 36, 0.6);
+    }
+
+    /* Chrome / Edge / Safari */
+    ::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(26, 29, 36, 0.6);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(245, 158, 11, 0.45);
+      border-radius: 999px;
+      transition: background 0.2s ease;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(245, 158, 11, 0.85);
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+    }
+
+    ::-webkit-scrollbar-button {
+      display: none;
+      height: 0;
+    }
+
+    /* ===========================================
+       GLOBAL BASE
+       =========================================== */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg-base);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: var(--body-size);
+    }
+
+    /* ===========================================
+       GRID BACKGROUND — ops-center atmosphere
+       Subtle structural lines on all slides
+       =========================================== */
+    .grid-bg::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(245, 158, 11, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(245, 158, 11, 0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ===========================================
+       ANIMATIONS — techy/cinematic entrance
+       =========================================== */
+    .reveal {
+      opacity: 0;
+      transform: translateY(28px);
+      transition: opacity 0.65s var(--ease-expo), transform 0.65s var(--ease-expo);
+    }
+
+    .reveal-left {
+      opacity: 0;
+      transform: translateX(-40px);
+      transition: opacity 0.65s var(--ease-expo), transform 0.65s var(--ease-expo);
+    }
+
+    .reveal-scale {
+      opacity: 0;
+      transform: scale(0.92);
+      transition: opacity 0.6s var(--ease-expo), transform 0.6s var(--ease-expo);
+    }
+
+    .slide.visible .reveal,
+    .slide.visible .reveal-left,
+    .slide.visible .reveal-scale {
+      opacity: 1;
+      transform: none;
+    }
+
+    /* Stagger delays */
+    .d1 {
+      transition-delay: 0.08s;
+    }
+
+    .d2 {
+      transition-delay: 0.18s;
+    }
+
+    .d3 {
+      transition-delay: 0.28s;
+    }
+
+    .d4 {
+      transition-delay: 0.38s;
+    }
+
+    .d5 {
+      transition-delay: 0.48s;
+    }
+
+    .d6 {
+      transition-delay: 0.58s;
+    }
+
+    /* Scan-line sweep on title slide */
+    @keyframes scanline {
+      0% {
+        top: -2px;
+        opacity: 0.6;
+      }
+
+      100% {
+        top: 100%;
+        opacity: 0;
+      }
+    }
+
+    .scanline {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scanline 3s linear infinite;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* Amber glow pulse on badge */
+    @keyframes glow-pulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 12px var(--accent-glow);
+      }
+
+      50% {
+        box-shadow: 0 0 28px var(--accent-glow), 0 0 48px rgba(245, 158, 11, 0.15);
+      }
+    }
+
+    /* Counter count-up animation trigger */
+    @keyframes countUp {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    /* ===========================================
+       PROGRESS BAR
+       =========================================== */
+    .progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 2px;
+      background: var(--accent);
+      z-index: 1000;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    /* ===========================================
+       NAVIGATION DOTS — top right
+       =========================================== */
+    .nav-dots {
+      position: fixed;
+      top: clamp(16px, 2.5vh, 28px);
+      right: clamp(16px, 2.5vw, 32px);
+      display: flex;
+      gap: 6px;
+      z-index: 100;
+      align-items: center;
+    }
+
+    .nav-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--border);
+      border: none;
+      cursor: pointer;
+      transition: background 0.25s, transform 0.25s;
+      padding: 0;
+    }
+
+    .nav-dot.active {
+      background: var(--accent);
+      transform: scale(1.5);
+    }
+
+    .nav-dot:hover:not(.active) {
+      background: var(--muted);
+    }
+
+    /* ===========================================
+       SLIDE COUNTER — bottom left
+       =========================================== */
+    .slide-counter {
+      position: absolute;
+      bottom: clamp(16px, 2.5vh, 28px);
+      left: clamp(16px, 2.5vw, 32px);
+      font-family: var(--font-mono);
+      font-size: var(--small-size);
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      z-index: 10;
+    }
+
+    .slide-counter span {
+      color: var(--accent);
+    }
+
+    /* ===========================================
+       SHARED COMPONENTS
+       =========================================== */
+
+    /* Amber accent badge / label */
+    .badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: var(--small-size);
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 4px 12px;
+      border-radius: 4px;
+    }
+
+    /* Section number */
+    .section-num {
+      font-family: var(--font-mono);
+      font-size: clamp(0.6rem, 1vw, 0.75rem);
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    /* Amber horizontal rule */
+    .amber-rule {
+      height: 1px;
+      background: linear-gradient(90deg, var(--accent), transparent);
+      margin: clamp(0.5rem, 1.5vh, 1.2rem) 0;
+      max-width: clamp(60px, 8vw, 100px);
+    }
+
+    /* Amber left-border card */
+    .info-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 8px;
+      padding: clamp(0.8rem, 1.5vw, 1.2rem) clamp(1rem, 2vw, 1.6rem);
+    }
+
+    /* Alert type pill */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: var(--small-size);
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 6px;
+    }
+
+    .pill-danger {
+      background: rgba(239, 68, 68, 0.12);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .pill-warning {
+      background: rgba(245, 158, 11, 0.12);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    .pill-info {
+      background: rgba(59, 130, 246, 0.12);
+      color: #3b82f6;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    .pill-success {
+      background: rgba(16, 185, 129, 0.12);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    /* Dot indicator */
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .dot-danger {
+      background: #ef4444;
+      box-shadow: 0 0 6px #ef4444;
+    }
+
+    .dot-warning {
+      background: #f59e0b;
+      box-shadow: 0 0 6px #f59e0b;
+    }
+
+    .dot-info {
+      background: #3b82f6;
+      box-shadow: 0 0 6px #3b82f6;
+    }
+
+    .dot-success {
+      background: #10b981;
+      box-shadow: 0 0 6px #10b981;
+    }
+
+    /* ===========================================
+       SLIDE 1 — TITLE
+       =========================================== */
+    .title-slide {
+      background: var(--bg-base);
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+
+    .title-slide .inner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--content-gap);
+      padding: var(--slide-padding);
+    }
+
+    .title-slide .logo-text {
+      font-family: var(--font-display);
+      font-size: var(--title-size);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      text-shadow: 0 0 40px rgba(245, 158, 11, 0.2);
+    }
+
+    .title-slide .logo-text .amber {
+      color: var(--accent);
+    }
+
+    .title-slide .subtitle {
+      font-family: var(--font-mono);
+      font-size: clamp(0.75rem, 1.5vw, 1rem);
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      max-width: min(90vw, 640px);
+      line-height: 1.6;
+    }
+
+    .title-slide .tagline {
+      font-family: var(--font-body);
+      font-size: clamp(0.85rem, 1.5vw, 1.05rem);
+      color: var(--mono);
+      max-width: min(90vw, 560px);
+      line-height: 1.7;
+    }
+
+    .title-slide .meta {
+      display: flex;
+      gap: clamp(12px, 2vw, 24px);
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: var(--small-size);
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+
+    .title-slide .meta .sep {
+      color: var(--border);
+    }
+
+    /* Corner accent marks — ops-center feel */
+    .corner {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      z-index: 1;
+    }
+
+    .corner-tl {
+      top: 24px;
+      left: 24px;
+      border-top: 2px solid var(--accent);
+      border-left: 2px solid var(--accent);
+    }
+
+    .corner-tr {
+      top: 24px;
+      right: 24px;
+      border-top: 2px solid var(--accent);
+      border-right: 2px solid var(--accent);
+    }
+
+    .corner-bl {
+      bottom: 24px;
+      left: 24px;
+      border-bottom: 2px solid var(--accent);
+      border-left: 2px solid var(--accent);
+    }
+
+    .corner-br {
+      bottom: 24px;
+      right: 24px;
+      border-bottom: 2px solid var(--accent);
+      border-right: 2px solid var(--accent);
+    }
+
+    /* ===========================================
+       SLIDE HEADER — reused across content slides
+       =========================================== */
+    .slide-header {
+      display: flex;
+      flex-direction: column;
+      gap: clamp(4px, 0.8vh, 10px);
+      margin-bottom: clamp(0.8rem, 2vh, 1.6rem);
+    }
+
+    .slide-header h2 {
+      font-family: var(--font-display);
+      font-size: var(--h2-size);
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+
+    .slide-header h2 .amber {
+      color: var(--accent);
+    }
+
+    /* ===========================================
+       BULLET LIST — clean amber-dotted list
+       =========================================== */
+    .skye-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: clamp(0.5rem, 1.2vh, 1rem);
+    }
+
+    .skye-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: var(--body-size);
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    .skye-list li::before {
+      content: '▸';
+      color: var(--accent);
+      font-size: 0.8em;
+      margin-top: 0.18em;
+      flex-shrink: 0;
+    }
+
+    .skye-list li strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .skye-list li .note {
+      display: block;
+      font-size: 0.85em;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ===========================================
+       ARCHITECTURE FLOW — slide 4
+       =========================================== */
+    .arch-flow {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .arch-node {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: clamp(0.6rem, 1.2vw, 1rem) clamp(0.8rem, 1.5vw, 1.2rem);
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .arch-node .node-icon {
+      font-size: clamp(1.2rem, 2.5vw, 1.8rem);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .arch-node .node-label {
+      font-family: var(--font-mono);
+      font-size: var(--small-size);
+      color: var(--text);
+      font-weight: 500;
+      display: block;
+      white-space: nowrap;
+    }
+
+    .arch-node .node-sub {
+      font-family: var(--font-mono);
+      font-size: clamp(0.55rem, 0.85vw, 0.7rem);
+      color: var(--muted);
+      display: block;
+      margin-top: 2px;
+    }
+
+    .arch-node.highlight {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .arch-node.highlight .node-label {
+      color: var(--accent);
+    }
+
+    .arch-arrow {
+      color: var(--muted);
+      font-size: clamp(0.9rem, 1.5vw, 1.2rem);
+      padding: 0 clamp(4px, 1vw, 10px);
+      flex-shrink: 0;
+    }
+
+    /* ===========================================
+       TECH STACK GRID — slide 10
+       =========================================== */
+    .stack-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: clamp(0.5rem, 1.2vw, 1rem);
+    }
+
+    .stack-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: clamp(0.7rem, 1.3vw, 1.1rem);
+    }
+
+    .stack-card .stack-cat {
+      font-family: var(--font-mono);
+      font-size: clamp(0.55rem, 0.85vw, 0.68rem);
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    .stack-card .stack-items {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .stack-card .stack-items li {
+      font-size: clamp(0.7rem, 1.1vw, 0.88rem);
+      color: var(--text);
+      font-family: var(--font-mono);
+    }
+
+    /* ===========================================
+       CLOSING SLIDE
+       =========================================== */
+    .closing-slide {
+      background: var(--bg-base);
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+
+    .closing-slide .stat-row {
+      display: flex;
+      gap: clamp(1.5rem, 4vw, 4rem);
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .stat-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .stat-num {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      color: var(--accent);
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-family: var(--font-mono);
+      font-size: var(--small-size);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    /* Two-column layout helper */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(1rem, 3vw, 2.5rem);
+      align-items: start;
+    }
+
+    @media (max-width: 700px) {
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+
+      .stack-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .arch-flow {
+        gap: 4px;
+      }
+
+      .arch-arrow {
+        display: none;
+      }
+    }
+
+    /* Content slides background */
+    .content-slide {
+      background: var(--bg-base);
+    }
+
+    /* Full-width divider for visual separation within a slide */
+    .section-divider {
+      height: 1px;
+      background: var(--border);
+      margin: clamp(0.5rem, 1.2vh, 1rem) 0;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Progress bar — fills as user advances slides -->
+  <div class="progress-bar" id="progressBar"></div>
+
+  <!-- Nav dots — generated by JS -->
+  <nav class="nav-dots" id="navDots" aria-label="Slide navigation"></nav>
+
+  <!-- ============================================================
+       SLIDE 1 — TITLE
+       ============================================================ -->
+  <section class="slide title-slide grid-bg" id="slide-1">
+    <div class="scanline"></div>
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
+
+    <div class="inner">
+      <div class="badge reveal d1">Final Year Project — 2026</div>
+
+      <h1 class="logo-text reveal d2">
+        <span class="amber">SKYE</span> Sentinel-AI
+      </h1>
+
+      <div class="amber-rule reveal d3" style="max-width:120px; margin:0 auto;"></div>
+
+      <p class="subtitle reveal d4">
+        Autonomous Indoor Safety Patrol System
+      </p>
+
+      <p class="tagline reveal d5">
+        BLE beacon tracking via TP-Link Omada APs · Kalman-filtered positioning ·
+        Real-time safety alerts · AI-generated audit reports
+      </p>
+
+      <div class="meta reveal d6">
+        <span>herman</span>
+        <span class="sep">·</span>
+        <span>lyyherman@gmail.com</span>
+        <span class="sep">·</span>
+        <span>2026</span>
+      </div>
+    </div>
+
+    <div class="slide-counter"><span>01</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 2 — THE PROBLEM
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-2">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">01 · Problem Statement</div>
+        <h2>Manual Safety Monitoring <span class="amber">Doesn't Scale</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <ul class="skye-list">
+        <li class="reveal d2">
+          <span>
+            <strong>No real-time location awareness</strong> — supervisors cannot tell where guards and workers are
+            inside large industrial floors without calling them.
+          </span>
+        </li>
+        <li class="reveal d3">
+          <span>
+            <strong>Delayed incident response</strong> — a worker who collapses or is injured may lie undetected for
+            minutes until the next manual check.
+          </span>
+        </li>
+        <li class="reveal d4">
+          <span>
+            <strong>Patrol compliance is unverifiable</strong> — there is no automated way to confirm guards visited
+            required checkpoints or lingered long enough.
+          </span>
+        </li>
+        <li class="reveal d5">
+          <span>
+            <strong>Ghost patrol risk</strong> — BLE badges can be left at a station; CCTV alone cannot distinguish a
+            present person from an unattended badge.
+          </span>
+        </li>
+        <li class="reveal d6">
+          <span>
+            <strong>Post-shift analysis is manual</strong> — safety officers write reports from memory and logbooks,
+            missing patterns and under-reporting near-misses.
+          </span>
+        </li>
+      </ul>
+    </div>
+    <div class="slide-counter"><span>02</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 3 — SOLUTION OVERVIEW
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-3">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">02 · Solution</div>
+        <h2>What <span class="amber">SKYE</span> Does</h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div class="two-col">
+        <ul class="skye-list">
+          <li class="reveal d2">
+            <span><strong>Real-time indoor positioning</strong> — BLE RSSI from Omada APs → LDPL distance estimation →
+              least-squares multilateration → Kalman smoothing</span>
+          </li>
+          <li class="reveal d3">
+            <span><strong>Automated safety alerts</strong> — man-down, collision prediction, ghost patrol, missed
+              checkpoint detected and fired within seconds</span>
+          </li>
+          <li class="reveal d4">
+            <span><strong>Patrol compliance tracking</strong> — every guard visit logged with checkpoint, dwell time,
+              and VIGI camera confirmation</span>
+          </li>
+        </ul>
+        <ul class="skye-list">
+          <li class="reveal d3">
+            <span><strong>Live operations dashboard</strong> — floor map with personnel markers, device heartbeat panel,
+              alert feed, simulation controls</span>
+          </li>
+          <li class="reveal d4">
+            <span><strong>AI audit reports</strong> — Gemini 2.5 Flash generates structured safety reports from patrol
+              logs and alert history</span>
+          </li>
+          <li class="reveal d5">
+            <span><strong>Multi-floor, multi-building</strong> — scalable zone hierarchy with per-floor activation and
+              calibrated AP coordinates</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div class="slide-counter"><span>03</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 4 — SYSTEM ARCHITECTURE
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-4">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">03 · Architecture</div>
+        <h2>System <span class="amber">Data Flow</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <!-- Architecture flow row -->
+      <div class="arch-flow reveal d2" style="margin-bottom: clamp(0.8rem,2vh,1.4rem);">
+        <div class="arch-node">
+          <span class="node-icon">📡</span>
+          <span class="node-label">BLE Beacons</span>
+          <span class="node-sub">Guards · Workers · Forklifts</span>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <span class="node-icon">🔵</span>
+          <span class="node-label">Omada APs</span>
+          <span class="node-sub">RSSI readings</span>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node highlight">
+          <span class="node-icon">⚙️</span>
+          <span class="node-label">FastAPI Backend</span>
+          <span class="node-sub">LDPL · Kalman · Safety</span>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <span class="node-icon">🔥</span>
+          <span class="node-label">Firebase</span>
+          <span class="node-sub">RTDB + Firestore</span>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <span class="node-icon">🖥️</span>
+          <span class="node-label">Next.js Dashboard</span>
+          <span class="node-sub">Real-time UI</span>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="info-card reveal d3">
+          <div class="section-num" style="margin-bottom:6px;">Backend — Python / FastAPI</div>
+          <ul class="skye-list" style="gap:0.35rem;">
+            <li><span>Positioning: LDPL formula → numpy multilateration</span></li>
+            <li><span>Kalman filter: [x, y, vx, vy] state vector</span></li>
+            <li><span>Safety checks on every telemetry tick</span></li>
+            <li><span>LLM provider abstraction: Gemini · OpenAI · Claude · Ollama</span></li>
+          </ul>
+        </div>
+        <div class="info-card reveal d4">
+          <div class="section-num" style="margin-bottom:6px;">Frontend — Next.js 15 App Router</div>
+          <ul class="skye-list" style="gap:0.35rem;">
+            <li><span>Zustand for global alert + position state</span></li>
+            <li><span>Firebase RTDB real-time listeners</span></li>
+            <li><span>SVG floor map with Kalman-smoothed markers</span></li>
+            <li><span>Critical alert banner — manual dismiss only</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="slide-counter"><span>04</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 5 — POSITIONING ENGINE
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-5">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">04 · Positioning</div>
+        <h2>LDPL + <span class="amber">Kalman Filter</span> Pipeline</h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div class="two-col">
+        <div style="display:flex; flex-direction:column; gap:var(--content-gap);">
+          <div class="info-card reveal d2">
+            <div class="section-num" style="margin-bottom:6px;">Step 1 — RSSI → Distance</div>
+            <p
+              style="font-family:var(--font-mono); font-size:clamp(0.7rem,1.2vw,0.9rem); color:var(--accent); margin-bottom:6px;">
+              d = 10 ^ ((TxPower − RSSI) / (10 × n))
+            </p>
+            <p style="font-size:clamp(0.7rem,1.1vw,0.85rem); color:var(--muted);">
+              Log-distance path loss model. Path loss exponent <em>n</em> tunable via env var.
+            </p>
+          </div>
+          <div class="info-card reveal d3">
+            <div class="section-num" style="margin-bottom:6px;">Step 2 — Multilateration</div>
+            <p style="font-size:clamp(0.7rem,1.1vw,0.85rem); color:var(--muted);">
+              Least-squares across all N APs simultaneously via <code
+                style="color:var(--accent); font-family:var(--font-mono);">numpy.linalg.lstsq</code>. Result clamped to
+              floor bounds before Kalman input.
+            </p>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:var(--content-gap);">
+          <div class="info-card reveal d3">
+            <div class="section-num" style="margin-bottom:6px;">Step 3 — Kalman Smoothing</div>
+            <p style="font-size:clamp(0.7rem,1.1vw,0.85rem); color:var(--muted); margin-bottom:6px;">
+              State vector: <code style="color:var(--accent); font-family:var(--font-mono);">[x, y, vx, vy]</code>
+            </p>
+            <ul class="skye-list" style="gap:0.3rem;">
+              <li><span>8m outlier rejection before update</span></li>
+              <li><span>Clamped to floor bounds after each tick</span></li>
+              <li><span>Reset if gap &gt; 10 s (stale signal)</span></li>
+            </ul>
+          </div>
+          <div class="info-card reveal d4">
+            <div class="section-num" style="margin-bottom:6px;">Step 4 — Collision Prediction</div>
+            <p style="font-size:clamp(0.7rem,1.1vw,0.85rem); color:var(--muted);">
+              <code style="color:var(--accent); font-family:var(--font-mono);">predict_ahead(3)</code> projects
+              positions forward 3 s using velocity. Direction-aware — diverging entities do not trigger.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-counter"><span>05</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 6 — SAFETY ALERT DETECTION
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-6">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">05 · Safety Alerts</div>
+        <h2>Four <span class="amber">Alert Types</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:clamp(0.5rem,1.2vh,0.9rem);">
+        <div class="info-card reveal d2" style="display:flex; align-items:flex-start; gap:14px;">
+          <span class="pill pill-danger" style="flex-shrink:0;"><span class="dot dot-danger"></span>Man Down</span>
+          <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5;">
+            Worker or guard position timestamp becomes stale (&gt; MAN_DOWN_MINUTES). Fires regardless of zone.
+            Suppressed 30 s after first alert. Forklifts exempt.
+          </p>
+        </div>
+        <div class="info-card reveal d3" style="display:flex; align-items:flex-start; gap:14px;">
+          <span class="pill pill-warning" style="flex-shrink:0;"><span class="dot dot-warning"></span>Collision</span>
+          <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5;">
+            Worker's Kalman-predicted position converges with forklift's predicted position within threshold.
+            Direction-aware — both parties stored (<code
+              style="font-family:var(--font-mono); color:var(--accent);">other_person_id</code>). 30 s suppression per
+            pair.
+          </p>
+        </div>
+        <div class="info-card reveal d4" style="display:flex; align-items:flex-start; gap:14px;">
+          <span class="pill pill-info" style="flex-shrink:0;"><span class="dot dot-info"></span>Ghost Patrol</span>
+          <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5;">
+            BLE tag is detected at checkpoint but VIGI camera does NOT confirm human presence. Fires only when BLE
+            present AND VIGI absent — not the reverse.
+          </p>
+        </div>
+        <div class="info-card reveal d5" style="display:flex; align-items:flex-start; gap:14px;">
+          <span class="pill pill-success" style="flex-shrink:0;"><span class="dot dot-success"></span>Patrol
+            Violation</span>
+          <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5;">
+            Guard misses a checkpoint (actual_arrival is null) or dwell time falls below MIN_DWELL_SECONDS. Triggers
+            immediately on patrol log write.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="slide-counter"><span>06</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 7 — AI AUDIT REPORTS
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-7">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">06 · AI Reports</div>
+        <h2>Gemini-Powered <span class="amber">Audit Reports</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div class="two-col">
+        <div style="display:flex; flex-direction:column; gap:var(--content-gap);">
+          <div class="info-card reveal d2">
+            <div class="section-num" style="margin-bottom:6px;">Patrol Report</div>
+            <ul class="skye-list" style="gap:0.35rem;">
+              <li><span>Per-guard, per-shift</span></li>
+              <li><span>Inputs: patrol log checkpoints + RTDB alerts filtered by guard ID</span></li>
+              <li><span>Output: safety rating 1–10, risk findings, corrective actions</span></li>
+            </ul>
+          </div>
+          <div class="info-card reveal d3">
+            <div class="section-num" style="margin-bottom:6px;">Safety Event Report</div>
+            <ul class="skye-list" style="gap:0.35rem;">
+              <li><span>Per-person, per-date</span></li>
+              <li><span>Inputs: all RTDB alerts for that person on that day</span></li>
+              <li><span>Output: incident summary, risk assessment, behavioural patterns, corrective actions, safety
+                  rating</span></li>
+            </ul>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:var(--content-gap);">
+          <div class="info-card reveal d3">
+            <div class="section-num" style="margin-bottom:6px;">LLM Pipeline</div>
+            <ul class="skye-list" style="gap:0.35rem;">
+              <li><span>Model: <strong>Gemini 2.5 Flash</strong> (default)</span></li>
+              <li><span>Pluggable: Gemini · OpenAI · Claude · Ollama via LLM_PROVIDER env var</span></li>
+              <li><span>Formatting constrained — no ####, no backticks, no HTML from LLM</span></li>
+              <li><span>RAG service stubbed — text-embedding-004 upgrade pending</span></li>
+            </ul>
+          </div>
+          <div class="info-card reveal d4">
+            <div class="section-num" style="margin-bottom:6px;">Rendering</div>
+            <ul class="skye-list" style="gap:0.35rem;">
+              <li><span>Custom <code style="font-family:var(--font-mono); color:var(--accent);">SimpleMarkdown</code>
+                  renderer in Next.js</span></li>
+              <li><span>Handles #–##### headings, **bold**, *italic*, `code`, bullet/ordered lists</span></li>
+              <li><span>Copy-to-clipboard on report panel</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-counter"><span>07</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 8 — LIVE DASHBOARD
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-8">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">07 · Dashboard</div>
+        <h2>Live <span class="amber">Operations Centre</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div class="two-col">
+        <ul class="skye-list">
+          <li class="reveal d2">
+            <span>
+              <strong>Floor Map</strong> — SVG viewport matches image natural size; worker markers coloured by type
+              (guard=green, worker=blue, forklift=amber); hover tooltip shows label, zone, coords
+            </span>
+          </li>
+          <li class="reveal d3">
+            <span>
+              <strong>Personnel Sidebar</strong> — grouped Guards → Workers → Forklifts with per-type colour labels and
+              live position data
+            </span>
+          </li>
+          <li class="reveal d4">
+            <span>
+              <strong>Device Status Panel</strong> — AP and CCTV online/offline with heartbeat staleness detection (8 s
+              AP, 15 s CCTV)
+            </span>
+          </li>
+        </ul>
+        <ul class="skye-list">
+          <li class="reveal d3">
+            <span>
+              <strong>Critical Alert Banner</strong> — man_down &amp; collision fire a fixed top-centre banner with
+              amber glow; stacks for simultaneous alerts; manual dismiss only
+            </span>
+          </li>
+          <li class="reveal d4">
+            <span>
+              <strong>Alert Feed</strong> — full alert history with resolve/delete; ACTIVE badge pulses red; collision
+              shows worker ↔ forklift
+            </span>
+          </li>
+          <li class="reveal d5">
+            <span>
+              <strong>Simulation Controls</strong> — start/stop patrol-only or full safety-events sim from the
+              dashboard; clears stale RTDB state on each run
+            </span>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div class="slide-counter"><span>08</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 9 — SIMULATION SYSTEM
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-9">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">08 · Simulation</div>
+        <h2>Scripted <span class="amber">Demo Scenarios</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div class="two-col">
+        <div style="display:flex; flex-direction:column; gap:var(--content-gap);">
+          <div class="info-card reveal d2">
+            <div class="section-num" style="margin-bottom:6px;">Patrol Simulation</div>
+            <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5; margin-bottom:6px;">
+              2 guards follow configured patrol route (or coordinate-sorted fallback). Per-guard shift rotation — Guard
+              Beta starts at mid-route so guards are always offset.
+            </p>
+          </div>
+
+          <div class="info-card reveal d3">
+            <div class="section-num" style="margin-bottom:6px;">Actors</div>
+            <ul class="skye-list" style="gap:0.3rem;">
+              <li><span><strong>Guard Alpha</strong> (EE:01) — forward route</span></li>
+              <li><span><strong>Guard Beta</strong> (EE:04) — mid-route offset</span></li>
+              <li><span><strong>Worker 1</strong> (EE:02) — forward traversal</span></li>
+              <li><span><strong>Forklift 1</strong> (EE:03) — reverse traversal</span></li>
+            </ul>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:var(--content-gap);">
+          <div class="info-card reveal d3">
+            <div class="section-num" style="margin-bottom:6px;">Event Timeline (Safety Sim)</div>
+            <ul class="skye-list" style="gap:0.3rem;">
+              <li><span><strong>normal_patrol</strong> — baseline, 15 ticks</span></li>
+              <li><span><strong>man_down</strong> — backdated seed at tick 12, 20 ticks</span></li>
+              <li><span><strong>collision_warning</strong> — forklift + worker converge, 25 ticks</span></li>
+              <li><span><strong>ghost_patrol</strong> — BLE only, no VIGI, fires at tick 10</span></li>
+              <li><span><strong>missed_checkpoint</strong> — guard skips AP index 1</span></li>
+            </ul>
+          </div>
+          <div class="info-card reveal d4">
+            <div class="section-num" style="margin-bottom:6px;">Telemetry</div>
+            <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5;">
+              RSSI synthesised via inverse LDPL + Gaussian noise. Sent via <code
+                style="font-family:var(--font-mono); color:var(--accent);">POST /telemetry</code> each tick. Kalman and
+              safety checks run on the backend — same path as real hardware.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="slide-counter"><span>09</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 10 — TECHNOLOGY STACK
+       ============================================================ -->
+  <section class="slide content-slide grid-bg" id="slide-10">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">09 · Tech Stack</div>
+        <h2>Full <span class="amber">Technology Stack</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div class="stack-grid">
+        <div class="stack-card reveal d2">
+          <span class="stack-cat">Backend</span>
+          <ul class="stack-items">
+            <li>Python 3 / FastAPI</li>
+            <li>firebase-admin SDK</li>
+            <li>FilterPy (Kalman)</li>
+            <li>NumPy / SciPy</li>
+            <li>google-generativeai</li>
+          </ul>
+        </div>
+        <div class="stack-card reveal d3">
+          <span class="stack-cat">Frontend</span>
+          <ul class="stack-items">
+            <li>Next.js 15 App Router</li>
+            <li>TypeScript</li>
+            <li>Tailwind CSS v3</li>
+            <li>Zustand</li>
+            <li>Recharts</li>
+          </ul>
+        </div>
+        <div class="stack-card reveal d4">
+          <span class="stack-cat">Infrastructure</span>
+          <ul class="stack-items">
+            <li>Firebase RTDB (positions)</li>
+            <li>Firestore (config, logs)</li>
+            <li>Firebase Auth</li>
+            <li>TP-Link Omada APs</li>
+            <li>VIGI CCTV cameras</li>
+          </ul>
+        </div>
+        <div class="stack-card reveal d3">
+          <span class="stack-cat">AI / LLM</span>
+          <ul class="stack-items">
+            <li>Gemini 2.5 Flash (default)</li>
+            <li>OpenAI GPT (optional)</li>
+            <li>Claude (optional)</li>
+            <li>Ollama local (optional)</li>
+            <li>RAG — text-embedding-004</li>
+          </ul>
+        </div>
+        <div class="stack-card reveal d4">
+          <span class="stack-cat">Architecture</span>
+          <ul class="stack-items">
+            <li>Clean 4-layer backend</li>
+            <li>Route → Service → Repo → DB</li>
+            <li>Multi-building / multi-floor</li>
+            <li>Pluggable LLM providers</li>
+            <li>Role-based auth (admin/user)</li>
+          </ul>
+        </div>
+        <div class="stack-card reveal d5">
+          <span class="stack-cat">Algorithms</span>
+          <ul class="stack-items">
+            <li>LDPL path loss model</li>
+            <li>Least-squares multilateration</li>
+            <li>Kalman [x,y,vx,vy] filter</li>
+            <li>Kalman predict-ahead (3 s)</li>
+            <li>Gemini Vision zone detect</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="slide-counter"><span>10</span> / 11</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 11 — CLOSING / THANK YOU
+       ============================================================ -->
+  <section class="slide closing-slide grid-bg" id="slide-11">
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
+
+    <div class="slide-content" style="align-items:center; text-align:center; justify-content:center;">
+      <div class="badge reveal d1" style="animation: glow-pulse 2s ease-in-out infinite; display:inline-block;">System
+        Online</div>
+
+      <h2 class="reveal d2"
+        style="font-family:var(--font-display); font-size:var(--h2-size); font-weight:800; margin-top:clamp(0.6rem,1.5vh,1.2rem); letter-spacing:-0.02em;">
+        Thank You
+      </h2>
+      <h1 class="reveal d2"
+        style="font-family:var(--font-display); font-size:var(--title-size); font-weight:800; color:var(--accent); letter-spacing:-0.02em; line-height:1;">
+        SKYE Sentinel-AI
+      </h1>
+
+      <div class="amber-rule reveal d3" style="max-width:100px; margin:clamp(0.6rem,1.5vh,1rem) auto;"></div>
+
+      <!-- Stats row -->
+      <div class="stat-row reveal d4">
+        <div class="stat-block">
+          <span class="stat-num">4</span>
+          <span class="stat-label">Alert Types</span>
+        </div>
+        <div class="stat-block">
+          <span class="stat-num">2</span>
+          <span class="stat-label">Report Modes</span>
+        </div>
+        <div class="stat-block">
+          <span class="stat-num">4</span>
+          <span class="stat-label">LLM Providers</span>
+        </div>
+        <div class="stat-block">
+          <span class="stat-num">∞</span>
+          <span class="stat-label">Floors Supported</span>
+        </div>
+      </div>
+
+      <p class="reveal d5"
+        style="font-family:var(--font-mono); font-size:var(--small-size); color:var(--muted); margin-top:clamp(0.8rem,2vh,1.5rem); letter-spacing:0.06em;">
+        Questions? · hermanlyy · lyyherman@gmail.com
+      </p>
+
+      <div class="reveal d6"
+        style="display:flex; gap:8px; justify-content:center; margin-top:clamp(0.4rem,1vh,0.8rem); flex-wrap:wrap;">
+        <span class="pill pill-danger"><span class="dot dot-danger"></span>Man Down</span>
+        <span class="pill pill-warning"><span class="dot dot-warning"></span>Collision</span>
+        <span class="pill pill-info"><span class="dot dot-info"></span>Ghost Patrol</span>
+        <span class="pill pill-success"><span class="dot dot-success"></span>Patrol Violation</span>
+      </div>
+    </div>
+
+    <div class="slide-counter"><span>11</span> / 11</div>
+  </section>
+
+  <script>
+    /* ===========================================
+       SLIDE PRESENTATION CONTROLLER
+       Handles: keyboard, mouse wheel, touch/swipe,
+       progress bar, nav dots, IntersectionObserver
+       =========================================== */
+    class SlidePresentation {
+      constructor() {
+        this.slides = Array.from(document.querySelectorAll('.slide'));
+        this.current = 0;
+        this.isScrolling = false;
+        this.cooldown = 700; // ms between slide advances
+
+        this.progressBar = document.getElementById('progressBar');
+        this.navDotsContainer = document.getElementById('navDots');
+
+        this.setupNavDots();
+        this.setupIntersectionObserver();
+        this.setupKeyboard();
+        this.setupWheel();
+        this.setupTouch();
+        this.updateProgress();
+      }
+
+      /* Build nav dots — always clear first to avoid duplicates */
+      setupNavDots() {
+        this.navDotsContainer.innerHTML = '';
+        this.slides.forEach((_, i) => {
+          const dot = document.createElement('button');
+          dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+          dot.setAttribute('aria-label', `Go to slide ${i + 1}`);
+          dot.addEventListener('click', () => this.goTo(i));
+          this.navDotsContainer.appendChild(dot);
+        });
+      }
+
+      /* IntersectionObserver — triggers .visible for CSS animations */
+      setupIntersectionObserver() {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                const idx = this.slides.indexOf(entry.target);
+                if (idx !== -1) {
+                  this.current = idx;
+                  this.updateProgress();
+                  this.updateDots();
+                }
+              }
+            });
+          },
+          { threshold: 0.55 }
+        );
+        this.slides.forEach(s => observer.observe(s));
+      }
+
+      /* Keyboard: arrows, space, page up/down, home/end */
+      setupKeyboard() {
+        document.addEventListener('keydown', (e) => {
+          if (['ArrowDown', 'ArrowRight', ' ', 'PageDown'].includes(e.key)) {
+            e.preventDefault(); this.next();
+          } else if (['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key)) {
+            e.preventDefault(); this.prev();
+          } else if (e.key === 'Home') {
+            e.preventDefault(); this.goTo(0);
+          } else if (e.key === 'End') {
+            e.preventDefault(); this.goTo(this.slides.length - 1);
+          }
+        });
+      }
+
+      /* Mouse wheel — debounced */
+      setupWheel() {
+        document.addEventListener('wheel', (e) => {
+          if (this.isScrolling) return;
+          this.isScrolling = true;
+          if (e.deltaY > 0) this.next(); else this.prev();
+          setTimeout(() => { this.isScrolling = false; }, this.cooldown);
+        }, { passive: true });
+      }
+
+      /* Touch/swipe support */
+      setupTouch() {
+        let startY = 0;
+        document.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+        document.addEventListener('touchend', e => {
+          const dy = startY - e.changedTouches[0].clientY;
+          if (Math.abs(dy) < 40) return;
+          if (dy > 0) this.next(); else this.prev();
+        }, { passive: true });
+      }
+
+      next() { if (this.current < this.slides.length - 1) this.goTo(this.current + 1); }
+      prev() { if (this.current > 0) this.goTo(this.current - 1); }
+
+      goTo(idx) {
+        this.current = Math.max(0, Math.min(idx, this.slides.length - 1));
+        this.slides[this.current].scrollIntoView({ behavior: 'smooth' });
+        this.updateProgress();
+        this.updateDots();
+      }
+
+      updateProgress() {
+        const pct = this.slides.length > 1
+          ? (this.current / (this.slides.length - 1)) * 100
+          : 100;
+        this.progressBar.style.width = pct + '%';
+      }
+
+      updateDots() {
+        const dots = this.navDotsContainer.querySelectorAll('.nav-dot');
+        dots.forEach((d, i) => d.classList.toggle('active', i === this.current));
+      }
+    }
+
+    new SlidePresentation();
+  </script>
+</body>
+
+</html>
