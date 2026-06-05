@@ -52,3 +52,5 @@ backend/serviceAccountKey.json
 *.sw?
 .DS_Store
 Thumbs.db
+.claude/
+
