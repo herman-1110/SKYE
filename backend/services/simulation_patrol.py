@@ -410,10 +410,22 @@ async def run_simulation() -> None:
             for beacon in SIMULATED_BEACONS:
                 payload = _build_payload(beacon, now_ts)
                 n_readings = len(payload["readings"])
+                key = beacon["mac"].replace(":", "_")
+                pos_data = rtdb.reference(f"/positions/{key}").get() or {}
+                pred_x = pos_data.get("predicted_x")
+                pred_y = pos_data.get("predicted_y")
+                smooth_x = pos_data.get("x")
+                smooth_y = pos_data.get("y")
+                kal_str = (
+                    f" | smooth=({smooth_x:.2f}m, {smooth_y:.2f}m)"
+                    f" predicted=({pred_x:.2f}m, {pred_y:.2f}m)"
+                    if pred_x is not None and smooth_x is not None else ""
+                )
                 try:
                     resp = await client.post(TELEMETRY_ENDPOINT, json=payload,
                                              headers=headers, timeout=5.0)
-                    print(f"[SIM] tick {tick:4d} | {beacon['label']:12s} → {resp.status_code} ({n_readings} APs) | pos=({beacon['x_m']:.2f}m, {beacon['y_m']:.2f}m)")
+                    print(f"[SIM] tick {tick:4d} | {beacon['label']:12s} → {resp.status_code} ({n_readings} APs)"
+                          f" | pos=({beacon['x_m']:.2f}m, {beacon['y_m']:.2f}m){kal_str}")
                 except Exception as e:
                     print(f"[SIM] {beacon['label']} send failed: {e}")
 
