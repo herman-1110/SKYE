@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from models.floor import FloorRecord
 from repositories.ap_repository import ap_repository
+from repositories.cctv_repository import cctv_repository
 from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
 from repositories.zone_repository import zone_repository
@@ -77,13 +78,27 @@ class FloorService:
         floor = floor_repository.get_by_id(building_id, floor_id)
         if not floor:
             return
-            
+
         # 1. Delete all zones in this floor
         zones = zone_repository.get_all(building_id, floor_id)
         for zone in zones:
             zone_repository.delete(building_id, floor_id, zone.id)
-            
-        # 2. Delete floorplan image from Firebase Storage
+
+        # 2. Delete all APs — Firestore docs + RTDB heartbeats
+        aps = ap_repository.get_all(building_id, floor_id)
+        for ap in aps:
+            ap_repository.delete(building_id, floor_id, ap.id)
+            if ap.mac:
+                position_repository.delete_ap_heartbeat(ap.mac)
+
+        # 3. Delete all CCTVs — Firestore docs + RTDB heartbeats
+        cctvs = cctv_repository.get_all(building_id, floor_id)
+        for cctv in cctvs:
+            cctv_repository.delete(building_id, floor_id, cctv.id)
+            if cctv.mac:
+                cctv_repository.delete_cctv_heartbeat(cctv.mac)
+
+        # 4. Delete floorplan image from Firebase Storage
         if floor.storage_path:
             try:
                 bucket = storage.bucket("skye-3fa05.firebasestorage.app")
@@ -92,8 +107,8 @@ class FloorService:
                     blob.delete()
             except Exception as e:
                 print(f"Failed to delete storage file {floor.storage_path}: {e}")
-                
-        # 3. Delete floor document
+
+        # 5. Delete floor document
         floor_repository.delete(building_id, floor_id)
 
     def delete_ap(self, building_id: str, floor_id: str, ap_id: str) -> None:

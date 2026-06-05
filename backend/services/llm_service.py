@@ -52,6 +52,7 @@ class LLMService:
             f"## Patrol Log\n{patrol_lines}\n\n"
             f"## Safety Alerts\n{alert_lines}\n\n"
             f"## Historical Context\n{rag_context}\n\n"
+            "Industrial Safety Audit Report"
             "Provide: (1) overall safety rating 1-10, "
             "(2) key risk findings, (3) recommended corrective actions.\n\n"
             + _FORMAT_INSTRUCTIONS

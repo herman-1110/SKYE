@@ -1,6 +1,7 @@
 from dataclasses import asdict
 
 from firebase_admin import firestore
+from firebase_admin import db as rtdb
 
 from models.cctv import CCTV
 
@@ -26,6 +27,10 @@ class CCTVRepository:
 
     def delete(self, building_id: str, floor_id: str, cctv_id: str) -> None:
         self._col(building_id, floor_id).document(cctv_id).delete()
+
+    def delete_cctv_heartbeat(self, mac: str) -> None:
+        key = mac.replace(":", "_")
+        rtdb.reference(f"/cctv_heartbeats/{key}").delete()
 
 
 cctv_repository = CCTVRepository()
