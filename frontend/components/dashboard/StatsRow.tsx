@@ -26,14 +26,14 @@ export default function StatsRow() {
   const alertList = Object.values(alerts) as AlertRecord[];
   const activeAlerts = alertList.filter((a) => !a.resolved).length;
   const manDown = alertList.filter((a) => a.alert_type === "man_down").length;
-  const patrolBreaches = alertList.filter((a) => a.alert_type === "patrol_violation").length;
+  const collision = alertList.filter((a) => a.alert_type === "collision").length;
   const personnel = Object.keys(positions).length;
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       <StatCard label="Active Personnel" value={personnel} />
       <StatCard label="Active Alerts" value={activeAlerts} pulse={activeAlerts > 0} />
-      <StatCard label="Patrol Breaches" value={patrolBreaches} pulse={patrolBreaches > 0} />
+      <StatCard label="Collision" value={collision} pulse={collision > 0} />
       <StatCard label="Man Down" value={manDown} pulse={manDown > 0} />
     </div>
   );

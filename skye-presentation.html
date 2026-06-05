@@ -910,7 +910,7 @@
       </div>
     </div>
 
-    <div class="slide-counter"><span>01</span> / 11</div>
+    <div class="slide-counter"><span>01</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -957,7 +957,7 @@
         </li>
       </ul>
     </div>
-    <div class="slide-counter"><span>02</span> / 11</div>
+    <div class="slide-counter"><span>02</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1002,7 +1002,7 @@
         </ul>
       </div>
     </div>
-    <div class="slide-counter"><span>03</span> / 11</div>
+    <div class="slide-counter"><span>03</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1070,7 +1070,7 @@
         </div>
       </div>
     </div>
-    <div class="slide-counter"><span>04</span> / 11</div>
+    <div class="slide-counter"><span>04</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1128,7 +1128,7 @@
         </div>
       </div>
     </div>
-    <div class="slide-counter"><span>05</span> / 11</div>
+    <div class="slide-counter"><span>05</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1176,7 +1176,7 @@
         </div>
       </div>
     </div>
-    <div class="slide-counter"><span>06</span> / 11</div>
+    <div class="slide-counter"><span>06</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1233,7 +1233,7 @@
         </div>
       </div>
     </div>
-    <div class="slide-counter"><span>07</span> / 11</div>
+    <div class="slide-counter"><span>07</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1290,7 +1290,7 @@
         </ul>
       </div>
     </div>
-    <div class="slide-counter"><span>08</span> / 11</div>
+    <div class="slide-counter"><span>08</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1337,17 +1337,20 @@
             </ul>
           </div>
           <div class="info-card reveal d4">
-            <div class="section-num" style="margin-bottom:6px;">Telemetry</div>
-            <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5;">
+            <div class="section-num" style="margin-bottom:6px;">Telemetry &amp; Log Output</div>
+            <p style="font-size:var(--body-size); color:var(--muted); line-height:1.5; margin-bottom:6px;">
               RSSI synthesised via inverse LDPL + Gaussian noise. Sent via <code
                 style="font-family:var(--font-mono); color:var(--accent);">POST /telemetry</code> each tick. Kalman and
               safety checks run on the backend — same path as real hardware.
+            </p>
+            <p style="font-family:var(--font-mono); font-size:clamp(0.58rem,0.9vw,0.72rem); color:var(--accent); line-height:1.6;">
+              pos=(x,y) | smooth=(sx,sy) predicted=(px,py)
             </p>
           </div>
         </div>
       </div>
     </div>
-    <div class="slide-counter"><span>09</span> / 11</div>
+    <div class="slide-counter"><span>09</span> / 12</div>
   </section>
 
   <!-- ============================================================
@@ -1424,13 +1427,76 @@
         </div>
       </div>
     </div>
-    <div class="slide-counter"><span>10</span> / 11</div>
+    <div class="slide-counter"><span>10</span> / 12</div>
   </section>
 
   <!-- ============================================================
-       SLIDE 11 — CLOSING / THANK YOU
+       SLIDE 11 — FUTURE IMPROVEMENTS / ROADMAP
        ============================================================ -->
-  <section class="slide closing-slide grid-bg" id="slide-11">
+  <section class="slide content-slide grid-bg" id="slide-11">
+    <div class="slide-content">
+      <div class="slide-header reveal d1">
+        <div class="section-num">10 · Roadmap</div>
+        <h2>Future <span class="amber">Improvements</span></h2>
+        <div class="amber-rule"></div>
+      </div>
+
+      <div class="two-col">
+        <ul class="skye-list">
+          <li class="reveal d2">
+            <span>
+              <strong>AI Chatbot</strong> — natural language queries over alerts and reports;
+              LLM function-calling maps intent to Firebase queries and returns formatted answers
+              <span class="note">Planned: floating chat panel, POST /chatbot/query</span>
+            </span>
+          </li>
+          <li class="reveal d3">
+            <span>
+              <strong>Patrol Route Overlay</strong> — visualise configured AP route as an animated
+              path on the floor map SVG; highlight current guard position in the sequence
+              <span class="note">PatrolRouteOverlay.tsx component</span>
+            </span>
+          </li>
+          <li class="reveal d4">
+            <span>
+              <strong>RAG Re-enable</strong> — semantic retrieval over historical reports using
+              text-embedding-004; currently stubbed pending vector store integration
+              <span class="note">Improves LLM context for audit quality</span>
+            </span>
+          </li>
+        </ul>
+        <ul class="skye-list">
+          <li class="reveal d3">
+            <span>
+              <strong>Auto Checkpoint Detection</strong> — replace simulation patrol log writes with
+              geofence-triggered checkpoint events from real beacon proximity
+              <span class="note">patrol_tracker_service.py</span>
+            </span>
+          </li>
+          <li class="reveal d4">
+            <span>
+              <strong>Patrol Compliance Analytics</strong> — per-guard, per-shift trend charts;
+              missed checkpoint frequency heatmap; dwell-time distribution
+              <span class="note">Recharts dashboard extension</span>
+            </span>
+          </li>
+          <li class="reveal d5">
+            <span>
+              <strong>Mobile Supervisor View</strong> — responsive alert feed and floor map for
+              on-site supervisors; push notifications for critical alerts
+              <span class="note">Progressive Web App target</span>
+            </span>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <div class="slide-counter"><span>11</span> / 12</div>
+  </section>
+
+  <!-- ============================================================
+       SLIDE 12 — CLOSING / THANK YOU
+       ============================================================ -->
+  <section class="slide closing-slide grid-bg" id="slide-12">
     <div class="corner corner-tl"></div>
     <div class="corner corner-tr"></div>
     <div class="corner corner-bl"></div>
@@ -1485,7 +1551,7 @@
       </div>
     </div>
 
-    <div class="slide-counter"><span>11</span> / 11</div>
+    <div class="slide-counter"><span>12</span> / 12</div>
   </section>
 
   <script>
