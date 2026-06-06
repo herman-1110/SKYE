@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   subscribeToReports,
   unsubscribeFromReports,
@@ -96,6 +96,80 @@ function SimpleMarkdown({ text }: { text: string }) {
           </p>
         );
       })}
+    </div>
+  );
+}
+
+function CustomSelect({
+  value,
+  onChange,
+  options,
+  placeholder = "Select…",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+
+  return (
+    <div ref={ref} className="relative flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-2 bg-s-surface border border-s-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-s-accent transition-colors hover:border-s-accent"
+      >
+        <span className={`truncate ${selected ? "text-s-text" : "text-s-muted"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5"
+          strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 text-s-muted transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <ul className="absolute z-50 mt-1 w-full bg-s-surface border border-s-border rounded-lg shadow-lg overflow-y-auto max-h-56 py-1">
+          <li>
+            <button
+              type="button"
+              onClick={() => { onChange(""); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs font-mono text-s-muted hover:bg-s-elevated transition-colors"
+            >
+              {placeholder}
+            </button>
+          </li>
+          {options.map((o) => (
+            <li key={o.value}>
+              <button
+                type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-xs font-mono transition-colors hover:bg-s-elevated ${
+                  o.value === value ? "text-s-accent font-semibold" : "text-s-text"
+                }`}
+              >
+                {o.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -215,30 +289,21 @@ export default function ReportsPage() {
               ) : shifts.length === 0 ? (
                 <p className="flex-1 text-s-muted text-xs font-mono px-3 py-2">No completed patrol shifts available. Run a simulation first.</p>
               ) : (
-                <select
+                <CustomSelect
                   value={selectedShift ? `${selectedShift.log_id}|${selectedShift.guard_id}` : ""}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  onChange={(val) => {
                     if (!val) { setSelectedShift(null); return; }
                     const sep = val.indexOf("|");
                     const logId = val.slice(0, sep);
                     const guardId = val.slice(sep + 1);
                     setSelectedShift(shifts.find((s) => s.log_id === logId && s.guard_id === guardId) ?? null);
                   }}
-                  className="flex-1 bg-s-surface border border-s-border rounded-lg px-3 py-2 text-xs text-s-text font-mono focus:outline-none focus:border-s-accent"
-                >
-                  <option value="">Select a shift…</option>
-                  {shifts.map((s) => {
-                    const start = s.shift_start
-                      ? new Date(s.shift_start * 1000).toLocaleString()
-                      : "Unknown start";
-                    return (
-                      <option key={`${s.log_id}|${s.guard_id}`} value={`${s.log_id}|${s.guard_id}`}>
-                        {s.guard_label} — {start}
-                      </option>
-                    );
-                  })}
-                </select>
+                  placeholder="Select a shift…"
+                  options={shifts.map((s) => ({
+                    value: `${s.log_id}|${s.guard_id}`,
+                    label: `${s.guard_label} — ${s.shift_start ? new Date(s.shift_start * 1000).toLocaleString() : "Unknown start"}`,
+                  }))}
+                />
               )}
               <button
                 onClick={handleGenerate}
@@ -285,14 +350,9 @@ export default function ReportsPage() {
                   No safety alerts recorded yet.
                 </p>
               ) : (
-                <select
-                  value={
-                    selectedGroup
-                      ? `${selectedGroup.person_id}|${selectedGroup.date_str}`
-                      : ""
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value;
+                <CustomSelect
+                  value={selectedGroup ? `${selectedGroup.person_id}|${selectedGroup.date_str}` : ""}
+                  onChange={(val) => {
                     if (!val) { setSelectedGroup(null); return; }
                     const [personId, dateStr] = val.split("|");
                     setSelectedGroup(
@@ -301,19 +361,12 @@ export default function ReportsPage() {
                       ) ?? null
                     );
                   }}
-                  className="flex-1 bg-s-surface border border-s-border rounded-lg px-3 py-2 text-xs text-s-text font-mono focus:outline-none focus:border-s-accent"
-                >
-                  <option value="">Select person + date…</option>
-                  {safetyGroups.map((g) => (
-                    <option
-                      key={`${g.person_id}|${g.date_str}`}
-                      value={`${g.person_id}|${g.date_str}`}
-                    >
-                      {g.person_id} — {g.date_str} ({g.alert_count} alert
-                      {g.alert_count !== 1 ? "s" : ""})
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Select person + date…"
+                  options={safetyGroups.map((g) => ({
+                    value: `${g.person_id}|${g.date_str}`,
+                    label: `${g.person_id} — ${g.date_str} (${g.alert_count} alert${g.alert_count !== 1 ? "s" : ""})`,
+                  }))}
+                />
               )}
               <button
                 onClick={handleGenerateSafety}

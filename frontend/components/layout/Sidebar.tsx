@@ -6,6 +6,7 @@ import { useDashboardStore } from "@/store/dashboardStore";
 import { subscribeToPendingCount } from "@/services/userService";
 import { useAuth } from "@/hooks/useAuth";
 import type { PositionRecord } from "@/types/position";
+import type { AlertRecord } from "@/types/alert";
 
 const NAV_ALL = [
   {
@@ -53,6 +54,9 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
   const positions = useDashboardStore((s) => s.positions);
   const personnel = Object.values(positions) as PositionRecord[];
   const [pendingCount, setPendingCount] = useState(0);
+  const alerts = useDashboardStore((s) => s.alerts);
+  const activeAlertCount = Object.values(alerts as Record<string, AlertRecord>)
+    .filter((a) => !a.resolved).length;
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -86,8 +90,12 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
       <nav className={`pt-3 ${collapsed ? "flex flex-col items-center gap-2 px-2" : "flex flex-col gap-0.5 px-2"}`}>
         {navItems.map(({ href, label, icon }) => {
           const active = pathname === href;
-          const isUsers = href === "/dashboard/users";
-          const showBadge = isUsers && pendingCount > 0;
+          const isUsers  = href === "/dashboard/users";
+          const isAlerts = href === "/dashboard/alerts";
+          const badgeCount =
+            isUsers  ? pendingCount :
+            isAlerts ? activeAlertCount : 0;
+          const showBadge = badgeCount > 0;
 
           if (collapsed) {
             return (
@@ -104,7 +112,7 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
                 {showBadge && (
                   <span className="absolute top-0 right-0 h-3.5 w-3.5 rounded-full bg-s-accent flex items-center justify-center border-2 border-s-surface">
                     <span className="font-mono text-[7px] font-bold text-white leading-none">
-                      {pendingCount > 9 ? "9+" : pendingCount}
+                      {badgeCount > 9 ? "9+" : badgeCount}
                     </span>
                   </span>
                 )}
@@ -126,7 +134,7 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
                 {showBadge && !active && (
                   <span className="absolute -top-1.5 -right-1.5 h-3.5 w-3.5 rounded-full bg-s-accent flex items-center justify-center">
                     <span className="font-mono text-[8px] font-bold text-s-base leading-none">
-                      {pendingCount > 9 ? "9+" : pendingCount}
+                      {badgeCount > 9 ? "9+" : badgeCount}
                     </span>
                   </span>
                 )}
@@ -135,7 +143,7 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
               {showBadge && (
                 <span className="ml-auto h-4 min-w-4 px-1 rounded-full bg-s-accent flex items-center justify-center">
                   <span className="font-mono text-[9px] font-bold text-s-base leading-none">
-                    {pendingCount > 9 ? "9+" : pendingCount}
+                    {badgeCount > 9 ? "9+" : badgeCount}
                   </span>
                 </span>
               )}
