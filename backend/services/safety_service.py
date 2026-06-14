@@ -67,7 +67,7 @@ class SafetyService:
 
                 pair_key = f"{w.person_id}|{f.person_id}"
                 last_ts = _last_collision.get(pair_key)
-                if last_ts and seconds_between(last_ts, utcnow_iso()) < 30:
+                if last_ts and seconds_between(last_ts, utcnow_iso()) < 10:
                     continue
 
                 record = AlertRecord(

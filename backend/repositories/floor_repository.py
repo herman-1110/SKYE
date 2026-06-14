@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 from firebase_admin import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 from models.floor import FloorRecord
 
@@ -53,7 +54,7 @@ class FloorRepository:
         return self._to_record(doc.to_dict())
 
     def get_active(self, building_id: str) -> Optional[FloorRecord]:
-        docs = list(self._col(building_id).where("is_active", "==", True).limit(1).stream())
+        docs = list(self._col(building_id).where(filter=FieldFilter("is_active", "==", True)).limit(1).stream())
         if not docs:
             return None
         return self._to_record(docs[0].to_dict())
@@ -63,7 +64,7 @@ class FloorRepository:
         db = self._db()
         docs = list(
             db.collection_group(self._FLOORS)
-            .where("is_active", "==", True)
+            .where(filter=FieldFilter("is_active", "==", True))
             .limit(1)
             .stream()
         )

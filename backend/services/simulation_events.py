@@ -37,9 +37,9 @@ from utils.timestamp_utils import utcnow_iso
 TICK_INTERVAL_S  = 1.0
 BACKEND_URL      = "http://localhost:8000"
 TELEMETRY_ENDPOINT = f"{BACKEND_URL}/telemetry"
-WANDER_TICKS_MIN = 5
-WANDER_TICKS_MAX = 8
-WANDER_RADIUS_M  = 2.0
+WANDER_TICKS_MIN = 1
+WANDER_TICKS_MAX = 1
+WANDER_RADIUS_M  = 1.0
 
 SIMULATED_CCTVS: List[Dict] = [
     {"mac": "A8:57:4E:3C:11:01", "name": "VIGI C340 (Sim)"},
@@ -48,14 +48,14 @@ SIMULATED_CCTVS: List[Dict] = [
 # ── Scenario timeline ──────────────────────────────────────────────────────
 # (segment_name, duration_ticks)
 SEGMENTS = [
-    ("normal_patrol",     15),   # 15s  — establish baseline
-    ("man_down",          20),   # 20s  — worker stationary, alert fires at tick 12
-    ("normal_patrol",     10),   # 10s
-    ("collision_warning", 25),   # 25s  — forklift + worker converge
-    ("normal_patrol",     10),   # 10s
-    ("ghost_patrol",      15),   # 15s  — BLE no VIGI, fires at tick 10
-    ("normal_patrol",     10),   # 10s
-    ("missed_checkpoint", 10),   # 10s  — guard skips AP, fires almost immediately
+    ("normal_patrol",     3),   # 3s  — establish baseline
+    ("man_down",          10),   # 10s  — worker stationary, alert fires at tick 5
+    ("normal_patrol",     3),   # 3s
+    ("collision_warning", 5),   # 5s  — forklift + worker converge
+    ("normal_patrol",     3),   # 3s
+    ("ghost_patrol",      5),   # 5s  — BLE no VIGI, fires at tick 2
+    ("normal_patrol",     3),   # 3s
+    ("missed_checkpoint", 5),   # 5s  — guard skips AP, fires almost immediately
 ]
 
 # ── Beacons ────────────────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ def _tick_man_down(tick: int) -> None:
     danger_x = _floor_bounds["x_max"] - WANDER_RADIUS_M
     danger_y = _floor_bounds["y_max"] - WANDER_RADIUS_M
 
-    if tick < 10:
+    if tick < 3:
         _move_toward(worker, danger_x, danger_y, speed=_scale_speed(1.0))
     else:
         worker["vx"] = 0.0
@@ -319,7 +319,7 @@ def _tick_man_down(tick: int) -> None:
                  _floor_bounds["y_min"] + _floor_bounds["h"] * 0.5,
                  speed=_scale_speed(0.3))
 
-    if tick == 12 and not _mandown_seeded:
+    if tick == 5 and not _mandown_seeded:
         _mandown_seeded = True
         print(f"[SIM] man_down: seeding backdated position for worker")
 
@@ -349,7 +349,7 @@ def _tick_ghost_patrol(tick: int) -> None:
     guard_a["vx"] = 0.0
     guard_a["vy"] = 0.0
 
-    if tick == 10 and not _event_fired:
+    if tick == 2 and not _event_fired:
         _event_fired = True
         cp_ap = _floor_aps[0]
         _write_patrol_log(
@@ -545,8 +545,8 @@ async def run_simulation() -> None:
             elif segment == "missed_checkpoint":
                 _tick_missed_checkpoint(_segment_tick)
 
-            # man_down: send backdated seed payload at tick 30
-            if segment == "man_down" and _segment_tick == 12 and _mandown_seeded:
+            # man_down: send backdated seed payload at tick 5
+            if segment == "man_down" and _segment_tick == 5 and _mandown_seeded:
                 worker = SIMULATED_BEACONS[2]
                 seed_ts = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
                 seed_payload = _build_payload(worker, seed_ts)

@@ -38,11 +38,11 @@ BACKEND_URL        = "http://localhost:8000"
 TELEMETRY_ENDPOINT = f"{BACKEND_URL}/telemetry"
 
 # How long (in ticks) a guard wanders within an AP zone before moving on
-WANDER_TICKS_MIN = 5
-WANDER_TICKS_MAX = 8
+WANDER_TICKS_MIN = 1
+WANDER_TICKS_MAX = 1
 
 # Wander radius around each AP in metres
-WANDER_RADIUS_M = 2.0
+WANDER_RADIUS_M = 1.0
 
 SIMULATED_CCTVS: List[Dict] = [
     {"mac": "A8:57:4E:3C:11:01", "name": "VIGI C340 (Sim)"},
@@ -271,7 +271,7 @@ def _tick_guard(beacon: Dict) -> None:
             if beacon["checkpoints_this_loop"] >= n_aps:
                 beacon["loops_completed"] += 1
                 beacon["checkpoints_this_loop"] = 0
-                beacon["current_ap_idx"] = 0
+                beacon["current_ap_idx"] = (beacon["current_ap_idx"] + 1) % n_aps
                 try:
                     _rotate_shift(beacon)
                 except Exception as e:
