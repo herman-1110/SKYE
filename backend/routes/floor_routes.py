@@ -164,9 +164,19 @@ def create_ap(
     body: APCreateRequest,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    existing = ap_repository.get_all(building_id, floor_id)
-    if any(a.mac.upper() == body.mac for a in existing):
-        raise HTTPException(status_code=409, detail=f"AP with MAC {body.mac} already exists on this floor")
+    global_matches = ap_repository.get_by_mac_global(body.mac)
+    if global_matches:
+        match = global_matches[0]
+        if match.floor_id == floor_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"AP with MAC {body.mac} already exists on this floor"
+            )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail=f"AP with MAC {body.mac} is already registered on another floor (floor_id: {match.floor_id}). Each AP MAC must be globally unique."
+            )
     ap = AccessPoint(
         id=str(uuid.uuid4()),
         floor_id=floor_id,

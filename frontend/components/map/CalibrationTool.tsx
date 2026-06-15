@@ -27,9 +27,25 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
   // CSS-pixel bounds of the rendered image inside the canvas (objectFit: contain adds letterbox).
   // Used to position DOM marker overlays precisely over the visible image.
   const [imgArea, setImgArea] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imgRef    = useRef<HTMLImageElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const imgRef       = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panStart     = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
+
+  const clampPan = (x: number, y: number, z: number): { x: number; y: number } => {
+    const container = containerRef.current;
+    if (!container) return { x, y };
+    const maxX = (container.offsetWidth  * (z - 1)) / 2;
+    const maxY = (container.offsetHeight * (z - 1)) / 2;
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  };
 
   // Escape → close
   useEffect(() => {
@@ -91,11 +107,14 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
     const compute = () => {
       const canvas = canvasRef.current;
       if (!canvas || canvas.width === 0 || canvas.height === 0) return;
-      const rect  = canvas.getBoundingClientRect();
-      const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height);
+      // Use offsetWidth/Height (layout space, unaffected by CSS transform) so the
+      // marker overlay's absolute position stays correct at any zoom level.
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      const scale = Math.min(w / canvas.width, h / canvas.height);
       setImgArea({
-        x: (rect.width  - canvas.width  * scale) / 2,
-        y: (rect.height - canvas.height * scale) / 2,
+        x: (w - canvas.width  * scale) / 2,
+        y: (h - canvas.height * scale) / 2,
         w: canvas.width  * scale,
         h: canvas.height * scale,
       });
@@ -104,6 +123,28 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
     window.addEventListener("resize", compute);
     return () => window.removeEventListener("resize", compute);
   }, [imgLoaded]);
+
+  useEffect(() => {
+    if (zoom <= 1) {
+      setPan({ x: 0, y: 0 });
+    } else {
+      setPan((p) => clampPan(p.x, p.y, zoom));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom]);
+
+  // Non-passive wheel listener so we can call preventDefault() and prevent page scroll.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.15 : -0.15;
+      setZoom((z) => Math.max(1, Math.min(6, z + delta)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   // Convert CSS pointer coordinates → image fractions (0..1).
   // Accounts for the objectFit: contain letterbox offset.
@@ -243,7 +284,6 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
             position: "relative",
             overflow: "hidden",
             background: "#060608",
-            cursor: step < 3 && imgLoaded ? "crosshair" : "default",
           }}
         >
           {!imgLoaded && (
@@ -252,104 +292,193 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
             </div>
           )}
 
-          {/* Canvas — objectFit: contain handles aspect-ratio scaling, no JS zoom needed */}
-          <canvas
-            ref={canvasRef}
-            onClick={handleCanvasClick}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseLeave={() => { if (step === 2) setCursorPos(null); }}
-            style={{
-              display: imgLoaded ? "block" : "none",
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-              cursor: step < 3 ? "crosshair" : "default",
-            }}
-          />
-
-          {/* ── DOM marker overlay ───────────────────────────────────
-               Positioned exactly over the rendered image area so markers
-               align with the objectFit: contain image, not the canvas box. */}
-          {imgLoaded && imgArea.w > 0 && (
+          {/* Zoom controls */}
+          {imgLoaded && (
             <div
               style={{
                 position: "absolute",
-                left: imgArea.x,
-                top: imgArea.y,
-                width: imgArea.w,
-                height: imgArea.h,
-                pointerEvents: "none",
+                bottom: 12,
+                right: 12,
+                zIndex: 20,
+                display: "flex",
+                gap: 6,
+                alignItems: "center",
               }}
             >
-              {([{ pt: pointA, label: "A" }, { pt: pointB, label: "B" }] as const).map(
-                ({ pt, label }) =>
-                  pt && (
-                    <div
-                      key={label}
-                      style={{
-                        position: "absolute",
-                        left: `${pt.px * 100}%`,
-                        top: `${pt.py * 100}%`,
-                        transform: "translate(-50%, -50%)",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      {/* Label sits above the ring, no background pill */}
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "-18px",
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          fontSize: "10px",
-                          fontFamily: "IBM Plex Mono, monospace",
-                          color: "var(--accent)",
-                          whiteSpace: "nowrap",
-                          userSelect: "none",
-                        }}
-                      >
-                        {label}
-                      </div>
-
-                      {/* Outer ring — hover scales up */}
-                      <div
-                        style={{
-                          width: "20px",
-                          height: "20px",
-                          borderRadius: "50%",
-                          border: "1.5px solid rgba(245,158,11,0.6)",
-                          boxShadow: "0 0 0 3px rgba(245,158,11,0.2)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          transition: "transform 120ms ease",
-                          pointerEvents: "auto",
-                          cursor: "default",
-                        }}
-                        onMouseEnter={(e) => {
-                          (e.currentTarget as HTMLDivElement).style.transform = "scale(1.2)";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLDivElement).style.transform = "scale(1)";
-                        }}
-                      >
-                        {/* Inner dot */}
-                        <div
-                          style={{
-                            width: "6px",
-                            height: "6px",
-                            borderRadius: "50%",
-                            backgroundColor: "var(--accent)",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )
+              <button
+                onClick={() => setZoom((z) => Math.max(1, z - 0.25))}
+                style={{
+                  width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)",
+                  background: "var(--bg-elevated)", color: "var(--text-primary)",
+                  fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", lineHeight: 1,
+                }}
+                title="Zoom out"
+              >−</button>
+              <span style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 10, color: "var(--text-secondary)", minWidth: 36, textAlign: "center" }}>
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                onClick={() => setZoom((z) => Math.min(6, z + 0.25))}
+                style={{
+                  width: 28, height: 28, borderRadius: 7, border: "1px solid var(--border)",
+                  background: "var(--bg-elevated)", color: "var(--text-primary)",
+                  fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", lineHeight: 1,
+                }}
+                title="Zoom in"
+              >+</button>
+              {zoom > 1 && (
+                <button
+                  onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+                  style={{
+                    height: 28, padding: "0 10px", borderRadius: 7, border: "1px solid var(--border)",
+                    background: "var(--bg-elevated)", color: "var(--text-secondary)",
+                    fontSize: 10, fontFamily: "IBM Plex Mono, monospace", cursor: "pointer",
+                  }}
+                  title="Reset zoom"
+                >Reset</button>
               )}
             </div>
           )}
 
+          {/* Pan/zoom container — intercepts wheel (via useEffect) and drag-to-pan */}
+          <div
+            ref={containerRef}
+            style={{
+              position: "absolute",
+              inset: 0,
+              overflow: "hidden",
+              cursor: isPanning ? "grabbing" : (step < 3 && imgLoaded ? "crosshair" : zoom > 1 ? "grab" : "default"),
+            }}
+            onMouseDown={(e) => {
+              if (zoom <= 1) return;
+              setIsPanning(true);
+              panStart.current = { mx: e.clientX, my: e.clientY, px: pan.x, py: pan.y };
+            }}
+            onMouseMove={(e) => {
+              if (isPanning && panStart.current) {
+                setPan(clampPan(
+                  panStart.current.px + (e.clientX - panStart.current.mx),
+                  panStart.current.py + (e.clientY - panStart.current.my),
+                  zoom,
+                ));
+              }
+            }}
+            onMouseUp={() => { setIsPanning(false); panStart.current = null; }}
+            onMouseLeave={() => {
+              setIsPanning(false);
+              panStart.current = null;
+              if (step === 2) setCursorPos(null);
+            }}
+          >
+            {/* Transform wrapper — canvas + overlay move together so markers stay aligned */}
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                position: "relative",
+                transformOrigin: "center center",
+                transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                transition: isPanning ? "none" : "transform 0.1s ease",
+              }}
+            >
+              <canvas
+                ref={canvasRef}
+                onClick={handleCanvasClick}
+                onMouseMove={handleCanvasMouseMove}
+                style={{
+                  display: imgLoaded ? "block" : "none",
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "contain",
+                  cursor: "inherit",
+                }}
+              />
 
+              {/* ── DOM marker overlay ───────────────────────────────────
+                   imgArea is computed in layout space (offsetWidth/Height), so
+                   these positions are correct inside the transform wrapper. */}
+              {imgLoaded && imgArea.w > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: imgArea.x,
+                    top: imgArea.y,
+                    width: imgArea.w,
+                    height: imgArea.h,
+                    pointerEvents: "none",
+                  }}
+                >
+                  {([{ pt: pointA, label: "A" }, { pt: pointB, label: "B" }] as const).map(
+                    ({ pt, label }) =>
+                      pt && (
+                        <div
+                          key={label}
+                          style={{
+                            position: "absolute",
+                            left: `${pt.px * 100}%`,
+                            top: `${pt.py * 100}%`,
+                            transform: "translate(-50%, -50%)",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          {/* Label sits above the ring, no background pill */}
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: "-18px",
+                              left: "50%",
+                              transform: "translateX(-50%)",
+                              fontSize: "10px",
+                              fontFamily: "IBM Plex Mono, monospace",
+                              color: "var(--accent)",
+                              whiteSpace: "nowrap",
+                              userSelect: "none",
+                            }}
+                          >
+                            {label}
+                          </div>
+
+                          {/* Outer ring — hover scales up */}
+                          <div
+                            style={{
+                              width: "20px",
+                              height: "20px",
+                              borderRadius: "50%",
+                              border: "1.5px solid rgba(245,158,11,0.6)",
+                              boxShadow: "0 0 0 3px rgba(245,158,11,0.2)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              transition: "transform 120ms ease",
+                              pointerEvents: "auto",
+                              cursor: "default",
+                            }}
+                            onMouseEnter={(e) => {
+                              (e.currentTarget as HTMLDivElement).style.transform = "scale(1.2)";
+                            }}
+                            onMouseLeave={(e) => {
+                              (e.currentTarget as HTMLDivElement).style.transform = "scale(1)";
+                            }}
+                          >
+                            {/* Inner dot */}
+                            <div
+                              style={{
+                                width: "6px",
+                                height: "6px",
+                                borderRadius: "50%",
+                                backgroundColor: "var(--accent)",
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* ── RIGHT: controls panel ─────────────────────────────────── */}

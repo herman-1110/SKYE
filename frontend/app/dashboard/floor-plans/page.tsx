@@ -236,7 +236,21 @@ function AddFloorModal({
   existingCount: number;
   onClose: () => void;
 }) {
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef            = useRef<HTMLInputElement>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const previewPanStart    = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
+
+  const clampPreviewPan = (x: number, y: number, z: number): { x: number; y: number } => {
+    const container = previewContainerRef.current;
+    if (!container) return { x, y };
+    const maxX = (container.offsetWidth  * (z - 1)) / 2;
+    const maxY = (container.offsetHeight * (z - 1)) / 2;
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  };
+  
   const [name, setName] = useState("");
   const [floorNumber, setFloorNumber] = useState(String(existingCount + 1));
   const [file, setFile] = useState<File | null>(null);
@@ -244,6 +258,9 @@ function AddFloorModal({
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
+  const [previewPanning, setPreviewPanning] = useState(false);
 
   const ACCEPTED = ["image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
 
@@ -261,6 +278,28 @@ function AddFloorModal({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, progress]);
+
+  // Non-passive wheel listener on the preview container so preventDefault() works.
+  // Re-registers whenever preview changes (container mounts/unmounts with file changes).
+  useEffect(() => {
+    const el = previewContainerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.2 : -0.2;
+      setPreviewZoom((z) => {
+        const next = Math.max(1, Math.min(6, z + delta));
+        if (next <= 1) {
+          setPreviewPan({ x: 0, y: 0 });
+        } else {
+          setPreviewPan((p) => clampPreviewPan(p.x, p.y, next));
+        }
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [preview]);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -303,7 +342,57 @@ function AddFloorModal({
           {file ? (
             <div className="border border-s-border rounded-lg overflow-hidden">
               {preview ? (
-                <img src={preview} alt={file.name} className="w-full h-32 object-cover" />
+                <div
+                  ref={previewContainerRef}
+                  style={{
+                    position: "relative",
+                    height: 160,
+                    overflow: "hidden",
+                    background: "#060608",
+                    cursor: previewPanning ? "grabbing" : previewZoom > 1 ? "grab" : "zoom-in",
+                  }}
+                  onMouseDown={(e) => {
+                    if (previewZoom <= 1) return;
+                    setPreviewPanning(true);
+                    previewPanStart.current = { mx: e.clientX, my: e.clientY, px: previewPan.x, py: previewPan.y };
+                  }}
+                  onMouseMove={(e) => {
+                    if (previewPanning && previewPanStart.current) {
+                      setPreviewPan(clampPreviewPan(
+                        previewPanStart.current.px + (e.clientX - previewPanStart.current.mx),
+                        previewPanStart.current.py + (e.clientY - previewPanStart.current.my),
+                        previewZoom,
+                      ));
+                    }
+                  }}
+                  onMouseUp={() => { setPreviewPanning(false); previewPanStart.current = null; }}
+                  onMouseLeave={() => { setPreviewPanning(false); previewPanStart.current = null; }}
+                >
+                  <img
+                    src={preview}
+                    alt={file.name}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      transformOrigin: "center center",
+                      transform: `scale(${previewZoom}) translate(${previewPan.x / previewZoom}px, ${previewPan.y / previewZoom}px)`,
+                      transition: previewPanning ? "none" : "transform 0.1s ease",
+                      userSelect: "none",
+                      pointerEvents: "none",
+                    }}
+                    draggable={false}
+                  />
+                  {previewZoom === 1 && (
+                    <div style={{
+                      position: "absolute", bottom: 6, right: 8,
+                      fontFamily: "IBM Plex Mono, monospace", fontSize: 9,
+                      color: "rgba(255,255,255,0.35)", pointerEvents: "none", userSelect: "none",
+                    }}>
+                      scroll to zoom
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="h-20 bg-s-elevated flex items-center justify-center text-s-muted">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
@@ -311,7 +400,7 @@ function AddFloorModal({
               )}
               <div className="flex items-center justify-between px-3 py-2 bg-s-elevated border-t border-s-border">
                 <p className="text-xs text-s-text truncate">{file.name}</p>
-                <button onClick={() => { setFile(null); setPreview(null); }} className="text-s-muted hover:text-s-danger ml-2 shrink-0 transition-colors">
+                <button onClick={() => { setFile(null); setPreview(null); setPreviewZoom(1); setPreviewPan({ x: 0, y: 0 }); }} className="text-s-muted hover:text-s-danger ml-2 shrink-0 transition-colors">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                 </button>
               </div>

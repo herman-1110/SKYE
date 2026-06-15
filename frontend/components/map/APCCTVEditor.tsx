@@ -88,7 +88,11 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
       if (msg.includes("409") || msg.toLowerCase().includes("already exists")) {
-        setMacError("An AP with this MAC is already on this floor");
+        if (msg.toLowerCase().includes("another floor")) {
+          setMacError("This MAC is already registered on a different floor. Each AP must have a unique MAC across all floors.");
+        } else {
+          setMacError("An AP with this MAC already exists on this floor.");
+        }
       } else {
         toast.error("Failed to place AP");
       }

@@ -24,6 +24,16 @@ class APRepository:
         docs = self._col(building_id, floor_id).stream()
         return [AccessPoint(**d.to_dict()) for d in docs]
 
+    def get_by_mac_global(self, mac: str) -> list[AccessPoint]:
+        """Return all AP documents across ALL buildings and floors that match this MAC (case-insensitive)."""
+        docs = (
+            firestore.client()
+            .collection_group("access_points")
+            .where("mac", "==", mac.upper())
+            .stream()
+        )
+        return [AccessPoint(**d.to_dict()) for d in docs]
+
     def update_coordinates(self, building_id: str, floor_id: str, ap_id: str, x_m: float, y_m: float) -> None:
         self._col(building_id, floor_id).document(ap_id).update({
             "x_m": round(x_m, 4),
