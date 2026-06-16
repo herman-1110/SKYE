@@ -18,7 +18,7 @@ async function req<T>(method: string, path: string): Promise<T> {
   return res.json();
 }
 
-export type SimMode = "patrol" | "events";
+export type SimMode = "patrol" | "events" | "shift";
 
 export interface SimStatus {
   running: boolean;

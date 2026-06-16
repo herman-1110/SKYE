@@ -1,8 +1,9 @@
 """
-Simulation routes — start/stop/status for patrol and events simulations.
+Simulation routes — start/stop/status for patrol, events, and shift simulations.
 
 POST /simulation/start?mode=patrol   → runs simulation_patrol.py
 POST /simulation/start?mode=events   → runs simulation_events.py (default)
+POST /simulation/start?mode=shift    → runs simulation_shift.py
 POST /simulation/stop                → stops whichever is running
 GET  /simulation/status              → returns running/stopped + current mode
 """
@@ -12,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from services.simulation_patrol import run_simulation as run_patrol
 from services.simulation_events import run_simulation as run_events
+from services.simulation_shift  import run_simulation as run_shift
 
 router = APIRouter(tags=["simulation"])
 
@@ -24,7 +26,7 @@ def _is_running() -> bool:
 
 
 @router.post("/simulation/start")
-async def start_simulation(mode: str = Query(default="events", pattern="^(patrol|events)$")):
+async def start_simulation(mode: str = Query(default="events", pattern="^(patrol|events|shift)$")):
     global _task, _current_mode
 
     if _is_running():
@@ -34,7 +36,12 @@ async def start_simulation(mode: str = Query(default="events", pattern="^(patrol
         )
 
     _current_mode = mode
-    runner = run_patrol if mode == "patrol" else run_events
+    if mode == "patrol":
+        runner = run_patrol
+    elif mode == "shift":
+        runner = run_shift
+    else:
+        runner = run_events
     _task = asyncio.create_task(runner())
 
     return {"status": "started", "mode": mode}

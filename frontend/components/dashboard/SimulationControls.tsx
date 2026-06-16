@@ -98,6 +98,21 @@ export default function SimulationControls() {
           >
             {loading === "events" ? "Starting…" : "Events"}
           </button>
+
+          <button
+            disabled={busy}
+            onClick={() => start("shift")}
+            className="font-mono text-[10px] tracking-widest px-2.5 py-1.5 rounded-lg border transition-colors"
+            style={{
+              borderColor:     "var(--info, #3b82f6)",
+              color:           "var(--info, #3b82f6)",
+              backgroundColor: "rgba(59 130 246 / 0.08)",
+              opacity: busy ? 0.5 : 1,
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading === "shift" ? "Starting…" : "Shift Change"}
+          </button>
         </>
       )}
 
