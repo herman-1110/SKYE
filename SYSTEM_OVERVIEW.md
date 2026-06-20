@@ -52,11 +52,20 @@ Traditional safety patrols rely on manual logbooks and radio check-ins. Supervis
 ┌─────────────────────────────────────────────────────────────────┐
 │                    NETWORK LAYER                                 │
 │  TP-Link Omada WiFi Access Points — capture BLE RSSI per MAC    │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ POST /telemetry  (Bearer token)
-                         ▼
+└──────────┬──────────────────────────────────────────────────────┘
+           │                          │
+           │ POST /telemetry          │ POST /telemetry/omada
+           │ (simulation path)        │ (real AP path — AP-centric)
+           │ Bearer token header      │ token in meta.access_token body
+           ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   BACKEND — Python / FastAPI                     │
+│                                                                 │
+│  OmadaIngestService  (real AP path only)                        │
+│    AP-centric → beacon-centric inversion                        │
+│    iBeacon UUID:major:minor identity (survives MAC rotation)    │
+│    2s rolling buffer → emit when ≥3 APs report same beacon      │
+│    AP heartbeat write for every AP (registered or not)          │
 │                                                                 │
 │  PositioningService                                             │
 │    RSSI → LDPL distance → numpy least-squares multilateration   │
@@ -70,7 +79,7 @@ Traditional safety patrols rely on manual logbooks and radio check-ins. Supervis
 │  LLMService  →  GeminiProvider / OpenAIProvider /              │
 │                 ClaudeProvider / OllamaProvider                 │
 │                                                                 │
-│  SimulationService (patrol + safety-events modes)               │
+│  Simulation (patrol · events · shift-change modes)              │
 └──────────┬──────────────────────────────────────┬──────────────┘
            │ firebase-admin SDK                   │ Firestore
            ▼                                      ▼
@@ -136,20 +145,27 @@ Traditional safety patrols rely on manual logbooks and radio check-ins. Supervis
 - Patrol logs stored in Firestore with full compliance metadata
 
 ### 3.4 Simulation System
-Two independent simulation modes, both running as asyncio loops via `POST /simulation/start`:
+Three independent simulation modes, all running as asyncio loops via `POST /simulation/start?mode=`:
 
-**Patrol Simulation** (`simulation_patrol.py`):
+**Sim/Real namespace isolation:** All simulated `person_id` values carry a `sim-` prefix (`sim-guard-001`, `sim-guard-002`, `sim-worker-001`, `sim-forklift-001`, `sim-guard-003`, `sim-guard-004`). The real phone uses bare `guard-001`. The simulation can never pollute `/positions/guard-001` or real patrol logs.
+
+**Patrol Simulation** (`simulation_patrol.py` — mode: `patrol`):
 - 2 guards (Guard Alpha EE:01, Guard Beta EE:04) follow configured patrol route
 - Per-guard shift tracking; loop completion detection; wander behaviour at each AP
 - RSSI synthesised via inverse LDPL + Gaussian noise — same telemetry path as real hardware
 
-**Safety Events Simulation** (`simulation_events.py`):
+**Safety Events Simulation** (`simulation_events.py` — mode: `events`):
 - 4 actors: Guard Alpha, Guard Beta, Worker 1 (EE:02), Forklift 1 (EE:03)
 - Scripted timeline: `normal_patrol → man_down → collision_warning → ghost_patrol → missed_checkpoint`
 - man_down: backdated seed payload triggers `check_man_down` staleness detection
 - collision_warning: forklift and worker converge toward floor centre; collision fires via Kalman backend
 - ghost_patrol: Guard Alpha freezes; patrol log written with `vigi_detected=False`
 - missed_checkpoint: Guard Alpha skips AP index 1; patrol log written with `compliant=False`
+
+**Shift Change Simulation** (`simulation_shift.py` — mode: `shift`):
+- 4 guards: outgoing (Guard Alpha EE:01, Guard Beta EE:04) patrol one full loop then freeze
+- Incoming (Guard Gamma EE:05, Guard Delta EE:06) wait at starting APs until both outgoing guards finish
+- Shift change triggers when both outgoing guards complete their loop; incoming guards begin patrol
 
 ### 3.5 Multi-Floor Building Management
 - Hierarchy: **Building → Floor → Zone** — unlimited buildings, floors per building, zones per floor
@@ -159,9 +175,18 @@ Two independent simulation modes, both running as asyncio loops via `POST /simul
 - AI zone detection: Gemini Vision analyses floor plan image → returns suggested zone bounding boxes
 
 ### 3.6 Device Status Monitoring
-- **AP heartbeats**: simulation writes to RTDB `/ap_heartbeats/{mac}` every tick; frontend detects stale > 8s → offline
+- **AP heartbeats**: simulation writes to RTDB `/ap_heartbeats/{mac}` every tick; real Omada APs write via `OmadaIngestService._write_ap_heartbeat()` on every POST; frontend detects stale > 8s → offline
 - **CCTV heartbeats**: VIGI detection writes to `/cctv_heartbeats/{mac}`; stale > 15s → offline
 - `DeviceStatusPanel` renders live online/offline status for all APs and CCTVs on the active floor
+- **Detected-but-unplaced APs panel** (`APCCTVEditor`): real APs writing heartbeats but not yet placed on a floor appear in an animated panel; click any entry to enter placement mode with the MAC pre-filled
+
+### 3.10 Real Omada RSSI Ingestion
+- `POST /telemetry/omada` receives AP-centric BLE scan payloads from the Omada IoT Transport Stream
+- Auth: token read from `meta.access_token` in JSON body (real APs don't send `Authorization` headers)
+- **AP-centric → beacon-centric inversion**: Omada sends one payload per AP listing all beacons heard; adapter buffers readings per beacon across APs in a 2s rolling window; emits to `PositioningService` when ≥3 distinct APs have reported the same beacon
+- **iBeacon identity keying**: phones rotate BLE MAC every ~15 min; adapter keys on stable `uuid:major:minor` composite from the iBeacon advertisement block — identity persists across MAC rotation
+- **Stable RTDB key**: `reporter_mac` is set to `person_id` (e.g. `guard-001`) so the RTDB `/positions/` key never changes regardless of which BLE MAC the phone is currently using
+- **AP heartbeats for unplaced APs**: every reporting AP gets a heartbeat written BEFORE the "not registered" early-return — this is what populates the detected-but-unplaced panel
 
 ### 3.7 AI Audit Reports (2 Report Types)
 
@@ -243,7 +268,7 @@ A read-only mobile-optimised view for supervisors on the floor: live personnel p
 - FastAPI app: `SKYE Sentinel-AI v0.1.0`
 - Firebase Admin SDK initialised with RTDB URL on startup
 - Middleware: CORS (all origins), `RequestLogger`, global `error_handler`
-- Registered routers: `auth · telemetry · alert · user · building · floor · zone · report · simulation · vigi`
+- Registered routers: `auth · telemetry · omada_telemetry · alert · user · building · floor · zone · report · simulation · vigi`
 
 ### 5.2 Routes
 
@@ -256,7 +281,8 @@ A read-only mobile-optimised view for supervisors on the floor: live personnel p
 #### Telemetry — Omada Bearer token
 | Method | Path | Description |
 |---|---|---|
-| POST | `/telemetry` | Main positioning pipeline. RSSI → LDPL → multilateration → Kalman → RTDB + safety checks. |
+| POST | `/telemetry` | Simulation path. Beacon-centric RSSI payload → LDPL → multilateration → Kalman → RTDB + safety checks. Auth: `Authorization: Bearer` header. |
+| POST | `/telemetry/omada` | Real AP path. AP-centric Omada payload → invert/buffer → positioning pipeline. Auth: `meta.access_token` in JSON body. Rate limit: 600/min. |
 
 #### Alerts — require_auth / require_admin
 | Method | Path | Description |
@@ -317,7 +343,7 @@ A read-only mobile-optimised view for supervisors on the floor: live personnel p
 #### Simulation — require_admin
 | Method | Path | Description |
 |---|---|---|
-| POST | `/simulation/start` | Start simulation (mode: "patrol" or "events"). |
+| POST | `/simulation/start` | Start simulation (mode: "patrol", "events", or "shift"). |
 | POST | `/simulation/stop` | Stop running simulation. |
 | GET | `/simulation/status` | Current simulation mode and running state. |
 
@@ -345,6 +371,7 @@ A read-only mobile-optimised view for supervisors on the floor: live personnel p
 
 | Service | Responsibility |
 |---|---|
+| `OmadaIngestService` | AP-centric → beacon-centric inversion; iBeacon identity resolution; 2s rolling buffer; AP heartbeat writes; emits to PositioningService |
 | `PositioningService` | Full BLE → position pipeline; LDPL → multilateration → Kalman → pixel conversion → zone assignment → RTDB save |
 | `SafetyService` | `check_man_down`, `check_collision` (with 30s pair suppression), `check_patrol_compliance`, `verify_multimodal`, `run_all_checks` |
 | `LLMService` | `generate_report` (patrol), `generate_safety_report` (safety events), `get_safety_event_groups`, `get_reportable_shifts` |
@@ -410,8 +437,8 @@ All providers implement `BaseLLMProvider.generate(prompt: str) → str`.
 - `FloorMapArea` — floor selector dropdown; mounts `FloorMap` + `DeviceStatusPanel`
 - `DeviceStatusPanel` — live AP + CCTV online/offline status with glow dot indicators
 - `PatrolConfigPanel` — toggle patrol enabled + drag-to-reorder AP route
-- `SimulationControls` — start/stop patrol or safety-events simulation
-- `APCCTVEditor` — add/delete APs and CCTVs per floor
+- `SimulationControls` — start/stop patrol, safety-events, or shift-change simulation
+- `APCCTVEditor` — add/delete APs and CCTVs per floor; detected-but-unplaced AP panel for one-click placement of real online APs
 - `ZoneEditor` — drag-to-create zones, colour picker, is_high_risk toggle, AI detect button
 
 **Alerts**
@@ -456,8 +483,24 @@ All providers implement `BaseLLMProvider.generate(prompt: str) → str`.
         ↓
 [TP-Link Omada APs pick up RSSI from BLE broadcasts]
         ↓
-POST /telemetry  { reporter_mac, person_id, person_type, label,
-                   readings: [{ap_mac, rssi, ap_x, ap_y}] }
+        ├── SIMULATION PATH ──────────────────────────────────────
+        │   POST /telemetry  (Authorization: Bearer header)
+        │   { reporter_mac=person_id, person_id, person_type,
+        │     label, readings: [{ap_mac, rssi, ap_x, ap_y}] }
+        │
+        └── REAL AP PATH ──────────────────────────────────────────
+            POST /telemetry/omada  (meta.access_token in body)
+            { reporter: {mac, name, ...},
+              reported: [{mac, rssi:{avg}, ibeacon:{uuid,major,minor}, ...}] }
+                ↓
+            OmadaIngestService.ingest()
+              1. Write AP heartbeat → RTDB /ap_heartbeats/{mac_underscores}
+              2. Look up AP coordinates from active floor cache
+              3. For each beacon: extract iBeacon uuid:major:minor
+              4. Resolve identity from beacon_registry.py
+              5. Buffer reading per beacon across APs (2s window)
+              6. When ≥3 APs report same beacon → emit OmadaTelemetryPayload
+                 (reporter_mac = person_id for stable RTDB key)
         ↓
 PositioningService.compute_position()
   1. RSSI → LDPL distance per AP
@@ -517,12 +560,14 @@ usePositions() RTDB onValue listener
 
 | Path | Data | Update Frequency |
 |---|---|---|
-| `/positions/{mac_underscores}` | PositionRecord | Every telemetry packet (~1s) |
+| `/positions/{key}` | PositionRecord | Every telemetry packet (~1s) |
 | `/alerts/{alert_id}` | AlertRecord | On safety event detection |
-| `/ap_heartbeats/{mac_underscores}` | `{ last_seen, mac }` | Every simulation tick (~1s) |
+| `/ap_heartbeats/{mac_underscores}` | `{ last_seen, mac }` | Every sim tick (~1s) or every real AP POST |
 | `/cctv_heartbeats/{mac_underscores}` | `{ last_seen, mac, device_name }` | On VIGI detection event |
 
-> **RTDB key format**: ALL keys use underscores — `AA_BB_CC_DD_EE_01`. Always `mac.replace(":", "_")` before constructing RTDB paths.
+> **RTDB `/positions/` key**: derived from `reporter_mac.replace(":", "_")`. For simulation this is `sim-guard-001` etc.; for real phone this is `guard-001`. Neither contains colons so no transform occurs — the `replace` is a no-op but kept for consistency.
+>
+> **RTDB key format**: AP/CCTV heartbeat keys always use underscores — `AA_BB_CC_DD_EE_01`. Always `mac.replace(":", "_")` before constructing those RTDB paths.
 
 ### Firestore — persistent, queryable
 
@@ -582,6 +627,12 @@ Deleting an AP triggers: Firestore AP doc delete → RTDB heartbeat path delete 
 
 ### Pluggable LLM Provider
 A single env var (`LLM_PROVIDER`) switches the underlying model without code changes. `LLM_MODEL_NAME` must be set explicitly — raises `KeyError` if missing rather than silently using a wrong model. The factory pattern dispatches to Gemini, OpenAI, Claude, or Ollama — all implementing the same `BaseLLMProvider` interface.
+
+### iBeacon Identity over MAC for Real Devices
+Phone BLE MACs rotate every ~15 minutes for privacy. Keying beacon identity on `reported[].mac` (Omada's field) causes the position node to rotate and the Kalman filter to reset every rotation cycle. The adapter instead keys on the stable iBeacon triple `uuid:major:minor` set in nRF Connect (or burned into a Minew beacon). The RTDB position key is then derived from `person_id` (e.g. `guard-001`), which never changes — the marker persists and the Kalman filter accumulates history correctly.
+
+### Sim/Real Namespace Isolation
+All simulated `person_id` values are prefixed `sim-` (`sim-guard-001`, etc.). The real beacon registry uses bare IDs (`guard-001`). Both paths set `reporter_mac = person_id`, so simulation writes to `/positions/sim-guard-001` and the real phone writes to `/positions/guard-001` — completely disjoint. Simulation startup-clears target only `sim-` keys. Running a simulation while the real phone is tracking cannot overwrite or delete the real guard's position, patrol logs, or alerts.
 
 ---
 
