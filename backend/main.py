@@ -19,6 +19,7 @@ from routes.building_routes import router as building_router
 from routes.floor_routes import router as floor_router
 from routes.report_routes import router as report_router
 from routes.telemetry_routes import router as telemetry_router
+from routes.omada_telemetry import router as omada_telemetry_router
 from routes.simulation_routes import router as simulation_router
 from routes.user_routes import router as user_router
 from routes.vigi_routes import router as vigi_router
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
 
     # Omada-token protected
     app.include_router(telemetry_router)
+    app.include_router(omada_telemetry_router)
 
     # Firebase-token protected
     app.include_router(alert_router)

@@ -1,4 +1,4 @@
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 import firebase_admin.auth
 import hmac
@@ -10,6 +10,17 @@ from repositories.user_repository import user_repository
 async def verify_omada_token(authorization: str = Header(..., alias="Authorization")) -> None:
     """FastAPI dependency that validates the Omada Bearer token on /telemetry."""
     if not hmac.compare_digest(authorization, f"Bearer {settings.OMADA_ACCESS_TOKEN}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+async def verify_omada_body_token(request: Request) -> None:
+    """Validate Omada token from JSON body meta.access_token (real AP payloads don't send a header)."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=401, detail="Missing or invalid JSON body")
+    token = (body.get("meta") or {}).get("access_token", "")
+    if not hmac.compare_digest(token, settings.OMADA_ACCESS_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

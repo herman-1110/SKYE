@@ -55,7 +55,7 @@ _shift_triggered = False   # set to True when both outgoing guards finish
 
 OUTGOING_BEACONS: List[Dict] = [
     {
-        "mac": "AA:BB:CC:DD:EE:01", "person_id": "guard-001",
+        "mac": "AA:BB:CC:DD:EE:01", "person_id": "sim-guard-001",
         "person_type": "guard", "label": "Guard Alpha",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "start_ap_idx": 0,
@@ -64,7 +64,7 @@ OUTGOING_BEACONS: List[Dict] = [
         "frozen": False,
     },
     {
-        "mac": "AA:BB:CC:DD:EE:04", "person_id": "guard-002",
+        "mac": "AA:BB:CC:DD:EE:04", "person_id": "sim-guard-002",
         "person_type": "guard", "label": "Guard Beta",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "start_ap_idx": 0,
@@ -76,7 +76,7 @@ OUTGOING_BEACONS: List[Dict] = [
 
 INCOMING_BEACONS: List[Dict] = [
     {
-        "mac": "AA:BB:CC:DD:EE:05", "person_id": "guard-003",
+        "mac": "AA:BB:CC:DD:EE:05", "person_id": "sim-guard-003",
         "person_type": "guard", "label": "Guard Gamma",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "start_ap_idx": 0,
@@ -84,7 +84,7 @@ INCOMING_BEACONS: List[Dict] = [
         "shift_id": "", "loops_completed": 0, "checkpoints_this_loop": 0,
     },
     {
-        "mac": "AA:BB:CC:DD:EE:06", "person_id": "guard-004",
+        "mac": "AA:BB:CC:DD:EE:06", "person_id": "sim-guard-004",
         "person_type": "guard", "label": "Guard Delta",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "start_ap_idx": 0,
@@ -178,7 +178,7 @@ def _build_payload(beacon: Dict, timestamp: str) -> Dict:
             continue
         readings.append({"ap_mac": ap["mac"], "rssi": rssi, "ap_x": ap["x_m"], "ap_y": ap["y_m"]})
     return {
-        "reporter_mac": beacon["mac"],
+        "reporter_mac": beacon["person_id"],
         "timestamp": timestamp,
         "readings": readings,
         "person_id": beacon["person_id"],
@@ -386,15 +386,14 @@ async def run_simulation() -> None:
     _shift_complete[1] = False
     _shift_triggered = False
 
-    # Clear stale RTDB positions for all 6 guards + other sim MACs
-    ALL_MACS = [b["mac"] for b in OUTGOING_BEACONS + INCOMING_BEACONS] + [
-        "AA:BB:CC:DD:EE:02",  # Worker 1 (from simulation_events)
-        "AA:BB:CC:DD:EE:03",  # Forklift 1 (from simulation_events)
+    # Clear stale positions for all sim person_id nodes (all 4 guards + other sim actors).
+    # Keyed by person_id now (not MAC), matching what compute_position() writes.
+    sim_person_ids = [b["person_id"] for b in OUTGOING_BEACONS + INCOMING_BEACONS] + [
+        "sim-worker-001", "sim-forklift-001",
     ]
     print("[SIM] Clearing stale RTDB positions…")
-    for mac in ALL_MACS:
-        key = mac.replace(":", "_")
-        rtdb.reference(f"/positions/{key}").delete()
+    for pid in sim_person_ids:
+        rtdb.reference(f"/positions/{pid}").delete()
     print("[SIM] Stale positions cleared.")
 
     route_str = " → ".join(ap["name"] for ap in _floor_aps)
@@ -433,8 +432,7 @@ async def run_simulation() -> None:
             for beacon in OUTGOING_BEACONS + INCOMING_BEACONS:
                 payload = _build_payload(beacon, now_ts)
                 n_readings = len(payload["readings"])
-                key = beacon["mac"].replace(":", "_")
-                pos_data = rtdb.reference(f"/positions/{key}").get() or {}
+                pos_data = rtdb.reference(f"/positions/{beacon['person_id']}").get() or {}
                 pred_x   = pos_data.get("predicted_x")
                 smooth_x = pos_data.get("x")
                 pred_y   = pos_data.get("predicted_y")

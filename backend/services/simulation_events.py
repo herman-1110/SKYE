@@ -61,7 +61,7 @@ SEGMENTS = [
 # ── Beacons ────────────────────────────────────────────────────────────────
 SIMULATED_BEACONS: List[Dict] = [
     {
-        "mac": "AA:BB:CC:DD:EE:01", "person_id": "guard-001",
+        "mac": "AA:BB:CC:DD:EE:01", "person_id": "sim-guard-001",
         "person_type": "guard", "label": "Guard Alpha",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "wander_ticks": 0, "state": "moving",
@@ -69,7 +69,7 @@ SIMULATED_BEACONS: List[Dict] = [
         "wander_target": None,
     },
     {
-        "mac": "AA:BB:CC:DD:EE:04", "person_id": "guard-002",
+        "mac": "AA:BB:CC:DD:EE:04", "person_id": "sim-guard-002",
         "person_type": "guard", "label": "Guard Beta",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "wander_ticks": 0, "state": "moving",
@@ -77,14 +77,14 @@ SIMULATED_BEACONS: List[Dict] = [
         "wander_target": None,
     },
     {
-        "mac": "AA:BB:CC:DD:EE:02", "person_id": "worker-001",
+        "mac": "AA:BB:CC:DD:EE:02", "person_id": "sim-worker-001",
         "person_type": "worker", "label": "Worker 1",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "wander_ticks": 0, "state": "moving",
         "wander_target": None,
     },
     {
-        "mac": "AA:BB:CC:DD:EE:03", "person_id": "forklift-001",
+        "mac": "AA:BB:CC:DD:EE:03", "person_id": "sim-forklift-001",
         "person_type": "forklift", "label": "Forklift 1",
         "x_m": 0.0, "y_m": 0.0, "vx": 0.0, "vy": 0.0,
         "ap_order": [], "current_ap_idx": 0, "wander_ticks": 0, "state": "moving",
@@ -278,7 +278,7 @@ def _build_payload(beacon: Dict, timestamp: str) -> Dict:
             continue
         readings.append({"ap_mac": ap["mac"], "rssi": rssi, "ap_x": ap["x_m"], "ap_y": ap["y_m"]})
     return {
-        "reporter_mac": beacon["mac"],
+        "reporter_mac": beacon["person_id"],
         "timestamp": timestamp,
         "readings": readings,
         "person_id": beacon["person_id"],
@@ -504,18 +504,12 @@ async def run_simulation() -> None:
     _event_fired = False
     _mandown_seeded = False
 
-    # Clear stale positions for ALL simulated beacons (guards + worker + forklift)
-    # so switching between simulation modes never leaves ghost markers on the map
-    ALL_SIMULATED_MACS = [
-        "AA:BB:CC:DD:EE:01",  # Guard Alpha
-        "AA:BB:CC:DD:EE:04",  # Guard Beta
-        "AA:BB:CC:DD:EE:02",  # Worker 1
-        "AA:BB:CC:DD:EE:03",  # Forklift 1
-    ]
+    # Clear stale positions for all sim person_id nodes.
+    # Keyed by person_id now (not MAC), matching what compute_position() writes.
+    sim_person_ids = [b["person_id"] for b in SIMULATED_BEACONS]
     print("[SIM] Clearing stale RTDB positions…")
-    for mac in ALL_SIMULATED_MACS:
-        key = mac.replace(":", "_")
-        rtdb.reference(f"/positions/{key}").delete()
+    for pid in sim_person_ids:
+        rtdb.reference(f"/positions/{pid}").delete()
     print("[SIM] Stale positions cleared.")
 
     async with httpx.AsyncClient() as client:
@@ -562,9 +556,7 @@ async def run_simulation() -> None:
             for beacon in SIMULATED_BEACONS:
                 payload = _build_payload(beacon, now_ts)
                 n_readings = len(payload["readings"])
-                # Read back Kalman-smoothed position from RTDB
-                key = beacon["mac"].replace(":", "_")
-                pos_data = rtdb.reference(f"/positions/{key}").get() or {}
+                pos_data = rtdb.reference(f"/positions/{beacon['person_id']}").get() or {}
                 pred_x = pos_data.get("predicted_x")
                 pred_y = pos_data.get("predicted_y")
                 smooth_x = pos_data.get("x")

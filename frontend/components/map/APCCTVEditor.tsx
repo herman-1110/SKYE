@@ -45,6 +45,12 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [cctvMac, setCctvMac] = useState("");
   const [cctvMacError, setCctvMacError] = useState("");
   const apStatuses = useAPHeartbeats();
+
+  const placedMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
+  const unregisteredOnlineMacs = Object.entries(apStatuses)
+    .filter(([mac, status]) => status === "online" && !placedMacs.has(mac.toUpperCase()))
+    .map(([mac]) => mac);
+
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
@@ -139,6 +145,14 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setCctvName(""); setCctvMac(""); setCctvMacError("");
   };
 
+  const startPlacingDetectedAP = (mac: string) => {
+    setApMac(mac);
+    setApName("");
+    setMacError("");
+    setPlacementMode("ap");
+    toast.info(`Click on the map to place AP ${mac}`);
+  };
+
   return (
     <div className="space-y-4">
       {/* Calibration guard */}
@@ -181,6 +195,44 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           </button>
         )}
       </div>
+
+      {/* Detected-but-unplaced APs panel */}
+      {floor.scale_pixels_per_meter && unregisteredOnlineMacs.length > 0 && (
+        <div className="bento-card p-3 border border-s-accent/40">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-s-accent opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-s-accent" />
+            </span>
+            <span className="font-mono text-[10px] text-s-accent tracking-widest uppercase">
+              {unregisteredOnlineMacs.length} AP{unregisteredOnlineMacs.length > 1 ? "s" : ""} online but not placed
+            </span>
+          </div>
+          <p className="font-mono text-[10px] text-s-muted mb-2.5 leading-relaxed">
+            These access points are sending data but aren&apos;t on this floor yet. Click one to place it.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {unregisteredOnlineMacs.map((mac) => (
+              <button
+                key={mac}
+                onClick={() => startPlacingDetectedAP(mac)}
+                className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-s-elevated border border-s-border hover:border-s-accent transition-colors text-left group"
+              >
+                <div className="flex items-center gap-2">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+                  </svg>
+                  <span className="font-mono text-[11px] text-s-text">{mac}</span>
+                </div>
+                <span className="flex items-center gap-1.5 font-mono text-[10px] text-s-accent opacity-0 group-hover:opacity-100 transition-opacity">
+                  Place
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Map canvas */}
       <div
