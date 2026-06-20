@@ -15,6 +15,7 @@
 7. [Data Flow](#7-data-flow-ble--backend--frontend)
 8. [Firebase Usage](#8-firebase-usage)
 9. [Key Design Decisions](#9-key-design-decisions)
+9b. [Known Issues & Pending Work](#9b-known-issues--pending-work)
 10. [Environment Variables](#10-environment-variables)
 
 ---
@@ -34,7 +35,7 @@ Traditional safety patrols rely on manual logbooks and radio check-ins. Supervis
 | Delayed incident response | Automated man-down and collision detection within seconds of trigger |
 | Unverifiable patrol compliance | Checkpoint logging with dwell time + VIGI camera cross-verification |
 | Ghost patrol / proxy fraud | Ghost patrol alert when BLE present but VIGI does not confirm human |
-| Manual post-shift reporting | Gemini 2.5 Flash generates structured audit reports from live data |
+| Manual post-shift reporting | Gemini 3.1 Flash Lite generates structured audit reports from live data |
 | No central operations view | Next.js dashboard: floor map, personnel panel, alert feed, device status |
 
 ---
@@ -115,7 +116,7 @@ Traditional safety patrols rely on manual logbooks and radio check-ins. Supervis
 | Database | Firebase Realtime DB (live positions/alerts) + Firestore (persistent config/logs) |
 | Storage | Firebase Storage (floor plan images) |
 | Auth | Firebase Auth (email/password) |
-| AI | Gemini 2.5 Flash (reports + zone detection) — pluggable to OpenAI, Claude, Ollama |
+| AI | Gemini 3.1 Flash Lite (reports + zone detection) — pluggable to OpenAI, Claude, Ollama |
 | Hardware | TP-Link Omada APs (BLE RSSI capture), VIGI IP cameras (presence verification) |
 
 ---
@@ -132,7 +133,7 @@ Traditional safety patrols rely on manual logbooks and radio check-ins. Supervis
 
 | Alert Type | Trigger | Suppression |
 |---|---|---|
-| `man_down` | Worker/guard position timestamp stale > MAN_DOWN_MINUTES. Forklifts exempt. Fires regardless of zone. | 30s per person_id |
+| `man_down` | Worker/guard position timestamp stale > MAN_DOWN_MINUTES. Forklifts exempt. Fires regardless of zone. Only checked on telemetry arrival — see §9b for the stop-gap. | 30s per person_id |
 | `collision` | Worker's Kalman-predicted position converges with forklift's within threshold. Stores both parties (`other_person_id`). | 30s per worker+forklift pair |
 | `ghost_patrol` | BLE tag detected at checkpoint but VIGI camera does NOT confirm human presence | Per patrol log event |
 | `patrol_violation` | Guard misses checkpoint (actual_arrival is null) or dwell_time < MIN_DWELL_SECONDS | Per patrol log event |
@@ -180,7 +181,7 @@ Three independent simulation modes, all running as asyncio loops via `POST /simu
 - `DeviceStatusPanel` renders live online/offline status for all APs and CCTVs on the active floor
 - **Detected-but-unplaced APs panel** (`APCCTVEditor`): real APs writing heartbeats but not yet placed on a floor appear in an animated panel; click any entry to enter placement mode with the MAC pre-filled
 
-### 3.10 Real Omada RSSI Ingestion
+### 3.7 Real Omada RSSI Ingestion
 - `POST /telemetry/omada` receives AP-centric BLE scan payloads from the Omada IoT Transport Stream
 - Auth: token read from `meta.access_token` in JSON body (real APs don't send `Authorization` headers)
 - **AP-centric → beacon-centric inversion**: Omada sends one payload per AP listing all beacons heard; adapter buffers readings per beacon across APs in a 2s rolling window; emits to `PositioningService` when ≥3 distinct APs have reported the same beacon
@@ -188,7 +189,7 @@ Three independent simulation modes, all running as asyncio loops via `POST /simu
 - **Stable RTDB key**: `reporter_mac` is set to `person_id` (e.g. `guard-001`) so the RTDB `/positions/` key never changes regardless of which BLE MAC the phone is currently using
 - **AP heartbeats for unplaced APs**: every reporting AP gets a heartbeat written BEFORE the "not registered" early-return — this is what populates the detected-but-unplaced panel
 
-### 3.7 AI Audit Reports (2 Report Types)
+### 3.8 AI Audit Reports (2 Report Types)
 
 **Patrol Report**: per-guard, per-shift
 - Inputs: Firestore patrol log checkpoints + RTDB alerts filtered by guard ID
@@ -198,16 +199,16 @@ Three independent simulation modes, all running as asyncio loops via `POST /simu
 - Inputs: all RTDB alerts for that person on that day
 - Output: incident summary, risk assessment, behavioural pattern analysis, corrective actions, safety rating
 
-Both reports use Gemini 2.5 Flash by default. Formatting constrained via prompt — no `####`, no backticks, no HTML from the LLM. Custom `SimpleMarkdown` renderer handles `#`–`#####` headings, `**bold**`, `*italic*`, `` `code` ``, bullet and ordered lists.
+Both reports use Gemini 3.1 Flash Lite by default. Formatting constrained via prompt — no `####`, no backticks, no HTML from the LLM. Custom `SimpleMarkdown` renderer handles `#`–`#####` headings, `**bold**`, `*italic*`, `` `code` ``, bullet and ordered lists.
 
-### 3.8 Live Dashboard
+### 3.9 Live Dashboard
 - **Floor map**: SVG viewport matches floor plan natural size; worker markers coloured by type (guard=green, worker=blue, forklift=amber); hover tooltip shows label, zone, coordinates
 - **Personnel sidebar**: grouped Guards → Workers → Forklifts with live position data and per-type colour labels
 - **Critical alert banner**: man_down and collision fire a fixed top-centre amber-glowing banner; stacks for simultaneous alerts; manual dismiss only — does not auto-dismiss
 - **Alert feed**: full alert history with active/resolved state; collision shows `worker-001 ↔ forklift-001`; resolve and delete actions
 - **Simulation controls**: start/stop patrol or safety-events sim; clears stale RTDB positions on each run
 
-### 3.9 User Management
+### 3.10 User Management
 - First registered account → auto-admin, auto-approved
 - Subsequent accounts → role `user`, status `pending` until admin approves
 - Admin controls: approve, suspend, promote to admin, delete
@@ -565,7 +566,7 @@ usePositions() RTDB onValue listener
 | `/ap_heartbeats/{mac_underscores}` | `{ last_seen, mac }` | Every sim tick (~1s) or every real AP POST |
 | `/cctv_heartbeats/{mac_underscores}` | `{ last_seen, mac, device_name }` | On VIGI detection event |
 
-> **RTDB `/positions/` key**: derived from `reporter_mac.replace(":", "_")`. For simulation this is `sim-guard-001` etc.; for real phone this is `guard-001`. Neither contains colons so no transform occurs — the `replace` is a no-op but kept for consistency.
+> **RTDB `/positions/` key**: derived from `reporter_mac`, which both paths set to `person_id` — simulation writes `sim-guard-001` etc., the real phone writes `guard-001`. These are disjoint namespaces (see §9 "Sim/Real Namespace Isolation"). person_id values contain no colons, so `.replace(":", "_")` is a no-op but kept for consistency.
 >
 > **RTDB key format**: AP/CCTV heartbeat keys always use underscores — `AA_BB_CC_DD_EE_01`. Always `mac.replace(":", "_")` before constructing those RTDB paths.
 
@@ -636,6 +637,31 @@ All simulated `person_id` values are prefixed `sim-` (`sim-guard-001`, etc.). Th
 
 ---
 
+## 9b. Known Issues & Pending Work
+
+These are live items as of the current build — not yet resolved. Listed so the system is not mistaken for fully complete.
+
+### Real-RSSI marker placement (active blocker)
+Real RSSI flows end-to-end (3 Omada APs → `/telemetry/omada` → positioning → `/positions/guard-001`), the marker renders, and the phone shows in the sidebar. However, the marker currently lands in the **top-left corner** of the floor map. Root cause is **stale calibration after a floor-plan swap**: the active floor's `scale_pixels_per_meter` and the placed APs' `x_m/y_m` coordinates belong to a *previous* floor plan image, so multilateration collapses toward the origin. **Resolution:** recalibrate the scale on the floor plan actually in use, and re-place the 3 APs on it. (Open question to confirm: whether a *new floor record* was created, or the *image was swapped on the existing record* — the latter means the app allowed an image swap without invalidating calibration, which should be guarded against.)
+
+### Man-down detection when simulation/telemetry stops
+`check_man_down` only runs when a telemetry packet arrives. If the simulation (or real feed) stops, beacon positions freeze in RTDB and no staleness check ever fires — so a man-down that begins after the feed stops is never detected. **Planned fix:** a FastAPI background task (asyncio + lifespan) running every ~60s that scans RTDB `/positions` and fires man-down for stationary non-forklift beacons independently of telemetry arrival. Touches `main.py` (lifespan task) and `safety_service.py` (add `check_man_down_stale()`).
+
+### RAG re-enable
+RAG is stubbed: `rag_service.get_context()` returns `""` because `google-generativeai==0.7.2` routes `embed_content` through v1beta where `text-embedding-004` is unavailable. Audit reports work without it. (Also tracked in §4.3.)
+
+### Beacon management UI (future)
+Beacon identity currently lives in code (`config/beacon_registry.py`), keyed by iBeacon `uuid:major:minor`. Future work promotes this to a Firestore `beacons` collection + `beacon_repository` + CRUD route + dashboard UI + RTDB last-detected online/offline indicator, mirroring the AP/CCTV pattern. The registration form should accept EITHER a MAC (stable-MAC Minew beacons) OR an iBeacon `uuid/major/minor` (rotating-MAC phones). The identity-matching logic does not change — only the identity *source* swaps from file to Firestore.
+
+### Backend reachability requirement (operational — do not lose this)
+For real Omada APs to reach the backend, the server **must** be started with an explicit host bind:
+```
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+Without `--host 0.0.0.0`, uvicorn binds to `127.0.0.1` (loopback only) and APs cannot connect — this presents as "no data arriving" despite correct token/config/network. In addition, inbound TCP to :8000 must be permitted: either a Windows Firewall allow rule (`netsh advfirewall firewall add rule name="SKYE Backend 8000" dir=in action=allow protocol=TCP localport=8000`) OR the AP network being classified as a Private profile. Verify an existing rule with `netsh advfirewall firewall show rule name="SKYE Backend 8000"`.
+
+---
+
 ## 10. Environment Variables
 
 ### Backend (`backend/.env`)
@@ -647,7 +673,7 @@ FIREBASE_RTDB_URL=https://your-project-default-rtdb.firebaseio.com
 
 # LLM — LLM_MODEL_NAME required; raises KeyError if missing
 LLM_PROVIDER=gemini
-LLM_MODEL_NAME=gemini-2.5-flash
+LLM_MODEL_NAME=gemini-3.1-flash-lite
 GEMINI_API_KEY=AIza...
 ANTHROPIC_API_KEY=sk-ant-...      # if LLM_PROVIDER=claude
 OPENAI_API_KEY=sk-...             # if LLM_PROVIDER=openai
