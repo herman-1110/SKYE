@@ -10,6 +10,7 @@ Beacon-centric out: one OmadaTelemetryPayload per beacon, listing all APs that h
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -112,8 +113,46 @@ class OmadaIngestService:
         ap_mac_raw = reporter.get("mac", "")
         reported: List[dict] = raw.get("reported", [])
 
+        # ── DEBUG: full raw Omada payload dump ───────────────────────────
         ap_name = reporter.get("name", "?")
-        print(f"[OMADA] {ap_name} ({ap_mac_raw or 'NO MAC'}) heard {len(reported)} beacon(s)")
+        print("[OMADA] ═══════════════════════════════════════════════════════════")
+        print(f"[OMADA] AP REPORT from '{ap_name}' ({ap_mac_raw or 'NO MAC'})")
+        print(f"[OMADA] ── Reporter block ──")
+        for k, v in reporter.items():
+            print(f"[OMADA]     {k:12s}: {v}")
+        print(f"[OMADA] ── Reported beacons: {len(reported)} ──")
+        if not reported:
+            print("[OMADA]     (none — AP scanned no beacons this cycle)")
+        for i, b in enumerate(reported):
+            bmac     = b.get("mac", "?")
+            dclass   = b.get("deviceClass", [])
+            model    = b.get("model", "")
+            lastseen = b.get("lastseen", "?")
+            rssi_avg = (b.get("rssi") or {}).get("avg", "?")
+            ib       = b.get("ibeacon", {}) or {}
+            txpower  = b.get("txpower", "")
+            sensors  = b.get("sensors", {}) or {}
+
+            print(f"[OMADA]   ┌─ Beacon #{i + 1}: {bmac}")
+            print(f"[OMADA]   │   deviceClass : {dclass}")
+            if model:
+                print(f"[OMADA]   │   model       : {model}")
+            print(f"[OMADA]   │   lastseen    : {lastseen}")
+            print(f"[OMADA]   │   rssi.avg    : {rssi_avg} dBm")
+            if ib:
+                print(f"[OMADA]   │   iBeacon     : uuid={ib.get('uuid','?')} "
+                      f"major={ib.get('major','?')} minor={ib.get('minor','?')} "
+                      f"power={ib.get('power','?')}")
+            if txpower != "":
+                print(f"[OMADA]   │   txpower     : {txpower}")
+            if sensors:
+                print(f"[OMADA]   │   sensors     : {sensors}")
+            print(f"[OMADA]   └─")
+
+        print(f"[OMADA] ── Raw JSON ──")
+        print(f"[OMADA] {json.dumps(raw, separators=(',', ':'))}")
+        print("[OMADA] ═══════════════════════════════════════════════════════════")
+        # ─────────────────────────────────────────────────────────────────
 
         if not ap_mac_raw:
             return {"status": "ignored", "reason": "no reporter.mac"}

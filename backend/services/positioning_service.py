@@ -57,23 +57,34 @@ class PositioningService:
                 self._cached_zones = zone_repository.get_all(
                     self._cached_building_id, self._cached_floor_id
                 )
-                # Load AP positions to derive floor bounds for Kalman clamping
-                aps = ap_repository.get_all(
-                    self._cached_building_id, self._cached_floor_id
-                )
-                if aps:
-                    xs = [ap.x_m for ap in aps]
-                    ys = [ap.y_m for ap in aps]
-                    pad = 3.0
-                    self._cached_x_min = max(0.0, min(xs) - pad)
-                    self._cached_x_max = max(xs) + pad
-                    self._cached_y_min = max(0.0, min(ys) - pad)
-                    self._cached_y_max = max(ys) + pad
-                else:
+                # Derive bounds from floor image dimensions when available;
+                # fall back to AP-spread ± pad if dims are missing.
+                _scale = self._cached_scale
+                if (
+                    floor.image_width_px and floor.image_height_px
+                    and _scale and _scale > 0
+                ):
                     self._cached_x_min = 0.0
-                    self._cached_x_max = 100.0
+                    self._cached_x_max = floor.image_width_px / _scale
                     self._cached_y_min = 0.0
-                    self._cached_y_max = 100.0
+                    self._cached_y_max = floor.image_height_px / _scale
+                else:
+                    aps = ap_repository.get_all(
+                        self._cached_building_id, self._cached_floor_id
+                    )
+                    if aps:
+                        xs = [ap.x_m for ap in aps]
+                        ys = [ap.y_m for ap in aps]
+                        pad = 3.0
+                        self._cached_x_min = max(0.0, min(xs) - pad)
+                        self._cached_x_max = max(xs) + pad
+                        self._cached_y_min = max(0.0, min(ys) - pad)
+                        self._cached_y_max = max(ys) + pad
+                    else:
+                        self._cached_x_min = 0.0
+                        self._cached_x_max = 100.0
+                        self._cached_y_min = 0.0
+                        self._cached_y_max = 100.0
             else:
                 self._cached_zones = []
                 self._cached_x_min = 0.0
@@ -125,7 +136,19 @@ class PositioningService:
             for r in readings
         ]
 
-        raw = least_squares_position(ap_positions, distances)
+        # Populate floor bounds and scale before the solve so bounds are real on first packet
+        scale = self._get_scale()
+
+        raw = least_squares_position(
+            ap_positions,
+            distances,
+            bounds=(
+                self._cached_x_min,
+                self._cached_x_max,
+                self._cached_y_min,
+                self._cached_y_max,
+            ),
+        )
         if raw is None:
             return None
 
@@ -154,10 +177,23 @@ class PositioningService:
 
         px, py = kf.predict_ahead(seconds=float(settings.COLLISION_ALERT_SECONDS))
 
-        scale = self._get_scale()
         pixel_x = sx * scale if scale is not None else None
         pixel_y = sy * scale if scale is not None else None
 
+        # ── DIAG: solver trace ──
+        print("[SOLVER] ─────────────────────────────")
+        print(f"[SOLVER] beacon {payload.person_id}")
+        for (ax, ay), d in zip(ap_positions, distances):
+            print(f"[SOLVER]   AP ({ax:7.2f},{ay:7.2f})  dist={d:6.2f} m")
+        print(f"[SOLVER] raw solve   = {raw}")
+        print(f"[SOLVER] after clamp = ({raw_x:.2f}, {raw_y:.2f})")
+        print(f"[SOLVER] kalman out  = ({sx:.2f}, {sy:.2f})")
+        print(f"[SOLVER] bounds      = x[{self._cached_x_min:.2f},{self._cached_x_max:.2f}] "
+              f"y[{self._cached_y_min:.2f},{self._cached_y_max:.2f}]")
+        print(f"[SOLVER] scale       = {scale} px/m  -> pixel ({pixel_x},{pixel_y})")
+        print("[SOLVER] ─────────────────────────────")
+        # ────────────────────────
+        
         record = PositionRecord(
             beacon_mac=payload.reporter_mac,
             person_id=payload.person_id,

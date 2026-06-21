@@ -13,8 +13,8 @@ class KalmanService:
     def __init__(
         self,
         dt: float = 1.0,
-        process_noise: float = 0.1,
-        measurement_noise: float = 2.0,
+        process_noise: float = 0.05,
+        measurement_noise: float = 10.0,
     ) -> None:
         self._dt = dt
         self._kf = self._build(dt, process_noise, measurement_noise)

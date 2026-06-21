@@ -1,37 +1,49 @@
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
+
 import numpy as np
+from scipy.optimize import least_squares as scipy_least_squares
 
 
 def least_squares_position(
     ap_positions: List[Tuple[float, float]],
     distances: List[float],
+    bounds: Optional[Tuple[float, float, float, float]] = None,  # (x_min, x_max, y_min, y_max)
 ) -> Optional[Tuple[float, float]]:
     """
-    Estimate (x, y) from N >= 3 AP positions and distances via Least Squares.
-
-    Linearises the system by subtracting the last AP's equation from all others,
-    which eliminates quadratic position terms.  All N APs are used simultaneously
-    so more APs reduce position error (per LR1 Ramires et al., LR2 Ainul et al.).
+    Estimate (x, y) from N >= 3 AP positions and distances via weighted nonlinear
+    least-squares. Inverse-square-distance weighting lets strong (near) APs dominate
+    and downweights obstructed far APs. Optional floor bounds keep the estimate on-map.
     """
     if len(ap_positions) < 3 or len(ap_positions) != len(distances):
         return None
 
-    x_ref, y_ref = ap_positions[-1]
-    d_ref = distances[-1]
+    aps = np.array(ap_positions, dtype=float)
+    d = np.array(distances, dtype=float)
 
-    A_rows: List[List[float]] = []
-    b_rows: List[float] = []
+    # Inverse-square weights; clip distances to 0.1 m to avoid division by zero
+    w = 1.0 / np.clip(d, 0.1, None) ** 2
+    w /= w.sum()
 
-    for i in range(len(ap_positions) - 1):
-        xi, yi = ap_positions[i]
-        di = distances[i]
-        # Linearised equation: 2(xi-xr)*x + 2(yi-yr)*y = xi²-xr² + yi²-yr² - di²+dr²
-        A_rows.append([2.0 * (xi - x_ref), 2.0 * (yi - y_ref)])
-        b_rows.append(
-            xi**2 - x_ref**2 + yi**2 - y_ref**2 - di**2 + d_ref**2
-        )
+    # Weighted centroid as initial guess
+    p0 = (aps * w[:, None]).sum(axis=0)
 
-    A = np.array(A_rows, dtype=float)
-    b = np.array(b_rows, dtype=float)
-    result, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
-    return float(result[0]), float(result[1])
+    def residuals(p: np.ndarray) -> np.ndarray:
+        diff = aps - p
+        dist_est = np.sqrt((diff ** 2).sum(axis=1))
+        return np.sqrt(w) * (dist_est - d)
+
+    try:
+        if bounds is not None:
+            x_min, x_max, y_min, y_max = bounds
+            sol = scipy_least_squares(
+                residuals,
+                p0,
+                method="trf",
+                bounds=([x_min, y_min], [x_max, y_max]),
+            )
+        else:
+            sol = scipy_least_squares(residuals, p0, method="lm")
+    except Exception:
+        return None
+
+    return float(sol.x[0]), float(sol.x[1])
