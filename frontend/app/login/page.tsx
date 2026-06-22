@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signIn, onAuthChanged, signInWithGoogle } from "@/services/authService";
-import { getUserRecord } from "@/services/userService";
+import { signIn, signInWithGoogle } from "@/services/authService";
+import { useAuth } from "@/hooks/useAuth";
 
 function getRedirectPath(role: string, status: string): string {
   if (status === "pending") return "/pending-approval";
@@ -21,30 +21,24 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const { user, userRecord, isLoading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (authLoading || !user || !userRecord) return;
+    router.replace(getRedirectPath(userRecord.role, userRecord.status));
+  }, [authLoading, user, userRecord, router]);
 
   function validateEmail(v: string) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
   }
-
-  useEffect(() => {
-    const unsub = onAuthChanged(async (u) => {
-      if (!u) return;
-      const record = await getUserRecord(u.uid);
-      if (!record) return;
-      router.push(getRedirectPath(record.role, record.status));
-    });
-    return unsub;
-  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const user = await signIn(email, password);
-      const record = await getUserRecord(user.uid);
-      router.push(getRedirectPath(record?.role ?? "user", record?.status ?? "approved"));
-      // keep spinner alive — navigation is non-blocking and may take time on cold start
+      await signIn(email, password);
+      // nav handled by the reactive useAuth effect
     } catch {
       setError("Invalid credentials. Contact your administrator.");
       setLoading(false);
@@ -55,9 +49,8 @@ export default function LoginPage() {
     setGoogleLoading(true);
     setError(null);
     try {
-      const { role, status } = await signInWithGoogle();
-      router.push(getRedirectPath(role, status));
-      // keep spinner alive through navigation
+      await signInWithGoogle();
+      // nav handled by the reactive useAuth effect
     } catch {
       setError("Google sign-in failed. Please try again.");
       setGoogleLoading(false);

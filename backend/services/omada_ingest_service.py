@@ -32,6 +32,14 @@ BUFFER_WINDOW_S = 2.0
 # Minimum distinct APs that must hear a beacon before we attempt positioning.
 MIN_APS_FOR_POSITION = 3
 
+# Cap how often positioning runs per beacon. The 3 APs POST independently
+# (~every 2 s, staggered), so without this guard _flush_ready_beacons emits on
+# EVERY POST — 3 solves/cycle on 1-fresh-2-stale readings, which stutters the
+# Kalman velocity estimate and makes the dot hop while moving. Emitting at most
+# once per AP-report period collapses that to a single solve on the freshest
+# reading from each AP. Set to ~0.9x your per-AP report interval.
+EMIT_MIN_INTERVAL_S = 1.8
+
 
 def _normalise_mac(mac: str) -> str:
     """Strip separators and uppercase. Works for both colon and colon-less forms."""
@@ -66,6 +74,8 @@ class OmadaIngestService:
         self._ap_coords: Dict[str, tuple[float, float]] = {}
         self._ap_cache_loaded_at: float = 0.0
         self._AP_CACHE_TTL_S = 30.0
+        # beacon key (uuid:major:minor) -> time.monotonic() of last positioning emit
+        self._last_emit: Dict[str, float] = {}
 
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
@@ -218,6 +228,8 @@ class OmadaIngestService:
     def _flush_ready_beacons(self) -> int:
         """
         Evict stale readings, then emit positioning for beacons with enough fresh APs.
+        Positioning is rate-limited per beacon (EMIT_MIN_INTERVAL_S) so the 3 staggered
+        AP POSTs in a cycle produce a single solve, not three.
         Returns count of beacons sent to the pipeline this call.
         """
         now_mono = time.monotonic()
@@ -232,6 +244,10 @@ class OmadaIngestService:
             buf.readings = fresh
 
             if len(fresh) < MIN_APS_FOR_POSITION:
+                continue
+
+            # Rate-limit: collapse the 3 staggered AP POSTs/cycle into one solve.
+            if now_mono - self._last_emit.get(beacon_key, 0.0) < EMIT_MIN_INTERVAL_S:
                 continue
 
             # beacon_key is "uuid:major:minor"
@@ -264,6 +280,8 @@ class OmadaIngestService:
                 label=identity["label"],
             )
 
+            # Stamp BEFORE solving so a thrown exception can't bypass the rate-limit.
+            self._last_emit[beacon_key] = now_mono
             try:
                 position = positioning_service.compute_position(payload)
                 if position:

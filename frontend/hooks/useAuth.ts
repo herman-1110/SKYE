@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { createElement, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import type { User } from "firebase/auth";
 import { onAuthChanged } from "@/services/authService";
@@ -8,25 +8,22 @@ import type { UserRecord } from "@/types/user";
 
 const UNPROTECTED = ["/login", "/register", "/pending-approval", "/suspended"];
 
-export function useAuth(): { user: User | null; userRecord: UserRecord | null; isLoading: boolean } {
+type AuthState = { user: User | null; userRecord: UserRecord | null; isLoading: boolean };
+
+const AuthContext = createContext<AuthState>({ user: null, userRecord: null, isLoading: true });
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [userRecord, setUserRecord] = useState<UserRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Single global auth listener — runs once, state shared app-wide.
   useEffect(() => {
     const unsubscribe = onAuthChanged(async (u) => {
       setUser(u);
-      if (u) {
-        if (!u.emailVerified) {
-          setUserRecord(null);
-          setIsLoading(false);
-          if (!UNPROTECTED.some((p) => pathname?.startsWith(p))) {
-            router.push("/pending-approval");
-          }
-          return;
-        }
+      if (u && u.emailVerified) {
         const record = await getUserRecord(u.uid);
         setUserRecord(record);
       } else {
@@ -35,7 +32,19 @@ export function useAuth(): { user: User | null; userRecord: UserRecord | null; i
       setIsLoading(false);
     });
     return unsubscribe;
-  }, [router, pathname]);
+  }, []);
 
-  return { user, userRecord, isLoading };
+  // Unverified-email redirect — re-evaluates on path/state change.
+  useEffect(() => {
+    if (isLoading || !user) return;
+    if (!user.emailVerified && !UNPROTECTED.some((p) => pathname?.startsWith(p))) {
+      router.replace("/pending-approval");
+    }
+  }, [user, isLoading, pathname, router]);
+
+  return createElement(AuthContext.Provider, { value: { user, userRecord, isLoading } }, children);
+}
+
+export function useAuth(): AuthState {
+  return useContext(AuthContext);
 }

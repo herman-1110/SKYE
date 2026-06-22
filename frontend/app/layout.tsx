@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/layout/ThemeProvider";
+import { AuthProvider } from "@/hooks/useAuth";
 
 const ibmPlexSans = IBM_Plex_Sans({
   weight: ["400", "500", "600", "700"],
@@ -34,7 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="font-sans antialiased bg-s-base text-s-text min-h-screen" suppressHydrationWarning>
         <ThemeProvider />
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
