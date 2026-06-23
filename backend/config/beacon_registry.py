@@ -22,19 +22,15 @@ def make_ibeacon_key(uuid: str, major: str, minor: str) -> str:
     return f"{(uuid or '').lower()}:{major}:{minor}"
 
 
+# Legacy seed only — migrated into Firestore on startup (idempotent), then vestigial.
 # iBeacon identity key → person identity
-REAL_BEACON_REGISTRY: Dict[str, BeaconIdentity] = {
+SEED_BEACONS: Dict[str, BeaconIdentity] = {
     # Test phone (nRF Connect iBeacon) — Guard Alpha
     "c001405c0e9f43b8af4aea309ba7e130:0001:0001": {
         "person_id": "guard-001",
         "person_type": "guard",
         "label": "Guard Alpha (Real)",
     },
-    # Add more beacons here:
-    #   make_ibeacon_key(uuid, major, minor): {"person_id": ..., "person_type": ..., "label": ...}
 }
 
-
-def resolve_beacon_by_ibeacon(uuid: str, major: str, minor: str) -> Optional[BeaconIdentity]:
-    """Return identity for an iBeacon (uuid/major/minor), or None if unregistered."""
-    return REAL_BEACON_REGISTRY.get(make_ibeacon_key(uuid, major, minor))
+# resolve_beacon_by_ibeacon() removed — see OmadaIngestService._resolve_beacon (cached)

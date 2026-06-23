@@ -199,3 +199,31 @@ export const createCCTV = (
 
 export const deleteCCTV = (buildingId: string, floorId: string, cctvId: string): Promise<void> =>
   req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`);
+
+export function subscribeToAPs(
+  buildingId: string,
+  floorId: string,
+  callback: (aps: APRecord[]) => void,
+): Unsubscribe {
+  const q = query(
+    collection(fsdb, "buildings", buildingId, "floors", floorId, "access_points"),
+    orderBy("created_at"),
+  );
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => d.data() as APRecord));
+  });
+}
+
+export function subscribeToCCTVs(
+  buildingId: string,
+  floorId: string,
+  callback: (cctvs: CCTVRecord[]) => void,
+): Unsubscribe {
+  const q = query(
+    collection(fsdb, "buildings", buildingId, "floors", floorId, "cctvs"),
+    orderBy("created_at"),
+  );
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => d.data() as CCTVRecord));
+  });
+}

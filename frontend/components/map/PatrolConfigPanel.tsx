@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
-import { listAPs, savePatrolConfig, type APRecord } from "@/services/floorService";
+import { useEffect, useRef, useState } from "react";
+import { subscribeToAPs, savePatrolConfig, type APRecord } from "@/services/floorService";
 import type { FloorRecord } from "@/types/floor";
 import { toast } from "@/store/toastStore";
 
@@ -23,20 +23,27 @@ export default function PatrolConfigPanel({
   const [routeIds, setRouteIds] = useState<string[]>(floor.patrol_route ?? []);
   const [saving, setSaving] = useState(false);
 
+  const routeInitialized = useRef(false);
+
   useEffect(() => {
-    listAPs(buildingId, floor.id)
-      .then((data) => {
-        setAps(data);
-        const liveIds = new Set(data.map((a) => a.id));
+    routeInitialized.current = false;
+    const unsub = subscribeToAPs(buildingId, floor.id, (data) => {
+      setAps(data);
+      const liveIds = new Set(data.map((a) => a.id));
+      if (!routeInitialized.current) {
+        routeInitialized.current = true;
         if (!floor.patrol_route || floor.patrol_route.length === 0) {
           const sorted = [...data].sort((a, b) => a.name.localeCompare(b.name));
           setRouteIds(sorted.map((a) => a.id));
         } else {
           setRouteIds(floor.patrol_route.filter((id) => liveIds.has(id)));
         }
-      })
-      .catch(() => toast.error("Failed to load APs"))
-      .finally(() => setLoading(false));
+      } else {
+        setRouteIds((prev) => prev.filter((id) => liveIds.has(id)));
+      }
+      setLoading(false);
+    });
+    return unsub;
   }, [buildingId, floor.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const apById = Object.fromEntries(aps.map((a) => [a.id, a]));

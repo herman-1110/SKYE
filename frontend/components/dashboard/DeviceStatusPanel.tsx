@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useAPHeartbeats } from "@/hooks/useAPHeartbeats";
 import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
-import { listAPs, listCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
+import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
 interface Props {
   buildingId: string | null;
@@ -17,8 +17,9 @@ export default function DeviceStatusPanel({ buildingId, floorId }: Props) {
 
   useEffect(() => {
     if (!buildingId || !floorId) { setAps([]); setCctvs([]); return; }
-    listAPs(buildingId, floorId).then(setAps).catch(() => {});
-    listCCTVs(buildingId, floorId).then(setCctvs).catch(() => {});
+    const unsubAPs = subscribeToAPs(buildingId, floorId, setAps);
+    const unsubCCTVs = subscribeToCCTVs(buildingId, floorId, setCctvs);
+    return () => { unsubAPs(); unsubCCTVs(); };
   }, [buildingId, floorId]);
 
   if (!buildingId || !floorId || (aps.length === 0 && cctvs.length === 0)) return null;
@@ -31,7 +32,7 @@ export default function DeviceStatusPanel({ buildingId, floorId }: Props) {
         <div className="device-status-section">
           <span className="device-status-label">ACCESS POINTS</span>
           {aps.map((ap) => {
-            const status = apStatuses[ap.mac.toUpperCase()] ?? "offline";
+            const status = apStatuses[ap.mac.toUpperCase()]?.status ?? "offline";
             return (
               <div key={ap.id} className="device-status-row">
                 <span className={`device-status-dot ${status}`} />

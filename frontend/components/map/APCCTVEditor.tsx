@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { FloorRecord } from "@/types/floor";
 import {
-  listAPs, createAP, deleteAP,
-  listCCTVs, createCCTV, deleteCCTV,
+  subscribeToAPs, createAP, deleteAP,
+  subscribeToCCTVs, createCCTV, deleteCCTV,
   type APRecord, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
@@ -44,12 +44,12 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [cctvName, setCctvName] = useState("");
   const [cctvMac, setCctvMac] = useState("");
   const [cctvMacError, setCctvMacError] = useState("");
-  const apStatuses = useAPHeartbeats();
+  const apHeartbeats = useAPHeartbeats();
 
   const placedMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
-  const unregisteredOnlineMacs = Object.entries(apStatuses)
-    .filter(([mac, status]) => status === "online" && !placedMacs.has(mac.toUpperCase()))
-    .map(([mac]) => mac);
+  const unregisteredOnlineAPs = Object.values(apHeartbeats)
+    .filter((hb) => hb.status === "online" && !placedMacs.has(hb.mac.toUpperCase()))
+    .map((hb) => ({ mac: hb.mac, name: hb.name }));
 
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -57,8 +57,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
-    listAPs(buildingId, floor.id).then(setAps).catch(() => {});
-    listCCTVs(buildingId, floor.id).then(setCctvs).catch(() => {});
+    const unsubAPs = subscribeToAPs(buildingId, floor.id, setAps);
+    const unsubCCTVs = subscribeToCCTVs(buildingId, floor.id, setCctvs);
+    return () => { unsubAPs(); unsubCCTVs(); };
   }, [buildingId, floor.id]);
 
   const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -88,7 +89,6 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         x_m,
         y_m,
       });
-      setAps((prev) => [...prev, ap]);
       toast.success(`AP "${ap.name}" placed`);
       setPendingPct(null); setApName(""); setApMac(""); setPlacementMode(null);
     } catch (err: unknown) {
@@ -120,7 +120,6 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         y_pct: pendingPct.y,
         mac: hasHex ? cctvMac : null,
       });
-      setCctvs((prev) => [...prev, cctv]);
       toast.success(`CCTV "${cctv.name}" placed`);
       setPendingPct(null); setCctvName(""); setCctvMac(""); setCctvMacError(""); setPlacementMode(null);
     } catch { toast.error("Failed to place CCTV"); }
@@ -129,14 +128,16 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
   const handleDeleteAP = async (id: string) => {
     setDeletingId(id);
-    try { await deleteAP(buildingId, floor.id, id); setAps((p) => p.filter((a) => a.id !== id)); toast.success("AP removed"); }
+    setHoveredMarker(null);
+    try { await deleteAP(buildingId, floor.id, id); toast.success("AP removed"); }
     catch { toast.error("Failed to remove AP"); }
     finally { setDeletingId(null); }
   };
 
   const handleDeleteCCTV = async (id: string) => {
     setDeletingId(id);
-    try { await deleteCCTV(buildingId, floor.id, id); setCctvs((p) => p.filter((c) => c.id !== id)); toast.success("CCTV removed"); }
+    setHoveredMarker(null);
+    try { await deleteCCTV(buildingId, floor.id, id); toast.success("CCTV removed"); }
     catch { toast.error("Failed to remove CCTV"); }
     finally { setDeletingId(null); }
   };
@@ -145,12 +146,12 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setCctvName(""); setCctvMac(""); setCctvMacError("");
   };
 
-  const startPlacingDetectedAP = (mac: string) => {
+  const startPlacingDetectedAP = (mac: string, name = "") => {
     setApMac(mac);
-    setApName("");
+    setApName(name);
     setMacError("");
     setPlacementMode("ap");
-    toast.info(`Click on the map to place AP ${mac}`);
+    toast.info(`Click on the map to place ${name || mac}`);
   };
 
   return (
@@ -170,8 +171,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "ap" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
           </svg>
           {placementMode === "ap" ? "Cancel" : "Add AP"}
         </button>
@@ -180,8 +181,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "cctv" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
           </svg>
           {placementMode === "cctv" ? "Cancel" : "Add CCTV"}
         </button>
@@ -190,14 +191,14 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         )}
         {onClose && (
           <button onClick={onClose} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-s-elevated border border-s-border text-xs font-mono text-s-muted hover:text-s-danger transition-colors">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             Close
           </button>
         )}
       </div>
 
       {/* Detected-but-unplaced APs panel */}
-      {floor.scale_pixels_per_meter && unregisteredOnlineMacs.length > 0 && (
+      {floor.scale_pixels_per_meter && unregisteredOnlineAPs.length > 0 && (
         <div className="bento-card p-3 border border-s-accent/40">
           <div className="flex items-center gap-2 mb-2">
             <span className="relative flex h-2 w-2">
@@ -205,28 +206,31 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
               <span className="relative inline-flex rounded-full h-2 w-2 bg-s-accent" />
             </span>
             <span className="font-mono text-[10px] text-s-accent tracking-widest uppercase">
-              {unregisteredOnlineMacs.length} AP{unregisteredOnlineMacs.length > 1 ? "s" : ""} online but not placed
+              {unregisteredOnlineAPs.length} AP{unregisteredOnlineAPs.length > 1 ? "s" : ""} online but not placed
             </span>
           </div>
           <p className="font-mono text-[10px] text-s-muted mb-2.5 leading-relaxed">
             These access points are sending data but aren&apos;t on this floor yet. Click one to place it.
           </p>
           <div className="flex flex-col gap-1.5">
-            {unregisteredOnlineMacs.map((mac) => (
+            {unregisteredOnlineAPs.map((ap) => (
               <button
-                key={mac}
-                onClick={() => startPlacingDetectedAP(mac)}
+                key={ap.mac}
+                onClick={() => startPlacingDetectedAP(ap.mac, ap.name)}
                 className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-s-elevated border border-s-border hover:border-s-accent transition-colors text-left group"
               >
                 <div className="flex items-center gap-2">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
                   </svg>
-                  <span className="font-mono text-[11px] text-s-text">{mac}</span>
+                  <div className="flex flex-col leading-tight">
+                    {ap.name && <span className="font-mono text-[11px] text-s-text">{ap.name}</span>}
+                    <span className="font-mono text-[10px] text-s-muted">{ap.mac}</span>
+                  </div>
                 </div>
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-s-accent opacity-0 group-hover:opacity-100 transition-opacity">
                   Place
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                 </span>
               </button>
             ))}
@@ -258,8 +262,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
             onMouseMove={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
             onMouseLeave={() => setHoveredMarker(null)}
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
             </svg>
             <button
               onClick={(e) => { e.stopPropagation(); handleDeleteAP(ap.id); }}
@@ -280,8 +284,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
             onMouseMove={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
             onMouseLeave={() => setHoveredMarker(null)}
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
             </svg>
             <button
               onClick={(e) => { e.stopPropagation(); handleDeleteCCTV(cctv.id); }}
@@ -314,14 +318,14 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
             </thead>
             <tbody>
               {aps.map((ap) => {
-                const status = apStatuses[ap.mac.toUpperCase()] ?? "unknown";
+                const status = apHeartbeats[ap.mac.toUpperCase()]?.status ?? "unknown";
                 return (
                 <tr key={ap.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
                       <StatusDot status={status} />
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="15"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
                       </svg>
                       <span className="text-s-text font-medium">{ap.name}</span>
                       <span className="font-mono text-[10px] text-s-muted">{ap.mac}</span>
@@ -330,7 +334,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted capitalize">{status === "unknown" ? "Access Point" : status}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button onClick={() => handleDeleteAP(ap.id)} disabled={deletingId === ap.id} className="text-s-muted hover:text-s-danger transition-colors disabled:opacity-40">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                     </button>
                   </td>
                 </tr>
@@ -340,8 +344,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 <tr key={cctv.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
                       </svg>
                       <span className="text-s-text font-medium">{cctv.name}</span>
                     </div>
@@ -349,7 +353,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted">CCTV Camera</td>
                   <td className="px-4 py-2.5 text-right">
                     <button onClick={() => handleDeleteCCTV(cctv.id)} disabled={deletingId === cctv.id} className="text-s-muted hover:text-s-danger transition-colors disabled:opacity-40">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                     </button>
                   </td>
                 </tr>

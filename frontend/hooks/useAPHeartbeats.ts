@@ -7,27 +7,38 @@ const ONLINE_THRESHOLD_MS = 10_000;
 
 export type APStatus = "online" | "offline" | "unknown";
 
-export function useAPHeartbeats(): Record<string, APStatus> {
-  const rawRef = useRef<Record<string, number>>({});
-  const [statuses, setStatuses] = useState<Record<string, APStatus>>({});
+export interface APHeartbeat {
+  mac: string;
+  name: string;
+  status: APStatus;
+}
+
+export function useAPHeartbeats(): Record<string, APHeartbeat> {
+  const rawRef = useRef<Record<string, { name: string; last_seen: number }>>({});
+  const [heartbeats, setHeartbeats] = useState<Record<string, APHeartbeat>>({});
 
   const recompute = () => {
     const now = Date.now();
-    const result: Record<string, APStatus> = {};
-    for (const [mac, last_seen] of Object.entries(rawRef.current)) {
+    const result: Record<string, APHeartbeat> = {};
+    for (const [mac, { name, last_seen }] of Object.entries(rawRef.current)) {
       const age = now - last_seen * 1000;
-      result[mac] = age < ONLINE_THRESHOLD_MS ? "online" : "offline";
+      result[mac] = {
+        mac,
+        name,
+        status: age < ONLINE_THRESHOLD_MS ? "online" : "offline",
+      };
     }
-    setStatuses(result);
+    setHeartbeats(result);
   };
 
   useEffect(() => {
     const r = ref(db, "/ap_heartbeats");
     const unsub = onValue(r, (snap) => {
       const data = snap.val() ?? {};
-      const raw: Record<string, number> = {};
-      for (const entry of Object.values(data) as { mac: string; last_seen: number }[]) {
-        raw[entry.mac.toUpperCase()] = entry.last_seen;
+      const raw: Record<string, { name: string; last_seen: number }> = {};
+      for (const entry of Object.values(data) as { mac: string; name?: string; last_seen: number }[]) {
+        // name is optional for backward-compat with nodes written before Prompt 91
+        raw[entry.mac.toUpperCase()] = { name: entry.name ?? "", last_seen: entry.last_seen };
       }
       rawRef.current = raw;
       recompute();
@@ -41,5 +52,5 @@ export function useAPHeartbeats(): Record<string, APStatus> {
     };
   }, []);
 
-  return statuses;
+  return heartbeats;
 }

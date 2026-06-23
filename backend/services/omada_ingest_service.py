@@ -17,9 +17,10 @@ from typing import Dict, List, Optional
 
 from firebase_admin import db as rtdb
 
-from config.beacon_registry import make_ibeacon_key, resolve_beacon_by_ibeacon
+from config.beacon_registry import make_ibeacon_key, BeaconIdentity
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
 from repositories.ap_repository import ap_repository
+from repositories.beacon_repository import beacon_repository
 from repositories.floor_repository import floor_repository
 from services.positioning_service import positioning_service
 from services.safety_service import safety_service
@@ -76,6 +77,10 @@ class OmadaIngestService:
         self._AP_CACHE_TTL_S = 30.0
         # beacon key (uuid:major:minor) -> time.monotonic() of last positioning emit
         self._last_emit: Dict[str, float] = {}
+        # iBeacon identity cache (hot path) — mirrors the AP cache above
+        self._beacon_cache: Dict[str, BeaconIdentity] = {}
+        self._beacon_cache_loaded_at: float = 0.0
+        self._BEACON_CACHE_TTL_S = 30.0
 
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
@@ -97,16 +102,44 @@ class OmadaIngestService:
             coords = self._ap_coords.get(ap_mac_colons.upper())
         return coords
 
+    # ── Beacon identity cache (resolve iBeacon triple → person) ──────────────────
+
+    def _refresh_beacon_cache(self) -> None:
+        beacons = beacon_repository.get_all()
+        self._beacon_cache = {
+            make_ibeacon_key(b.uuid, b.major, b.minor): {
+                "person_id": b.person_id,
+                "person_type": b.person_type,
+                "label": b.label,
+            }
+            for b in beacons
+        }
+        self._beacon_cache_loaded_at = time.monotonic()
+
+    def _resolve_beacon(self, uuid: str, major: str, minor: str) -> Optional[BeaconIdentity]:
+        """Cached identity lookup. Misses return None WITHOUT a Firestore read — ambient
+        BLE makes misses common, so refresh-per-miss would hammer Firestore. Newly added
+        beacons resolve on the next packet via invalidate_beacon_cache()."""
+        if time.monotonic() - self._beacon_cache_loaded_at > self._BEACON_CACHE_TTL_S:
+            self._refresh_beacon_cache()
+        return self._beacon_cache.get(make_ibeacon_key(uuid, major, minor))
+
+    def invalidate_beacon_cache(self) -> None:
+        """Mark the cache stale so the next _resolve_beacon reloads from Firestore.
+        Called by beacon_service after any create/update/delete."""
+        self._beacon_cache_loaded_at = 0.0
+
     # ── Heartbeat ───────────────────────────────────────────────────────────────
 
-    def _write_ap_heartbeat(self, ap_mac_colons: str) -> None:
+    def _write_ap_heartbeat(self, ap_mac_colons: str, name: str = "") -> None:
         """Write last-seen heartbeat for a reporting AP to RTDB.
         Called for every reporting AP — registered or not — so the dashboard can
-        surface online-but-unplaced APs in the detection panel."""
+        surface online-but-unplaced APs (with their reported name) in the detection panel."""
         key = ap_mac_colons.replace(":", "_")
         try:
             rtdb.reference(f"/ap_heartbeats/{key}").set({
                 "mac": ap_mac_colons,
+                "name": name or "",
                 "last_seen": int(time.time()),
             })
         except Exception as e:
@@ -170,8 +203,8 @@ class OmadaIngestService:
         ap_mac_colons = _format_mac_colons(_normalise_mac(ap_mac_raw))
 
         # Write heartbeat for every reporting AP — even unregistered ones —
-        # so the dashboard can surface online-but-unplaced APs.
-        self._write_ap_heartbeat(ap_mac_colons)
+        # so the dashboard can surface online-but-unplaced APs (with their name).
+        self._write_ap_heartbeat(ap_mac_colons, reporter.get("name", ""))
 
         ap_coords = self._get_ap_coords(ap_mac_colons)
         if ap_coords is None:
@@ -194,7 +227,7 @@ class OmadaIngestService:
             # Skip entries with no iBeacon block (e.g. Eddystone-only) for now.
             if not uuid:
                 continue
-            if resolve_beacon_by_ibeacon(uuid, major, minor) is None:
+            if self._resolve_beacon(uuid, major, minor) is None:
                 continue
 
             beacon_key = make_ibeacon_key(uuid, major, minor)
@@ -255,7 +288,7 @@ class OmadaIngestService:
                 uuid, major, minor = beacon_key.split(":")
             except ValueError:
                 continue
-            identity = resolve_beacon_by_ibeacon(uuid, major, minor)
+            identity = self._resolve_beacon(uuid, major, minor)
             if identity is None:
                 continue
 

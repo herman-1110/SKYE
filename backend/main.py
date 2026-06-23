@@ -15,6 +15,7 @@ from middleware.error_handler import register_exception_handlers
 from middleware.request_logger import RequestLoggerMiddleware
 from routes.alert_routes import router as alert_router
 from routes.auth_routes import router as auth_router
+from routes.beacon_routes import router as beacon_router
 from routes.building_routes import router as building_router
 from routes.floor_routes import router as floor_router
 from routes.report_routes import router as report_router
@@ -42,6 +43,12 @@ class MaxBodySizeMiddleware(BaseHTTPMiddleware):
 def create_app() -> FastAPI:
     cred = credentials.Certificate(settings.FIREBASE_KEY_PATH)
     firebase_admin.initialize_app(cred, {"databaseURL": settings.FIREBASE_RTDB_URL})
+
+    # Idempotently migrate the hardcoded beacon seed into Firestore.
+    from repositories.beacon_repository import beacon_repository
+    seeded = beacon_repository.seed_from_legacy()
+    if seeded:
+        logging.info("[SEED] migrated %d legacy beacon(s) into Firestore", seeded)
 
     app = FastAPI(title="SKYE Sentinel-AI", version="0.1.0")
 
@@ -76,6 +83,7 @@ def create_app() -> FastAPI:
 
     # Firebase-token protected
     app.include_router(alert_router)
+    app.include_router(beacon_router)
     app.include_router(building_router)
     app.include_router(floor_router)
     app.include_router(zone_router)
