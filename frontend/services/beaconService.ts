@@ -41,6 +41,7 @@ export interface BeaconRecord {
   person_type: PersonType;
   label: string;
   building_id?: string | null;
+  tx_power: number;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +54,7 @@ export interface BeaconCreate {
   person_type: PersonType;
   label: string;
   building_id?: string | null;
+  tx_power?: number;
 }
 
 export interface BeaconUpdate {
@@ -60,6 +62,7 @@ export interface BeaconUpdate {
   person_type?: PersonType;
   label?: string;
   building_id?: string | null;
+  tx_power?: number;
 }
 
 export const listBeacons = (): Promise<BeaconRecord[]> =>

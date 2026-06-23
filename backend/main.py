@@ -19,6 +19,7 @@ from routes.beacon_routes import router as beacon_router
 from routes.building_routes import router as building_router
 from routes.floor_routes import router as floor_router
 from routes.report_routes import router as report_router
+from routes.safety_settings_routes import router as safety_settings_router
 from routes.telemetry_routes import router as telemetry_router
 from routes.omada_telemetry import router as omada_telemetry_router
 from routes.simulation_routes import router as simulation_router
@@ -50,6 +51,10 @@ def create_app() -> FastAPI:
     if seeded:
         logging.info("[SEED] migrated %d legacy beacon(s) into Firestore", seeded)
 
+    # Idempotently seed the safety-settings doc from settings.py defaults.
+    from repositories.safety_settings_repository import safety_settings_repository
+    safety_settings_repository.seed_defaults()
+
     app = FastAPI(title="SKYE Sentinel-AI", version="0.1.0")
 
     # Rate limiting
@@ -65,7 +70,7 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:3000",
         ],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
@@ -88,6 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(floor_router)
     app.include_router(zone_router)
     app.include_router(report_router)
+    app.include_router(safety_settings_router)
     app.include_router(user_router)
     app.include_router(simulation_router)
     app.include_router(vigi_router)

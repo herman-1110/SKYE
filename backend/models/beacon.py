@@ -14,3 +14,4 @@ class Beacon:
     created_at: str
     updated_at: str
     building_id: Optional[str] = None   # org tag only — NEVER used to resolve
+    tx_power: float = -59.0             # RSSI at 1 metre; calibrate per device with nRF Connect

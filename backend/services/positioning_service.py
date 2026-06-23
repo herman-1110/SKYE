@@ -131,8 +131,9 @@ class PositioningService:
             return None
 
         ap_positions: List[Tuple[float, float]] = [(r.ap_x, r.ap_y) for r in readings]
+        tx_power = payload.tx_power if payload.tx_power else settings.TX_POWER_DEFAULT
         distances: List[float] = [
-            rssi_to_distance(r.rssi, settings.TX_POWER_DEFAULT, settings.PATH_LOSS_EXPONENT)
+            rssi_to_distance(r.rssi, tx_power, settings.PATH_LOSS_EXPONENT)
             for r in readings
         ]
 
@@ -180,20 +181,6 @@ class PositioningService:
         pixel_x = sx * scale if scale is not None else None
         pixel_y = sy * scale if scale is not None else None
 
-        # ── DIAG: solver trace ──
-        print("[SOLVER] ─────────────────────────────")
-        print(f"[SOLVER] beacon {payload.person_id}")
-        for (ax, ay), d in zip(ap_positions, distances):
-            print(f"[SOLVER]   AP ({ax:7.2f},{ay:7.2f})  dist={d:6.2f} m")
-        print(f"[SOLVER] raw solve   = {raw}")
-        print(f"[SOLVER] after clamp = ({raw_x:.2f}, {raw_y:.2f})")
-        print(f"[SOLVER] kalman out  = ({sx:.2f}, {sy:.2f})")
-        print(f"[SOLVER] bounds      = x[{self._cached_x_min:.2f},{self._cached_x_max:.2f}] "
-              f"y[{self._cached_y_min:.2f},{self._cached_y_max:.2f}]")
-        print(f"[SOLVER] scale       = {scale} px/m  -> pixel ({pixel_x},{pixel_y})")
-        print("[SOLVER] ─────────────────────────────")
-        # ────────────────────────
-        
         record = PositionRecord(
             beacon_mac=payload.reporter_mac,
             person_id=payload.person_id,

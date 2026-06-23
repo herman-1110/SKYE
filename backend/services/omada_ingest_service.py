@@ -81,6 +81,12 @@ class OmadaIngestService:
         self._beacon_cache: Dict[str, BeaconIdentity] = {}
         self._beacon_cache_loaded_at: float = 0.0
         self._BEACON_CACHE_TTL_S = 30.0
+        # /beacon_scans janitor: drop ambient-BLE nodes that haven't been heard in a while.
+        # Registered beacons are kept regardless of age (Status column needs them, and the
+        # set is bounded). Throttle ensures we don't hammer RTDB on every AP report.
+        self._last_janitor_run: float = 0.0
+        self._JANITOR_INTERVAL_S = 60.0      # run no more than once per 60 s
+        self._STALE_BEACON_S = 300.0         # unregistered + last_seen > 300 s ago → delete
 
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
@@ -111,6 +117,7 @@ class OmadaIngestService:
                 "person_id": b.person_id,
                 "person_type": b.person_type,
                 "label": b.label,
+                "tx_power": b.tx_power,
             }
             for b in beacons
         }
@@ -144,6 +151,53 @@ class OmadaIngestService:
             })
         except Exception as e:
             print(f"[OMADA] WARNING: heartbeat write failed for {ap_mac_colons}: {e}")
+
+    def _write_beacon_scan(
+        self,
+        beacon_key: str,           # "uuid:major:minor" from make_ibeacon_key
+        uuid: str,
+        major: str,
+        minor: str,
+        rssi: float,
+        ap_mac_colons: str,
+        registered: bool,
+    ) -> None:
+        """Write a lightweight last-seen record to RTDB for every heard beacon.
+        Called before the solve gate so both registered and unknown beacons are visible.
+        Node key uses underscores (RTDB keys cannot contain colons)."""
+        node_key = beacon_key.replace(":", "_")
+        try:
+            rtdb.reference(f"/beacon_scans/{node_key}").set({
+                "uuid": uuid,
+                "major": major,
+                "minor": minor,
+                "rssi": float(rssi),
+                "ap_mac": ap_mac_colons,
+                "last_seen": int(time.time()),
+                "registered": registered,
+            })
+        except Exception as e:
+            print(f"[OMADA] WARNING: beacon_scan write failed for {node_key}: {e}")
+
+    def _prune_stale_unregistered_scans(self) -> None:
+        """Delete /beacon_scans/{key} nodes that are unregistered AND haven't been
+        heard for > _STALE_BEACON_S seconds. Registered nodes are kept regardless
+        of age — bounded set + useful debug timestamp. Called only via the throttle
+        in ingest() so the full-tree read happens at most once per _JANITOR_INTERVAL_S."""
+        try:
+            snap = rtdb.reference("/beacon_scans").get() or {}
+            if not isinstance(snap, dict):
+                return
+            cutoff = int(time.time()) - int(self._STALE_BEACON_S)
+            for node_key, data in snap.items():
+                if not isinstance(data, dict):
+                    continue
+                if data.get("registered"):
+                    continue
+                if int(data.get("last_seen", 0)) < cutoff:
+                    rtdb.reference(f"/beacon_scans/{node_key}").delete()
+        except Exception as e:
+            print(f"[OMADA] WARNING: beacon_scans janitor failed: {e}")
 
     # ── Main entry point ────────────────────────────────────────────────────────
 
@@ -197,6 +251,13 @@ class OmadaIngestService:
         print("[OMADA] ═══════════════════════════════════════════════════════════")
         # ─────────────────────────────────────────────────────────────────
 
+        # Throttled janitor: prune stale unregistered /beacon_scans nodes.
+        # No-op on most ingest cycles — only fires once per _JANITOR_INTERVAL_S.
+        janitor_now = time.monotonic()
+        if janitor_now - self._last_janitor_run > self._JANITOR_INTERVAL_S:
+            self._last_janitor_run = janitor_now
+            self._prune_stale_unregistered_scans()
+
         if not ap_mac_raw:
             return {"status": "ignored", "reason": "no reporter.mac"}
 
@@ -223,14 +284,31 @@ class OmadaIngestService:
             major = ib.get("major", "")
             minor = ib.get("minor", "")
 
-            # Identify by stable iBeacon identity (survives BLE MAC rotation).
             # Skip entries with no iBeacon block (e.g. Eddystone-only) for now.
             if not uuid:
                 continue
-            if self._resolve_beacon(uuid, major, minor) is None:
-                continue
 
             beacon_key = make_ibeacon_key(uuid, major, minor)
+            identity = self._resolve_beacon(uuid, major, minor)
+
+            # Write scan record for ALL heard beacons (registered or not) BEFORE the
+            # solve gate. Powers online/offline status + unknown beacon discovery.
+            rssi_block_scan = entry.get("rssi", {})
+            rssi_avg_scan = rssi_block_scan.get("avg")
+            if rssi_avg_scan is not None:
+                self._write_beacon_scan(
+                    beacon_key=beacon_key,
+                    uuid=uuid,
+                    major=major,
+                    minor=minor,
+                    rssi=float(rssi_avg_scan),
+                    ap_mac_colons=ap_mac_colons,
+                    registered=(identity is not None),
+                )
+
+            # Unregistered beacons stop here — they don't enter the positioning pipeline.
+            if identity is None:
+                continue
 
             rssi_block = entry.get("rssi", {})
             rssi_avg = rssi_block.get("avg")
@@ -311,6 +389,7 @@ class OmadaIngestService:
                 person_id=identity["person_id"],
                 person_type=identity["person_type"],
                 label=identity["label"],
+                tx_power=identity.get("tx_power", -59.0),
             )
 
             # Stamp BEFORE solving so a thrown exception can't bypass the rate-limit.

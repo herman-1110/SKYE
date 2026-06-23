@@ -11,10 +11,11 @@ Key format: "<uuid_lowercase>:<major>:<minor>"
 from typing import Dict, Optional, TypedDict
 
 
-class BeaconIdentity(TypedDict):
+class BeaconIdentity(TypedDict, total=False):
     person_id: str
     person_type: str  # "guard" | "worker" | "forklift"
     label: str
+    tx_power: float   # optional — _refresh_beacon_cache populates it; legacy seed may omit
 
 
 def make_ibeacon_key(uuid: str, major: str, minor: str) -> str:

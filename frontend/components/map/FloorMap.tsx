@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { usePathname } from "next/navigation";
 import type { PositionRecord } from "@/types/position";
 import type { FloorRecord } from "@/types/floor";
 import { useZones } from "@/hooks/useZones";
@@ -72,7 +73,16 @@ function WorkerTooltip({ position, x, y }: { position: PositionRecord; x: number
 }
 
 export default function FloorMap({ positions, buildingId, activeFloor }: Props) {
+  const pathname = usePathname();
   const [showZones, setShowZones] = useState(true);
+
+  // Reset the zone-overlay toggle to its default whenever the route changes.
+  // Belt-and-braces: the dashboard layout already keys <main> by pathname so
+  // this component should remount, but Next.js Router Cache + browser back
+  // navigation can sometimes preserve subtrees. This guarantees the reset.
+  useEffect(() => {
+    setShowZones(true);
+  }, [pathname]);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [outerSize, setOuterSize] = useState({ w: 0, h: 0 });
 

@@ -1,4 +1,5 @@
 import math
+import time
 import uuid
 from typing import Dict, List, Optional
 
@@ -6,8 +7,10 @@ from config.settings import settings
 from models.alert import AlertRecord
 from models.patrol_log import PatrolLogRecord
 from models.position import PositionRecord
+from models.safety_settings import SafetySettings
 from repositories.alert_repository import alert_repository
 from repositories.position_repository import position_repository
+from repositories.safety_settings_repository import safety_settings_repository
 from utils.timestamp_utils import utcnow_iso, seconds_between
 
 
@@ -16,6 +19,33 @@ _last_collision: Dict[str, str] = {}   # "worker_id|forklift_id" → ISO timesta
 
 
 class SafetyService:
+
+    _SETTINGS_TTL_S = 30.0
+
+    def __init__(self) -> None:
+        self._settings_cache: Optional[SafetySettings] = None
+        self._settings_cache_ts: float = 0.0
+
+    def _get_settings(self) -> SafetySettings:
+        now = time.monotonic()
+        if self._settings_cache is not None and (now - self._settings_cache_ts) < self._SETTINGS_TTL_S:
+            return self._settings_cache
+        try:
+            s = safety_settings_repository.get()
+        except Exception:
+            s = None
+        if s is None:
+            s = SafetySettings(
+                man_down_minutes=settings.MAN_DOWN_MINUTES,
+                collision_distance_m=settings.COLLISION_DISTANCE_M,
+            )
+        self._settings_cache = s
+        self._settings_cache_ts = now
+        return s
+
+    def invalidate_settings_cache(self) -> None:
+        self._settings_cache = None
+        self._settings_cache_ts = 0.0
 
     # ------------------------------------------------------------------
     # FR3 / UC4 — Man-down detection
@@ -27,7 +57,8 @@ class SafetyService:
             return None
 
         elapsed = seconds_between(current.timestamp, utcnow_iso())
-        if elapsed < settings.MAN_DOWN_MINUTES * 60:
+        cfg = self._get_settings()
+        if elapsed < cfg.man_down_minutes * 60:
             return None
 
         last_ts = _last_man_down.get(current.person_id)
@@ -56,13 +87,16 @@ class SafetyService:
         forklifts = [p for p in all_positions if p.person_type == "forklift" and p.predicted_x is not None]
         alerts: List[AlertRecord] = []
 
+        cfg = self._get_settings()
+        collision_distance = cfg.collision_distance_m
+
         for w in workers:
             for f in forklifts:
                 dist = math.hypot(
                     w.predicted_x - f.predicted_x,  # type: ignore[operator]
                     w.predicted_y - f.predicted_y,  # type: ignore[operator]
                 )
-                if dist >= settings.MAN_DOWN_MOVEMENT_THRESHOLD * 2:
+                if dist >= collision_distance:
                     continue
 
                 pair_key = f"{w.person_id}|{f.person_id}"

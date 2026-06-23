@@ -17,6 +17,11 @@ import {
   uploadFloor,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
+import {
+  rasterisePdfPages,
+  revokeRasterPages,
+  type RasterPage,
+} from "@/utils/pdfRasterise";
 import CalibrationTool from "@/components/map/CalibrationTool";
 import ZoneEditor from "@/components/map/ZoneEditor";
 import APCCTVEditor from "@/components/map/APCCTVEditor";
@@ -262,15 +267,47 @@ function AddFloorModal({
   const [previewPan, setPreviewPan] = useState({ x: 0, y: 0 });
   const [previewPanning, setPreviewPanning] = useState(false);
 
+  // PDF flow: when a PDF is dropped, rasterise every page to a PNG and treat
+  // each page as a separate floor. pdfPages === null means single-image mode.
+  const [pdfPages, setPdfPages] = useState<RasterPage[] | null>(null);
+  const [pdfPageNames, setPdfPageNames] = useState<string[]>([]);
+  const [rasterising, setRasterising] = useState(false);
+
   const ACCEPTED = ["image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
+
+  const clearFileState = () => {
+    if (preview) URL.revokeObjectURL(preview);
+    if (pdfPages) revokeRasterPages(pdfPages);
+    setFile(null);
+    setPreview(null);
+    setPdfPages(null);
+    setPdfPageNames([]);
+    setPreviewZoom(1);
+    setPreviewPan({ x: 0, y: 0 });
+  };
 
   const handleFile = (f: File) => {
     if (!ACCEPTED.includes(f.type)) { setError("PNG, JPG, WEBP or PDF only."); return; }
     if (f.size > 10 * 1024 * 1024) { setError("Max 10 MB."); return; }
     if (preview) URL.revokeObjectURL(preview);
+    if (pdfPages) revokeRasterPages(pdfPages);
+    setPdfPages(null);
+    setPdfPageNames([]);
+    setPreview(null);
     setFile(f);
-    setPreview(f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
     setError(null);
+    if (f.type === "application/pdf") {
+      setRasterising(true);
+      rasterisePdfPages(f)
+        .then((pages) => {
+          setPdfPages(pages);
+          setPdfPageNames(pages.map((_, i) => `Page ${i + 1}`));
+        })
+        .catch((e) => setError(e instanceof Error ? e.message : "PDF rasterisation failed"))
+        .finally(() => setRasterising(false));
+    } else if (f.type.startsWith("image/")) {
+      setPreview(URL.createObjectURL(f));
+    }
   };
 
   useEffect(() => {
@@ -302,21 +339,46 @@ function AddFloorModal({
   }, [preview]);
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file || rasterising) return;
     const num = parseInt(floorNumber, 10);
     if (!num || num < 1) { setError("Enter a valid floor number."); return; }
     setError(null);
     setProgress(0);
     try {
-      const floorName = name.trim() || "";
-      await uploadFloor(file, buildingId, floorName, num, setProgress);
-      toast.success(`Floor "${floorName || `Level ${num}`}" uploaded`);
+      if (pdfPages && pdfPages.length > 0) {
+        // Multi-page PDF: each page becomes a separate floor, starting at `num`.
+        for (let i = 0; i < pdfPages.length; i++) {
+          const page = pdfPages[i];
+          const pageName = (pdfPageNames[i] || `Page ${page.pageNumber}`).trim();
+          await uploadFloor(
+            page.file,
+            buildingId,
+            pageName,
+            num + i,
+            (pct) => setProgress(Math.round(((i + pct / 100) / pdfPages.length) * 100)),
+          );
+        }
+        toast.success(`Uploaded ${pdfPages.length} floor${pdfPages.length > 1 ? "s" : ""}`);
+      } else {
+        const floorName = name.trim() || "";
+        await uploadFloor(file, buildingId, floorName, num, setProgress);
+        toast.success(`Floor "${floorName || `Level ${num}`}" uploaded`);
+      }
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
       setProgress(null);
     }
   };
+
+  // Revoke any object URLs we created when the modal unmounts.
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+      if (pdfPages) revokeRasterPages(pdfPages);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -340,71 +402,113 @@ function AddFloorModal({
           </div>
 
           {file ? (
-            <div className="border border-s-border rounded-lg overflow-hidden">
-              {preview ? (
-                <div
-                  ref={previewContainerRef}
-                  style={{
-                    position: "relative",
-                    height: 160,
-                    overflow: "hidden",
-                    background: "#060608",
-                    cursor: previewPanning ? "grabbing" : previewZoom > 1 ? "grab" : "zoom-in",
-                  }}
-                  onMouseDown={(e) => {
-                    if (previewZoom <= 1) return;
-                    setPreviewPanning(true);
-                    previewPanStart.current = { mx: e.clientX, my: e.clientY, px: previewPan.x, py: previewPan.y };
-                  }}
-                  onMouseMove={(e) => {
-                    if (previewPanning && previewPanStart.current) {
-                      setPreviewPan(clampPreviewPan(
-                        previewPanStart.current.px + (e.clientX - previewPanStart.current.mx),
-                        previewPanStart.current.py + (e.clientY - previewPanStart.current.my),
-                        previewZoom,
-                      ));
-                    }
-                  }}
-                  onMouseUp={() => { setPreviewPanning(false); previewPanStart.current = null; }}
-                  onMouseLeave={() => { setPreviewPanning(false); previewPanStart.current = null; }}
-                >
-                  <img
-                    src={preview}
-                    alt={file.name}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "contain",
-                      transformOrigin: "center center",
-                      transform: `scale(${previewZoom}) translate(${previewPan.x / previewZoom}px, ${previewPan.y / previewZoom}px)`,
-                      transition: previewPanning ? "none" : "transform 0.1s ease",
-                      userSelect: "none",
-                      pointerEvents: "none",
-                    }}
-                    draggable={false}
-                  />
-                  {previewZoom === 1 && (
-                    <div style={{
-                      position: "absolute", bottom: 6, right: 8,
-                      fontFamily: "IBM Plex Mono, monospace", fontSize: 9,
-                      color: "rgba(255,255,255,0.35)", pointerEvents: "none", userSelect: "none",
-                    }}>
-                      scroll to zoom
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="h-20 bg-s-elevated flex items-center justify-center text-s-muted">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
-                </div>
-              )}
-              <div className="flex items-center justify-between px-3 py-2 bg-s-elevated border-t border-s-border">
-                <p className="text-xs text-s-text truncate">{file.name}</p>
-                <button onClick={() => { setFile(null); setPreview(null); setPreviewZoom(1); setPreviewPan({ x: 0, y: 0 }); }} className="text-s-muted hover:text-s-danger ml-2 shrink-0 transition-colors">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                </button>
+            rasterising ? (
+              <div className="border border-s-border rounded-lg px-4 py-8 flex flex-col items-center justify-center gap-2 text-s-muted">
+                <span className="h-4 w-4 rounded-full border-2 border-s-accent border-t-transparent animate-spin" />
+                <p className="text-xs">Rendering PDF pages…</p>
               </div>
-            </div>
+            ) : pdfPages ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between border border-s-border rounded-lg px-3 py-2 bg-s-elevated">
+                  <p className="text-xs text-s-text truncate">
+                    {file.name}
+                    <span className="ml-2 text-s-muted">— {pdfPages.length} page{pdfPages.length > 1 ? "s" : ""}</span>
+                  </p>
+                  <button onClick={clearFileState} className="text-s-muted hover:text-s-danger ml-2 shrink-0 transition-colors">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                  {pdfPages.map((page, i) => (
+                    <div key={page.pageNumber} className="border border-s-border rounded-lg overflow-hidden">
+                      <div className="aspect-[4/3] bg-s-elevated flex items-center justify-center">
+                        <img src={page.previewUrl} alt={`Page ${page.pageNumber}`} className="max-w-full max-h-full object-contain" />
+                      </div>
+                      <input
+                        type="text"
+                        value={pdfPageNames[i] ?? ""}
+                        placeholder={`Page ${page.pageNumber}`}
+                        onChange={(e) => {
+                          const next = [...pdfPageNames];
+                          next[i] = e.target.value;
+                          setPdfPageNames(next);
+                        }}
+                        className="w-full bg-s-elevated border-t border-s-border px-2 py-1.5 text-xs text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="font-mono text-[9px] text-s-muted leading-relaxed">
+                  Each page becomes a separate floor (orders #{floorNumber || "?"} onward).
+                </p>
+              </div>
+            ) : (
+              <div className="border border-s-border rounded-lg overflow-hidden">
+                {preview ? (
+                  <div
+                    ref={previewContainerRef}
+                    style={{
+                      position: "relative",
+                      height: 160,
+                      overflow: "hidden",
+                      background: "#060608",
+                      cursor: previewPanning ? "grabbing" : previewZoom > 1 ? "grab" : "zoom-in",
+                    }}
+                    onMouseDown={(e) => {
+                      if (previewZoom <= 1) return;
+                      setPreviewPanning(true);
+                      previewPanStart.current = { mx: e.clientX, my: e.clientY, px: previewPan.x, py: previewPan.y };
+                    }}
+                    onMouseMove={(e) => {
+                      if (previewPanning && previewPanStart.current) {
+                        setPreviewPan(clampPreviewPan(
+                          previewPanStart.current.px + (e.clientX - previewPanStart.current.mx),
+                          previewPanStart.current.py + (e.clientY - previewPanStart.current.my),
+                          previewZoom,
+                        ));
+                      }
+                    }}
+                    onMouseUp={() => { setPreviewPanning(false); previewPanStart.current = null; }}
+                    onMouseLeave={() => { setPreviewPanning(false); previewPanStart.current = null; }}
+                  >
+                    <img
+                      src={preview}
+                      alt={file.name}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                        transformOrigin: "center center",
+                        transform: `scale(${previewZoom}) translate(${previewPan.x / previewZoom}px, ${previewPan.y / previewZoom}px)`,
+                        transition: previewPanning ? "none" : "transform 0.1s ease",
+                        userSelect: "none",
+                        pointerEvents: "none",
+                      }}
+                      draggable={false}
+                    />
+                    {previewZoom === 1 && (
+                      <div style={{
+                        position: "absolute", bottom: 6, right: 8,
+                        fontFamily: "IBM Plex Mono, monospace", fontSize: 9,
+                        color: "rgba(255,255,255,0.35)", pointerEvents: "none", userSelect: "none",
+                      }}>
+                        scroll to zoom
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-20 bg-s-elevated flex items-center justify-center text-s-muted">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                  </div>
+                )}
+                <div className="flex items-center justify-between px-3 py-2 bg-s-elevated border-t border-s-border">
+                  <p className="text-xs text-s-text truncate">{file.name}</p>
+                  <button onClick={clearFileState} className="text-s-muted hover:text-s-danger ml-2 shrink-0 transition-colors">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </button>
+                </div>
+              </div>
+            )
           ) : (
             <div
               onClick={() => fileRef.current?.click()}
@@ -437,9 +541,13 @@ function AddFloorModal({
         </div>
         <div className="flex gap-2 px-5 py-4 border-t border-s-border">
           <button onClick={onClose} className="px-4 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors">Cancel</button>
-          <button onClick={handleUpload} disabled={progress !== null || !file} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
+          <button onClick={handleUpload} disabled={progress !== null || !file || rasterising} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
             {progress !== null && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
-            {progress !== null ? "Uploading…" : "Upload Floor"}
+            {progress !== null
+              ? "Uploading…"
+              : pdfPages
+                ? `Upload ${pdfPages.length} Floor${pdfPages.length > 1 ? "s" : ""}`
+                : "Upload Floor"}
           </button>
         </div>
       </div>

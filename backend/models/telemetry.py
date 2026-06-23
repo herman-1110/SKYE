@@ -18,3 +18,4 @@ class OmadaTelemetryPayload:
     person_id: str = ""
     person_type: str = "worker"   # "guard" | "worker" | "forklift"
     label: str = ""
+    tx_power: float = -59.0       # RSSI at 1 m; per-beacon override of settings.TX_POWER_DEFAULT

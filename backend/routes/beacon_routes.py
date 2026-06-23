@@ -21,6 +21,7 @@ class BeaconCreateRequest(BaseModel):
     person_type: PersonType
     label: str
     building_id: Optional[str] = None
+    tx_power: float = -59.0
 
 
 class BeaconUpdateRequest(BaseModel):
@@ -28,6 +29,7 @@ class BeaconUpdateRequest(BaseModel):
     person_type: Optional[PersonType] = None
     label: Optional[str] = None
     building_id: Optional[str] = None
+    tx_power: Optional[float] = None
 
 
 @router.get("")
@@ -45,6 +47,7 @@ def create_beacon(
             uuid_str=body.uuid, major=body.major, minor=body.minor,
             person_id=body.person_id, person_type=body.person_type,
             label=body.label, building_id=body.building_id,
+            tx_power=body.tx_power,
         )
     except ValueError:
         raise HTTPException(
@@ -66,6 +69,7 @@ def update_beacon(
             "person_type": body.person_type,
             "label": body.label,
             "building_id": body.building_id,
+            "tx_power": body.tx_power,
         }.items() if v is not None
     }
     updated = beacon_service.update(beacon_id, patch)

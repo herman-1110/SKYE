@@ -1,6 +1,8 @@
 "use client";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/services/authService";
+import { useAuth } from "@/hooks/useAuth";
 import { useDashboardStore } from "@/store/dashboardStore";
 import { useThemeStore } from "@/store/themeStore";
 import StatusBadge from "@/components/shared/StatusBadge";
@@ -34,11 +36,22 @@ function MoonIcon() {
   );
 }
 
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  );
+}
+
 export default function Navbar({ user }: { user: User }) {
   const pathname = usePathname();
   const router = useRouter();
   const activeShiftId = useDashboardStore((s) => s.activeShiftId);
   const { theme, toggleTheme } = useThemeStore();
+  const { userRecord } = useAuth();
+  const isAdmin = userRecord?.role === "admin";
   const title = PAGE_TITLES[pathname] ?? "Dashboard";
 
   const handleSignOut = async () => {
@@ -64,7 +77,7 @@ export default function Navbar({ user }: { user: User }) {
       </div>
 
       {/* Right actions */}
-      <div className="flex items-center gap-2 w-[240px] justify-end">
+      <div className="flex items-center gap-2 w-[300px] justify-end">
         <StatusBadge status={activeShiftId ? "shift-active" : "no-shift"} />
 
         {/* Theme toggle */}
@@ -76,6 +89,18 @@ export default function Navbar({ user }: { user: User }) {
         >
           {theme === "dark" ? <SunIcon /> : <MoonIcon />}
         </button>
+
+        {/* Safety settings (admin only) */}
+        {isAdmin && (
+          <Link
+            href="/dashboard/safety-settings"
+            title="Safety settings"
+            aria-label="Safety settings"
+            className="h-9 w-9 flex items-center justify-center rounded-full bg-s-elevated border border-s-border text-s-muted hover:border-s-accent hover:text-s-text transition-colors"
+          >
+            <GearIcon />
+          </Link>
+        )}
 
         {/* Sign out */}
         <button

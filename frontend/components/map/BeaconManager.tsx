@@ -5,9 +5,23 @@ import {
   listBeacons, createBeacon, updateBeacon, deleteBeacon,
   type BeaconRecord, type PersonType,
 } from "@/services/beaconService";
+import { useBeaconScans, type BeaconScanRecord } from "@/hooks/useBeaconScans";
 import { toast } from "@/store/toastStore";
 
 const PERSON_TYPES: PersonType[] = ["guard", "worker", "forklift"];
+
+const ONLINE_THRESHOLD_S = 10;
+
+function isBeaconOnline(
+  beacon: BeaconRecord,
+  scans: Record<string, BeaconScanRecord>,
+): boolean {
+  // node_key matches the RTDB key format written by _write_beacon_scan
+  const key = `${beacon.uuid}_${beacon.major}_${beacon.minor}`;
+  const scan = scans[key];
+  if (!scan) return false;
+  return Date.now() / 1000 - scan.last_seen < ONLINE_THRESHOLD_S;
+}
 
 interface Props {
   onClose?: () => void;
@@ -20,11 +34,13 @@ interface FormState {
   person_id: string;
   person_type: PersonType;
   label: string;
+  tx_power: number;
 }
 
 const EMPTY_FORM: FormState = {
   uuid: "", major: "", minor: "",
   person_id: "", person_type: "guard", label: "",
+  tx_power: -59,
 };
 
 export default function BeaconManager({ onClose }: Props) {
@@ -36,6 +52,7 @@ export default function BeaconManager({ onClose }: Props) {
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const scans = useBeaconScans();
 
   useEffect(() => {
     listBeacons()
@@ -48,11 +65,19 @@ export default function BeaconManager({ onClose }: Props) {
     setEditingId(null); setForm(EMPTY_FORM); setFormError(""); setModalOpen(true);
   };
 
+  const openRegisterFromScan = (uuid: string, major: string, minor: string) => {
+    setEditingId(null);
+    setForm({ ...EMPTY_FORM, uuid, major, minor });
+    setFormError("");
+    setModalOpen(true);
+  };
+
   const openEdit = (b: BeaconRecord) => {
     setEditingId(b.id);
     setForm({
       uuid: b.uuid, major: b.major, minor: b.minor,
       person_id: b.person_id, person_type: b.person_type, label: b.label,
+      tx_power: b.tx_power ?? -59,
     });
     setFormError(""); setModalOpen(true);
   };
@@ -75,6 +100,7 @@ export default function BeaconManager({ onClose }: Props) {
           person_id: form.person_id.trim(),
           person_type: form.person_type,
           label: form.label.trim(),
+          tx_power: form.tx_power,
         });
         setBeacons((prev) => prev.map((b) => (b.id === editingId ? updated : b)));
         toast.success(`Beacon "${updated.label}" updated`);
@@ -86,6 +112,7 @@ export default function BeaconManager({ onClose }: Props) {
           person_id: form.person_id.trim(),
           person_type: form.person_type,
           label: form.label.trim(),
+          tx_power: form.tx_power,
         });
         setBeacons((prev) => [...prev, created]);
         toast.success(`Beacon "${created.label}" registered`);
@@ -144,7 +171,7 @@ export default function BeaconManager({ onClose }: Props) {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-s-border">
-                {["Person", "Type", "iBeacon (UUID · Major · Minor)", ""].map((h) => (
+                {["Status", "Person", "Type", "iBeacon (UUID · Major · Minor)", ""].map((h) => (
                   <th key={h} className="font-mono text-[10px] text-s-muted tracking-widest uppercase text-left px-4 py-2.5">{h}</th>
                 ))}
               </tr>
@@ -152,6 +179,19 @@ export default function BeaconManager({ onClose }: Props) {
             <tbody>
               {beacons.map((b) => (
                 <tr key={b.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    {isBeaconOnline(b, scans) ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-s-success">
+                        <span className="h-2 w-2 rounded-full bg-s-success shrink-0" />
+                        Online
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-s-muted">
+                        <span className="h-2 w-2 rounded-full bg-s-muted shrink-0" />
+                        Offline
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-col leading-tight">
                       <span className="text-s-text font-medium">{b.label}</span>
@@ -184,6 +224,9 @@ export default function BeaconManager({ onClose }: Props) {
           No beacons registered. Register one above.
         </p>
       )}
+
+      {/* Unknown Beacons — APs are hearing these but they are not in the registry */}
+      <UnknownBeaconsPanel scans={scans} onRegister={openRegisterFromScan} />
 
       {/* Create / Edit modal */}
       {modalOpen && typeof document !== "undefined" && createPortal(
@@ -276,6 +319,24 @@ export default function BeaconManager({ onClose }: Props) {
                 />
               </div>
 
+              <div className="space-y-1">
+                <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+                  Tx Power (RSSI at 1 m)
+                </label>
+                <input
+                  type="number"
+                  step={1}
+                  min={-100}
+                  max={0}
+                  value={Number.isFinite(form.tx_power) ? form.tx_power : ""}
+                  onChange={(e) => setForm((p) => ({ ...p, tx_power: parseFloat(e.target.value) }))}
+                  className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm font-mono text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors"
+                />
+                <p className="font-mono text-[10px] text-s-muted leading-relaxed">
+                  Measure with nRF Connect at 1 m. Default −59 dBm works for most devices.
+                </p>
+              </div>
+
               {formError && (
                 <p className="font-mono text-[10px] text-s-danger leading-relaxed">{formError}</p>
               )}
@@ -290,6 +351,118 @@ export default function BeaconManager({ onClose }: Props) {
           </div>
         </div>,
         document.body
+      )}
+    </div>
+  );
+}
+
+function UnknownBeaconsPanel({
+  scans,
+  onRegister,
+}: {
+  scans: Record<string, BeaconScanRecord>;
+  onRegister: (uuid: string, major: string, minor: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  // Only show beacons heard within the online threshold — same 10 s constant as registered
+  // beacon status. Beacons that go out of range drop from the table within ~10-12 s
+  // rather than piling up indefinitely (RTDB nodes persist even after the beacon is gone).
+  const unknowns = Object.values(scans).filter(
+    (s) => !s.registered && (Date.now() / 1000 - s.last_seen < ONLINE_THRESHOLD_S)
+  );
+
+  /** Format raw UUID string → 8-4-4-4-12 with dashes if not already formatted */
+  function formatUuid(raw: string): string {
+    const s = raw.replace(/-/g, "").toLowerCase();
+    if (s.length !== 32) return raw;
+    return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-s-border bg-s-surface overflow-hidden">
+
+      {/* Collapsible header — always visible */}
+      <button
+        onClick={() => setExpanded((p) => !p)}
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-s-text hover:bg-s-elevated transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <span>Unknown Beacons</span>
+          <span className="text-xs font-normal text-s-muted bg-s-elevated border border-s-border rounded-full px-2.5 py-0.5">
+            {unknowns.length} currently heard
+          </span>
+        </div>
+        <svg
+          width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2"
+          className={`transition-transform text-s-muted ${expanded ? "rotate-180" : ""}`}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <>
+          {unknowns.length === 0 ? (
+            <div className="px-4 py-3 border-t border-s-border">
+              <p className="text-xs text-s-muted">No unknown beacons currently heard.</p>
+            </div>
+          ) : (
+            <div className="border-t border-s-border">
+              {/* Column headers */}
+              <div className="flex items-center px-4 py-2 border-b border-s-border">
+                <div className="grid grid-cols-[24px_minmax(0,1fr)_100px_100px_80px] flex-1 min-w-0">
+                  <div />
+                  <span className="text-[11px] font-medium text-s-muted uppercase tracking-wide">UUID</span>
+                  <span className="text-[11px] font-medium text-s-muted uppercase tracking-wide">Major</span>
+                  <span className="text-[11px] font-medium text-s-muted uppercase tracking-wide">Minor</span>
+                  <span className="text-[11px] font-medium text-s-muted uppercase tracking-wide">RSSI</span>
+                </div>
+                {/* Empty placeholder matches the row's Register button width so columns line up */}
+                <div className="w-20 ml-8 shrink-0" />
+              </div>
+
+              {/* Data rows */}
+              {unknowns.map((s) => (
+                <div
+                  key={`${s.uuid}_${s.major}_${s.minor}`}
+                  className="flex items-center px-4 py-2.5 border-b border-s-border last:border-b-0 hover:bg-s-elevated transition-colors"
+                >
+                  <div className="grid grid-cols-[24px_minmax(0,1fr)_100px_100px_80px] items-center flex-1 min-w-0">
+                    {/* Pulsing dot */}
+                    <div className="flex items-center">
+                      <span className="relative flex h-2 w-2 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-s-success opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-s-success" />
+                      </span>
+                    </div>
+                    {/* UUID — monospaced, formatted with dashes */}
+                    <span className="text-xs font-mono text-s-text truncate pr-2">
+                      {formatUuid(s.uuid)}
+                    </span>
+                    <span className="text-sm text-s-text">{s.major}</span>
+                    <span className="text-sm text-s-text">{s.minor}</span>
+                    <span className="text-sm font-mono text-s-muted">{s.rssi} dBm</span>
+                  </div>
+                  <button
+                    onClick={() => onRegister(s.uuid, s.major, s.minor)}
+                    title="Pre-fill the registration form with this beacon's identity"
+                    className="ml-8 w-20 shrink-0 text-[10px] font-mono text-s-accent hover:text-s-base hover:bg-s-accent border border-s-accent/40 hover:border-s-accent rounded px-2 py-1 transition-colors"
+                  >
+                    Register
+                  </button>
+                </div>
+              ))}
+
+              {/* Footer hint */}
+              <div className="px-4 py-2.5">
+                <p className="text-xs text-s-muted">
+                  Register these beacons above to begin tracking them.
+                </p>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

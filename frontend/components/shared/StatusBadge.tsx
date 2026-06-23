@@ -11,7 +11,7 @@ const CONFIG: Record<StatusType, { dot: string; text: string; label: string; pul
 export default function StatusBadge({ status }: { status: StatusType }) {
   const c = CONFIG[status];
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-s-elevated border border-s-border">
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-s-elevated border border-s-border whitespace-nowrap shrink-0">
       <span className={`h-1.5 w-1.5 rounded-full ${c.dot} ${c.pulse ? "animate-alert-pulse" : ""}`} />
       <span className={`font-mono text-[10px] font-medium tracking-widest ${c.text}`}>{c.label}</span>
     </span>
