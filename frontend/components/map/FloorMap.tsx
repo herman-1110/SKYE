@@ -1,12 +1,12 @@
 "use client";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { usePathname } from "next/navigation";
 import type { PositionRecord } from "@/types/position";
 import type { FloorRecord } from "@/types/floor";
 import { useZones } from "@/hooks/useZones";
 import { useAPHeartbeats } from "@/hooks/useAPHeartbeats";
 import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
+import { useDashboardStore } from "@/store/dashboardStore";
 import WorkerMarker from "./WorkerMarker";
 import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
@@ -73,16 +73,11 @@ function WorkerTooltip({ position, x, y }: { position: PositionRecord; x: number
 }
 
 export default function FloorMap({ positions, buildingId, activeFloor }: Props) {
-  const pathname = usePathname();
-  const [showZones, setShowZones] = useState(true);
-
-  // Reset the zone-overlay toggle to its default whenever the route changes.
-  // Belt-and-braces: the dashboard layout already keys <main> by pathname so
-  // this component should remount, but Next.js Router Cache + browser back
-  // navigation can sometimes preserve subtrees. This guarantees the reset.
-  useEffect(() => {
-    setShowZones(true);
-  }, [pathname]);
+  // Zone-overlay toggle lives in the Zustand store so the user's choice survives
+  // navigating away to /dashboard/alerts and back (the dashboard layout's
+  // key={pathname} on <main> forces this component to remount on every route change).
+  const showZones = useDashboardStore((s) => s.showZones);
+  const toggleShowZones = useDashboardStore((s) => s.toggleShowZones);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [outerSize, setOuterSize] = useState({ w: 0, h: 0 });
 
@@ -170,7 +165,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
       {/* Zone toggle — pinned to the outer card corner, always visible */}
       {zones.length > 0 && (
         <button
-          onClick={(e) => { e.stopPropagation(); setShowZones((v) => !v); }}
+          onClick={(e) => { e.stopPropagation(); toggleShowZones(); }}
           className="absolute top-2 right-2 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-[10px] tracking-widest transition-colors"
           style={{ backgroundColor: showZones ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.45)", color: showZones ? "#f59e0b" : "rgba(255,255,255,0.7)" }}
         >

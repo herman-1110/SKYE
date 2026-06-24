@@ -23,6 +23,10 @@ interface DashboardState {
   setCachedReports: (reports: AuditReportRecord[]) => void;
   setCachedUsers: (users: UserRecord[]) => void;
   setCachedBuildings: (buildings: BuildingRecord[]) => void;
+
+  // user UI preferences — survive remount when navigating between dashboard tabs
+  showZones: boolean;
+  toggleShowZones: () => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
@@ -41,4 +45,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setCachedReports: (cachedReports) => set({ cachedReports }),
   setCachedUsers: (cachedUsers) => set({ cachedUsers }),
   setCachedBuildings: (cachedBuildings) => set({ cachedBuildings }),
+
+  showZones: true,
+  toggleShowZones: () => set((s) => ({ showZones: !s.showZones })),
 }));

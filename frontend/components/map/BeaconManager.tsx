@@ -10,6 +10,13 @@ import { toast } from "@/store/toastStore";
 
 const PERSON_TYPES: PersonType[] = ["guard", "worker", "forklift"];
 
+// Role colours mirror Sidebar's ROLE_COLOUR map so the same person reads the same way everywhere.
+const TYPE_PALETTE: Record<PersonType, { dot: string; text: string; border: string }> = {
+  guard:    { dot: "bg-s-success", text: "text-s-success", border: "border-s-success" },
+  worker:   { dot: "bg-blue-400",  text: "text-blue-400",  border: "border-blue-400"  },
+  forklift: { dot: "bg-s-accent",  text: "text-s-accent",  border: "border-s-accent"  },
+};
+
 const ONLINE_THRESHOLD_S = 10;
 
 function isBeaconOnline(
@@ -297,15 +304,27 @@ export default function BeaconManager({ onClose }: Props) {
               </div>
               <div className="space-y-1">
                 <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">Type</label>
-                <select
-                  value={form.person_type}
-                  onChange={(e) => setForm((p) => ({ ...p, person_type: e.target.value as PersonType }))}
-                  className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm text-s-text focus:outline-none focus:border-s-accent transition-colors capitalize"
-                >
-                  {PERSON_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+                <div className="grid grid-cols-3 gap-2">
+                  {PERSON_TYPES.map((t) => {
+                    const isActive = form.person_type === t;
+                    const c = TYPE_PALETTE[t];
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setForm((p) => ({ ...p, person_type: t }))}
+                        className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-xs font-mono capitalize transition-colors ${
+                          isActive
+                            ? `${c.border} ${c.text} bg-s-elevated`
+                            : "border-s-border text-s-muted hover:text-s-text hover:bg-s-elevated"
+                        }`}
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? c.dot : "bg-s-muted"}`} />
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div className="space-y-1">
                 <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
