@@ -19,3 +19,6 @@ class PositionRecord:
     floor_id: str = ""
     building_id: str = ""
     label: str = ""
+    radius_m: Optional[float] = None   # set when position is a single-AP proximity estimate
+    is_approximate: bool = False       # True when x/y is the anchor AP, not a multilateration solve
+    anchor_ap_mac: Optional[str] = None  # MAC of the strongest AP this proximity estimate is anchored to (None for exact solves)

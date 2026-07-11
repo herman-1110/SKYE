@@ -23,6 +23,7 @@ from repositories.ap_repository import ap_repository
 from repositories.beacon_repository import beacon_repository
 from repositories.floor_repository import floor_repository
 from services.positioning_service import positioning_service
+from services.proximity_service import proximity_service
 from services.safety_service import safety_service
 from utils.timestamp_utils import utcnow_iso
 
@@ -75,6 +76,11 @@ class OmadaIngestService:
         self._ap_coords: Dict[str, tuple[float, float]] = {}
         self._ap_cache_loaded_at: float = 0.0
         self._AP_CACHE_TTL_S = 30.0
+        # Active floor/building — refreshed alongside _ap_coords, tagged onto
+        # every position record (exact or proximity) so the frontend's
+        # floor_id filter picks the marker up.
+        self._active_floor_id: str = ""
+        self._active_building_id: str = ""
         # beacon key (uuid:major:minor) -> time.monotonic() of last positioning emit
         self._last_emit: Dict[str, float] = {}
         # iBeacon identity cache (hot path) — mirrors the AP cache above
@@ -97,6 +103,8 @@ class OmadaIngestService:
         aps = ap_repository.get_all(active_floor.building_id, active_floor.id)
         self._ap_coords = {ap.mac.upper(): (ap.x_m, ap.y_m) for ap in aps}
         self._ap_cache_loaded_at = time.monotonic()
+        self._active_floor_id = active_floor.id
+        self._active_building_id = active_floor.building_id
 
     def _get_ap_coords(self, ap_mac_colons: str) -> Optional[tuple[float, float]]:
         if time.monotonic() - self._ap_cache_loaded_at > self._AP_CACHE_TTL_S:
@@ -209,9 +217,35 @@ class OmadaIngestService:
         reporter = raw.get("reporter", {})
         ap_mac_raw = reporter.get("mac", "")
         reported: List[dict] = raw.get("reported", [])
-
-        # ── DEBUG: full raw Omada payload dump ───────────────────────────
         ap_name = reporter.get("name", "?")
+
+        # Throttled janitor: prune stale unregistered /beacon_scans nodes.
+        # No-op on most ingest cycles — only fires once per _JANITOR_INTERVAL_S.
+        janitor_now = time.monotonic()
+        if janitor_now - self._last_janitor_run > self._JANITOR_INTERVAL_S:
+            self._last_janitor_run = janitor_now
+            self._prune_stale_unregistered_scans()
+
+        if not ap_mac_raw:
+            return {"status": "ignored", "reason": "no reporter.mac"}
+
+        ap_mac_colons = _format_mac_colons(_normalise_mac(ap_mac_raw))
+
+        # Write heartbeat for every reporting AP — even unregistered ones —
+        # so the dashboard can surface online-but-unplaced APs (with their name).
+        self._write_ap_heartbeat(ap_mac_colons, reporter.get("name", ""))
+
+        ap_coords = self._get_ap_coords(ap_mac_colons)
+        if ap_coords is None:
+            return {
+                "status": "online_unregistered",
+                "ap": ap_mac_colons,
+                "reason": "AP online but not placed on active floor — heartbeat written",
+            }
+        ap_x, ap_y = ap_coords
+
+        # ── DEBUG: full raw Omada payload dump (registered APs only) ─────
+        # TEMP: gated on registration to cut console noise from unplaced APs.
         print("[OMADA] ═══════════════════════════════════════════════════════════")
         print(f"[OMADA] AP REPORT from '{ap_name}' ({ap_mac_raw or 'NO MAC'})")
         print(f"[OMADA] ── Reporter block ──")
@@ -250,31 +284,6 @@ class OmadaIngestService:
         print(f"[OMADA] {json.dumps(raw, separators=(',', ':'))}")
         print("[OMADA] ═══════════════════════════════════════════════════════════")
         # ─────────────────────────────────────────────────────────────────
-
-        # Throttled janitor: prune stale unregistered /beacon_scans nodes.
-        # No-op on most ingest cycles — only fires once per _JANITOR_INTERVAL_S.
-        janitor_now = time.monotonic()
-        if janitor_now - self._last_janitor_run > self._JANITOR_INTERVAL_S:
-            self._last_janitor_run = janitor_now
-            self._prune_stale_unregistered_scans()
-
-        if not ap_mac_raw:
-            return {"status": "ignored", "reason": "no reporter.mac"}
-
-        ap_mac_colons = _format_mac_colons(_normalise_mac(ap_mac_raw))
-
-        # Write heartbeat for every reporting AP — even unregistered ones —
-        # so the dashboard can surface online-but-unplaced APs (with their name).
-        self._write_ap_heartbeat(ap_mac_colons, reporter.get("name", ""))
-
-        ap_coords = self._get_ap_coords(ap_mac_colons)
-        if ap_coords is None:
-            return {
-                "status": "online_unregistered",
-                "ap": ap_mac_colons,
-                "reason": "AP online but not placed on active floor — heartbeat written",
-            }
-        ap_x, ap_y = ap_coords
         now_mono = time.monotonic()
         buffered = 0
 
@@ -354,10 +363,11 @@ class OmadaIngestService:
             }
             buf.readings = fresh
 
-            if len(fresh) < MIN_APS_FOR_POSITION:
+            if not fresh:
                 continue
 
-            # Rate-limit: collapse the 3 staggered AP POSTs/cycle into one solve.
+            # Rate-limit: collapse the staggered AP POSTs/cycle into one solve —
+            # applies to both the multilateration path and the proximity fallback.
             if now_mono - self._last_emit.get(beacon_key, 0.0) < EMIT_MIN_INTERVAL_S:
                 continue
 
@@ -379,6 +389,31 @@ class OmadaIngestService:
                 )
                 for r in fresh.values()
             ]
+            tx_power = identity.get("tx_power", -59.0)
+
+            # Stamp BEFORE solving so a thrown exception can't bypass the rate-limit.
+            self._last_emit[beacon_key] = now_mono
+
+            if len(fresh) < MIN_APS_FOR_POSITION:
+                # Too few APs for a multilateration solve — anchor to the closest
+                # AP instead of dropping the reading. Hops to a new AP on its own
+                # the next time a different one reports the strongest RSSI.
+                try:
+                    position = proximity_service.compute_position(
+                        person_id=identity["person_id"],
+                        person_type=identity["person_type"],
+                        label=identity["label"],
+                        readings=readings,
+                        tx_power=tx_power,
+                        floor_id=self._active_floor_id,
+                        building_id=self._active_building_id,
+                    )
+                    if position:
+                        safety_service.run_all_checks(position)
+                    emitted += 1
+                except Exception as e:
+                    print(f"[OMADA] proximity fallback failed for beacon {beacon_key}: {e}")
+                continue
 
             # Use person_id as reporter_mac so the RTDB position key is stable
             # regardless of the phone's rotating BLE MAC.
@@ -389,11 +424,9 @@ class OmadaIngestService:
                 person_id=identity["person_id"],
                 person_type=identity["person_type"],
                 label=identity["label"],
-                tx_power=identity.get("tx_power", -59.0),
+                tx_power=tx_power,
             )
 
-            # Stamp BEFORE solving so a thrown exception can't bypass the rate-limit.
-            self._last_emit[beacon_key] = now_mono
             try:
                 position = positioning_service.compute_position(payload)
                 if position:

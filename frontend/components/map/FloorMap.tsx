@@ -29,6 +29,11 @@ const WORKER_TYPE_COLOUR: Record<string, string> = {
   forklift: "var(--warning)",
 };
 
+// A live marker refreshes every ~2s (EMIT_MIN_INTERVAL_S 1.8 + 2s ingest buffer).
+// 12s ≈ 6 missed cycles — confidently gone without flickering on a couple of
+// dropped AP POSTs. Tune here after watching the demo.
+const STALE_POSITION_MS = 12_000;
+
 function WorkerTooltip({ position, x, y }: { position: PositionRecord; x: number; y: number }) {
   const displayName = position.label || position.person_id;
   const typeLabel   = WORKER_TYPE_LABEL[position.person_type] ?? position.person_type;
@@ -68,6 +73,11 @@ function WorkerTooltip({ position, x, y }: { position: PositionRecord; x: number
       <div style={{ fontSize: 10, fontFamily: "IBM Plex Mono, monospace", color: "var(--text-secondary)", opacity: 0.7 }}>
         {position.x.toFixed(1)}m, {position.y.toFixed(1)}m
       </div>
+      {position.is_approximate && position.radius_m != null && (
+        <div style={{ fontSize: 10, fontFamily: "IBM Plex Mono, monospace", color: "var(--text-secondary)", opacity: 0.7 }}>
+          ~approximate · ±{position.radius_m.toFixed(1)}m (single AP)
+        </div>
+      )}
     </div>
   );
 }
@@ -129,6 +139,29 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
     }
     return { x, y, w, h };
   }, [naturalSize, outerSize]);
+
+  // Drop markers whose backend timestamp has gone stale — a departed beacon's
+  // last /positions record otherwise lingers on the map forever (nothing deletes
+  // the RTDB node). Compared against the freshest marker in the batch, not
+  // browser-now, so client/server clock skew doesn't drop live markers.
+  const livePositions = useMemo(() => {
+    if (positions.length === 0) return positions;
+
+    const times = positions.map((p) => {
+      const t = Date.parse(p.timestamp);
+      return Number.isNaN(t) ? Infinity : t;   // malformed → treat as fresh, never hide
+    });
+    const freshest = Math.max(...times);
+
+    // All-stale backstop: if even the freshest marker is older than the window
+    // relative to the wall clock, everyone has left — clear them all. This is the
+    // ONLY place browser-now is used.
+    if (freshest !== Infinity && Date.now() - freshest > STALE_POSITION_MS) {
+      return [];
+    }
+
+    return positions.filter((_, i) => freshest - times[i] <= STALE_POSITION_MS);
+  }, [positions]);
 
   const toPct = (metres: number, axis: "x" | "y"): number => {
     if (!naturalSize || !scale) return 0;
@@ -258,7 +291,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
             aria-label="Worker positions overlay"
           >
-            {naturalSize && positions.map((p) => {
+            {naturalSize && livePositions.map((p) => {
               const { px, py } = toPixel(p);
               return (
                 <WorkerMarker
@@ -266,6 +299,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
                   position={p}
                   px={px}
                   py={py}
+                  scale={scale}
                   onHover={setHoveredWorker}
                 />
               );

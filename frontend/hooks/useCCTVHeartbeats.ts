@@ -26,7 +26,10 @@ export function useCCTVHeartbeats(): Record<string, CCTVStatus> {
     const unsub = onValue(r, (snap) => {
       const data = snap.val() ?? {};
       const raw: Record<string, number> = {};
-      for (const entry of Object.values(data) as { mac: string; last_seen: number }[]) {
+      for (const entry of Object.values(data) as Partial<{ mac: string; last_seen: number }>[]) {
+        // Skip malformed/legacy nodes (e.g. missing mac) instead of throwing and
+        // silently killing the update for every other CCTV in this snapshot.
+        if (typeof entry?.mac !== "string" || typeof entry.last_seen !== "number") continue;
         raw[entry.mac.toUpperCase()] = entry.last_seen;
       }
       rawRef.current = raw;

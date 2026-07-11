@@ -14,4 +14,6 @@ export interface PositionRecord {
   floor_id: string;
   building_id: string;
   label: string;
+  radius_m: number | null;
+  is_approximate: boolean;
 }

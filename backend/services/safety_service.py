@@ -16,6 +16,10 @@ from utils.timestamp_utils import utcnow_iso, seconds_between
 
 _last_man_down: Dict[str, str] = {}    # person_id → ISO timestamp of last alert
 _last_collision: Dict[str, str] = {}   # "worker_id|forklift_id" → ISO timestamp
+# person_id → (anchor_x, anchor_y, since_iso): where the person was last seen
+# genuinely moving, and when. Man-down fires if they stay within
+# MAN_DOWN_MOVEMENT_EPSILON_M of the anchor past the threshold.
+_man_down_tracker: Dict[str, tuple[float, float, str]] = {}
 
 
 class SafetyService:
@@ -51,29 +55,59 @@ class SafetyService:
     # FR3 / UC4 — Man-down detection
     # ------------------------------------------------------------------
     def check_man_down(self, current: PositionRecord) -> Optional[AlertRecord]:
-        """Alert if a worker or guard has not moved for > MAN_DOWN_MINUTES.
-        Forklifts are exempt. Fires regardless of zone."""
+        """Alert if a worker or guard has stayed within MAN_DOWN_MOVEMENT_EPSILON_M
+        of their last-moved position for longer than MAN_DOWN_MINUTES.
+
+        Forklifts are exempt. Fires regardless of zone. Alerts raised from an
+        approximate (proximity-fallback) position are flagged approximate=True:
+        single/dual-AP coverage cannot reliably tell 'still' from 'small movement',
+        so the alert is treated as a low-confidence welfare check, not a precise fix.
+        """
         if current.person_type == "forklift":
             return None
 
-        elapsed = seconds_between(current.timestamp, utcnow_iso())
         cfg = self._get_settings()
-        if elapsed < cfg.man_down_minutes * 60:
+        now = utcnow_iso()
+        pid = current.person_id
+
+        prev = _man_down_tracker.get(pid)
+
+        # First time we see this person: seed the tracker and start the clock.
+        # (Cold-start case — including a beacon that appears in a dead zone and
+        # never moves — begins counting from first sighting.)
+        if prev is None:
+            _man_down_tracker[pid] = (current.x, current.y, now)
             return None
 
-        last_ts = _last_man_down.get(current.person_id)
-        if last_ts and seconds_between(last_ts, utcnow_iso()) < 30:
+        anchor_x, anchor_y, since_iso = prev
+        moved = math.hypot(current.x - anchor_x, current.y - anchor_y)
+
+        # Genuine movement: re-anchor to the new spot and reset the clock.
+        # Do NOT re-anchor on every call — only when epsilon is broken — or the
+        # anchor chases position jitter and the person never appears still.
+        if moved >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
+            _man_down_tracker[pid] = (current.x, current.y, now)
+            return None
+
+        # Within epsilon: still. Has the clock run past the threshold?
+        if seconds_between(since_iso, now) < cfg.man_down_minutes * 60:
+            return None
+
+        # Repeat-alert suppression (unchanged): one man-down per person per 30s.
+        last_ts = _last_man_down.get(pid)
+        if last_ts and seconds_between(last_ts, now) < 30:
             return None
 
         record = AlertRecord(
             alert_id=str(uuid.uuid4()),
             alert_type="man_down",
-            person_id=current.person_id,
+            person_id=pid,
             zone=current.zone,
-            timestamp=utcnow_iso(),
+            timestamp=now,
+            approximate=current.is_approximate,
         )
         alert_repository.save(record)
-        _last_man_down[current.person_id] = record.timestamp
+        _last_man_down[pid] = record.timestamp
         return record
 
     # ------------------------------------------------------------------
