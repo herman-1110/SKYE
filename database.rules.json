@@ -1,0 +1,24 @@
+{
+  "rules": {
+    "positions": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "alerts": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "ap_heartbeats": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "cctv_heartbeats": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "beacon_scans": {
+      ".read": "auth != null",
+      ".write": false
+    }
+  }
+}
