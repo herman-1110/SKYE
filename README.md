@@ -49,7 +49,7 @@ The backend is a Python FastAPI application that receives BLE telemetry, runs th
 
 6. **Start the server:**
    ```bash
-   uvicorn main:app --reload
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000   
    ```
    API is available at `http://localhost:8000` (or the port set in `.env`).
 
