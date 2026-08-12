@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    match /users/{uid} {
+      allow get:    if isSignedIn() && request.auth.uid == uid;
+      allow list:   if isAdmin();
+      allow create, update, delete: if false;   // Admin SDK only, via /api/auth/*
+    }
+
+    match /beacons/{beaconId} {
+      allow read:  if isSignedIn();
+      allow write: if false;   // via /api/beacons/*
+    }
+
+    match /settings/{settingsId} {
+      allow read:  if isSignedIn();
+      allow write: if false;   // via /api/safety-settings
+    }
+
+    match /accuracy_metrics/{metricId} {
+      allow read:  if isSignedIn();
+      allow write: if false;
+    }
+
+    match /audit_reports/{reportId} {
+      allow read:  if isSignedIn();
+      allow write: if false;   // via /api/reports/generate*
+    }
+
+    match /feedback/{feedbackId} {
+      allow read:  if isSignedIn();
+      allow write: if false;   // via /api/alerts/.../feedback
+    }
+
+    match /patrol_logs/{logId} {
+      allow read:  if isSignedIn();
+      allow write: if false;
+    }
+
+    match /buildings/{buildingId} {
+      allow read:  if isSignedIn();
+      allow write: if false;   // via /api/buildings/*
+
+      match /floors/{floorId} {
+        allow read:  if isSignedIn();
+        allow write: if false;   // via /api/floors/*
+
+        match /access_points/{apId} {
+          allow read:  if isSignedIn();
+          allow write: if false;
+        }
+        match /cctvs/{cctvId} {
+          allow read:  if isSignedIn();
+          allow write: if false;
+        }
+        match /zones/{zoneId} {
+          allow read:  if isSignedIn();
+          allow write: if false;
+        }
+      }
+    }
+  }
+}

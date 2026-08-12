@@ -47,5 +47,9 @@ class AlertService:
         )
         feedback_repository.save(record)
 
+    def delete(self, alert_id: str) -> None:
+        """Permanently remove an alert from RTDB /alerts."""
+        alert_repository.delete(alert_id)
+
 
 alert_service = AlertService()
