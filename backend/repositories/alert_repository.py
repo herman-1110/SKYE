@@ -26,5 +26,9 @@ class AlertRepository:
         """Patch resolved=True on an existing alert without overwriting other fields."""
         db.reference(f"{self._PATH}/{alert_id}").update({"resolved": True})
 
+    def delete(self, alert_id: str) -> None:
+        """Permanently remove /alerts/{alert_id} from Realtime Database."""
+        db.reference(f"{self._PATH}/{alert_id}").delete()
+
 
 alert_repository = AlertRepository()

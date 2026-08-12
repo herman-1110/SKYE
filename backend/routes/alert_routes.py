@@ -23,3 +23,13 @@ def post_feedback(
     """Record operator feedback for an alert. All authenticated users."""
     alert_service.submit_feedback(alert_id, body.feedback, body.reason)
     return {"status": "ok"}
+
+
+@router.delete("/{alert_id}")
+def delete_alert(
+    alert_id: str,
+    caller: UserRecord = Depends(require_admin),
+) -> dict:
+    """Permanently delete an alert. Admin only — removes safety-incident evidence."""
+    alert_service.delete(alert_id)
+    return {"status": "deleted"}

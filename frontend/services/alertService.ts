@@ -1,4 +1,4 @@
-import { type DataSnapshot, off, onValue, ref, remove } from "firebase/database";
+import { type DataSnapshot, off, onValue, ref } from "firebase/database";
 import { db } from "@/config/firebase";
 import type { AlertRecord, FeedbackValue } from "@/types/alert";
 import { authFetch } from "@/utils/apiClient";
@@ -21,7 +21,10 @@ export function unsubscribeFromAlerts(): void {
 }
 
 export async function deleteAlert(alertId: string): Promise<void> {
-  await remove(ref(db, `alerts/${alertId}`));
+  const res = await authFetch(`/api/alerts/${alertId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Alert deletion failed: ${res.status}`);
 }
 
 export async function submitFeedback(
