@@ -6,7 +6,10 @@ from firebase_admin import firestore
 from models.user import UserRecord
 from utils.timestamp_utils import utcnow_iso
 
-_VALID_ROLES = {"admin", "user"}
+_VALID_ROLES = {"owner", "admin", "user"}
+# "owner" is never a settable value on the public role-switch endpoint — that's
+# enforced upstream by UpdateRoleRequest's Literal["admin","user"]. It's valid
+# here only so ensure_owner_exists() below can write it once at startup.
 _VALID_STATUSES = {"pending", "approved", "suspended"}
 
 
@@ -78,6 +81,24 @@ class UserRepository:
     def delete(self, uid: str) -> None:
         """Delete the Firestore users/{uid} document."""
         self._col().document(uid).delete()
+
+    def ensure_owner_exists(self) -> Optional[str]:
+        """One-time backfill for pre-existing deployments: the 'owner' role only gets
+        assigned automatically by create() when the whole users collection is empty, so
+        a database that already had users before this role was introduced would never
+        get one. If no owner exists yet but at least one admin does, promote whichever
+        admin registered first (earliest created_at) to owner. Idempotent — a no-op on
+        every startup after the first time it finds work to do.
+        """
+        records = self.get_all()
+        if any(r.role == "owner" for r in records):
+            return None
+        admins = [r for r in records if r.role == "admin"]
+        if not admins:
+            return None
+        earliest = min(admins, key=lambda r: r.created_at)
+        self.update_role(earliest.uid, "owner")
+        return earliest.uid
 
 
 user_repository = UserRepository()

@@ -55,6 +55,13 @@ def create_app() -> FastAPI:
     from repositories.safety_settings_repository import safety_settings_repository
     safety_settings_repository.seed_defaults()
 
+    # Idempotently backfill an owner for deployments that already had an admin
+    # before the owner role existed — promotes the earliest-registered admin.
+    from repositories.user_repository import user_repository
+    promoted_uid = user_repository.ensure_owner_exists()
+    if promoted_uid:
+        logging.info("[SEED] promoted existing admin %s to owner (no owner found)", promoted_uid)
+
     app = FastAPI(title="SKYE Sentinel-AI", version="0.1.0")
 
     # Rate limiting

@@ -9,13 +9,14 @@ import { toast } from "@/store/toastStore";
 import FloorMap from "@/components/map/FloorMap";
 import DeviceStatusPanel from "@/components/dashboard/DeviceStatusPanel";
 import SelectDropdown from "@/components/shared/SelectDropdown";
+import { isAdminRole } from "@/types/user";
 import type { PositionRecord } from "@/types/position";
 import type { BuildingRecord } from "@/types/building";
 import type { FloorRecord } from "@/types/floor";
 
 export default function FloorMapArea() {
   const { userRecord } = useAuth();
-  const isAdmin = userRecord?.role === "admin";
+  const isAdmin = isAdminRole(userRecord?.role);
   const { buildings, isLoading: buildingsLoading } = useBuildings();
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const { floors, activeFloor, isLoading: floorsLoading } = useFloors(selectedBuildingId);

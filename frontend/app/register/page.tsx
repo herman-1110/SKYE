@@ -41,7 +41,7 @@ export default function RegisterPage() {
     setError(null);
     try {
       const { role } = await registerUser(email, password, displayName);
-      if (role === "admin") {
+      if (role === "admin" || role === "owner") {
         router.push("/login?registered=admin");
       } else {
         router.push("/pending-approval");

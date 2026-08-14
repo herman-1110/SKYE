@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useDashboardStore } from "@/store/dashboardStore";
 import { subscribeToPendingCount } from "@/services/userService";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdminRole } from "@/types/user";
 import type { PositionRecord } from "@/types/position";
 import type { AlertRecord } from "@/types/alert";
 
@@ -54,7 +55,7 @@ interface Props { collapsed: boolean; onToggle: () => void }
 export default function Sidebar({ collapsed, onToggle }: Props) {
   const pathname = usePathname();
   const { userRecord } = useAuth();
-  const isAdmin = userRecord?.role === "admin";
+  const isAdmin = isAdminRole(userRecord?.role);
   const positions = useDashboardStore((s) => s.positions);
   const personnel = Object.values(positions) as PositionRecord[];
   const [pendingCount, setPendingCount] = useState(0);

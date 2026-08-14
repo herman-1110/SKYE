@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDashboardStore } from "@/store/dashboardStore";
 import { useThemeStore } from "@/store/themeStore";
 import StatusBadge from "@/components/shared/StatusBadge";
+import { isAdminRole } from "@/types/user";
 import type { User } from "firebase/auth";
 
 const PAGE_TITLES: Record<string, string> = {
@@ -51,7 +52,7 @@ export default function Navbar({ user }: { user: User }) {
   const activeShiftId = useDashboardStore((s) => s.activeShiftId);
   const { theme, toggleTheme } = useThemeStore();
   const { userRecord } = useAuth();
-  const isAdmin = userRecord?.role === "admin";
+  const isAdmin = isAdminRole(userRecord?.role);
   const title = PAGE_TITLES[pathname] ?? "Dashboard";
 
   const handleSignOut = async () => {

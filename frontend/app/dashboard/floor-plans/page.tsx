@@ -26,6 +26,7 @@ import CalibrationTool from "@/components/map/CalibrationTool";
 import ZoneEditor from "@/components/map/ZoneEditor";
 import APCCTVEditor from "@/components/map/APCCTVEditor";
 import PatrolConfigPanel from "@/components/map/PatrolConfigPanel";
+import { isAdminRole } from "@/types/user";
 import type { BuildingRecord } from "@/types/building";
 import type { FloorRecord } from "@/types/floor";
 
@@ -890,7 +891,7 @@ function DeleteBuildingModal({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function FloorPlansPage() {
   const { user, userRecord } = useAuth();
-  const isAdmin = userRecord?.role === "admin";
+  const isAdmin = isAdminRole(userRecord?.role);
   const { buildings, isLoading: buildingsLoading } = useBuildings();
 
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
