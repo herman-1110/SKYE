@@ -2,7 +2,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from middleware.auth_middleware import require_admin
+from middleware.auth_middleware import require_admin, require_owner
 from models.user import UserRecord
 from schemas.user_schema import UpdateRoleRequest, UpdateStatusRequest
 from services.user_service import user_service
@@ -25,10 +25,10 @@ def get_pending(admin: UserRecord = Depends(require_admin)) -> list:
 
 
 @router.patch("/{uid}/role")
-def update_role(uid: str, body: UpdateRoleRequest, admin: UserRecord = Depends(require_admin)) -> dict:
-    """Change a user's role. Admin only."""
+def update_role(uid: str, body: UpdateRoleRequest, owner: UserRecord = Depends(require_owner)) -> dict:
+    """Switch a user's role between admin and user. Owner only."""
     try:
-        user_service.update_role(uid, body.role, admin.uid)
+        user_service.update_role(uid, body.role, owner.uid)
     except (ValueError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "ok"}

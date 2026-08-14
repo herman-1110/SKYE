@@ -8,8 +8,10 @@ import { activateFloor } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
 import FloorMap from "@/components/map/FloorMap";
 import DeviceStatusPanel from "@/components/dashboard/DeviceStatusPanel";
+import SelectDropdown from "@/components/shared/SelectDropdown";
 import type { PositionRecord } from "@/types/position";
 import type { BuildingRecord } from "@/types/building";
+import type { FloorRecord } from "@/types/floor";
 
 export default function FloorMapArea() {
   const { userRecord } = useAuth();
@@ -19,7 +21,6 @@ export default function FloorMapArea() {
   const { floors, activeFloor, isLoading: floorsLoading } = useFloors(selectedBuildingId);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
-  const [floorDropdownOpen, setFloorDropdownOpen] = useState(false);
   const positions = useDashboardStore((s) => s.positions);
 
   const positionList = useMemo(() => {
@@ -113,63 +114,29 @@ export default function FloorMapArea() {
       {/* Building + floor selectors */}
       <div className="flex items-center gap-2">
         {buildings.length > 1 && (
-          <>
-            <span className="font-mono text-[10px] text-s-muted tracking-widest uppercase shrink-0">Building</span>
-            <select
-              value={selectedBuildingId ?? ""}
-              onChange={(e) => handleBuildingChange(e.target.value)}
-              className="bg-s-elevated border border-s-border rounded-lg px-2 py-1.5 text-xs text-s-text focus:outline-none focus:border-s-accent transition-colors"
-            >
-              {buildings.map((b: BuildingRecord) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
-          </>
+          <SelectDropdown<BuildingRecord>
+            label="Building"
+            items={buildings}
+            selectedId={selectedBuildingId}
+            getId={(b) => b.id}
+            getLabel={(b) => b.name}
+            onSelect={handleBuildingChange}
+            placeholder="Select Building"
+          />
         )}
 
         {floors.length > 1 && (
           <>
-            <span className="font-mono text-[10px] text-s-muted tracking-widest uppercase shrink-0">Floor</span>
-            <div className="floor-selector" style={{ position: "relative", display: "inline-block" }}>
-              <button
-                className={`floor-trigger${switching ? " opacity-50 cursor-not-allowed" : ""}`}
-                onClick={() => { if (!switching) setFloorDropdownOpen((prev) => !prev); }}
-                onBlur={() => setTimeout(() => setFloorDropdownOpen(false), 150)}
-              >
-                <span>
-                  {floors.find((f) => f.id === selectedFloorId)?.name ?? "Select Floor"}
-                  {floors.find((f) => f.id === selectedFloorId)?.is_active ? " — ACTIVE" : ""}
-                </span>
-                <svg
-                  width="12" height="12" viewBox="0 0 12 12" fill="none"
-                  style={{
-                    transform: floorDropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
-                    transition: "transform 180ms ease",
-                    marginLeft: "6px",
-                    flexShrink: 0,
-                  }}
-                >
-                  <path d="M2 4L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-
-              {floorDropdownOpen && (
-                <ul className="floor-dropdown-menu">
-                  {floors.map((floor) => (
-                    <li
-                      key={floor.id}
-                      className={`floor-dropdown-item${selectedFloorId === floor.id ? " active" : ""}`}
-                      onMouseDown={() => {
-                        handleFloorChange(floor.id);
-                        setFloorDropdownOpen(false);
-                      }}
-                    >
-                      {floor.name}{floor.is_active ? " — ACTIVE" : ""}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <SelectDropdown<FloorRecord>
+              label="Floor"
+              items={floors}
+              selectedId={selectedFloorId}
+              getId={(f) => f.id}
+              getLabel={(f) => `${f.name}${f.is_active ? " — ACTIVE" : ""}`}
+              onSelect={handleFloorChange}
+              disabled={switching}
+              placeholder="Select Floor"
+            />
             {switching && <span className="h-3 w-3 rounded-full border-2 border-s-accent border-t-transparent animate-spin shrink-0" />}
           </>
         )}

@@ -93,6 +93,7 @@ The frontend is a Next.js dashboard for real-time monitoring, alert management, 
    
    Simulation Patrol: venv/Scripts/python.exe services/simulation_patrol.py
    Simulation Events: venv/Scripts/python.exe services/simulation_events.py
+   Simulation Shift : venv/Scripts/python.exe services/simulation_shift.py 
 
 ## Backend Environment Variables
 

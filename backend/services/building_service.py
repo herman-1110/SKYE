@@ -8,8 +8,8 @@ from models.building import BuildingRecord
 
 class BuildingService:
 
-    def get_all(self, user_id: str) -> List[Dict[str, Any]]:
-        return building_repository.get_all(user_id)
+    def get_all(self) -> List[Dict[str, Any]]:
+        return building_repository.get_all()
 
     def create(self, user_id: str, name: str, description: str) -> BuildingRecord:
         return building_repository.create(user_id, name, description)

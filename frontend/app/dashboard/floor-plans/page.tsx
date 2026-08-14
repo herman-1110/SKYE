@@ -244,6 +244,7 @@ function AddFloorModal({
   const fileRef            = useRef<HTMLInputElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const previewPanStart    = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
+  const cancelUploadRef    = useRef<(() => void) | null>(null);
 
   const clampPreviewPan = (x: number, y: number, z: number): { x: number; y: number } => {
     const container = previewContainerRef.current;
@@ -272,6 +273,9 @@ function AddFloorModal({
   const [pdfPages, setPdfPages] = useState<RasterPage[] | null>(null);
   const [pdfPageNames, setPdfPageNames] = useState<string[]>([]);
   const [rasterising, setRasterising] = useState(false);
+  // Indices of PDF pages already uploaded successfully — retried on partial
+  // failure so a re-click of Upload doesn't re-create already-uploaded floors.
+  const [uploadedPageIndices, setUploadedPageIndices] = useState<Set<number>>(new Set());
 
   const ACCEPTED = ["image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
 
@@ -284,6 +288,7 @@ function AddFloorModal({
     setPdfPageNames([]);
     setPreviewZoom(1);
     setPreviewPan({ x: 0, y: 0 });
+    setUploadedPageIndices(new Set());
   };
 
   const handleFile = (f: File) => {
@@ -296,6 +301,7 @@ function AddFloorModal({
     setPreview(null);
     setFile(f);
     setError(null);
+    setUploadedPageIndices(new Set());
     if (f.type === "application/pdf") {
       setRasterising(true);
       rasterisePdfPages(f)
@@ -347,7 +353,10 @@ function AddFloorModal({
     try {
       if (pdfPages && pdfPages.length > 0) {
         // Multi-page PDF: each page becomes a separate floor, starting at `num`.
+        // Pages already uploaded from a prior (partially failed) attempt are
+        // skipped so retrying doesn't create duplicate floor records.
         for (let i = 0; i < pdfPages.length; i++) {
+          if (uploadedPageIndices.has(i)) continue;
           const page = pdfPages[i];
           const pageName = (pdfPageNames[i] || `Page ${page.pageNumber}`).trim();
           await uploadFloor(
@@ -356,19 +365,29 @@ function AddFloorModal({
             pageName,
             num + i,
             (pct) => setProgress(Math.round(((i + pct / 100) / pdfPages.length) * 100)),
+            (cancel) => { cancelUploadRef.current = cancel; },
           );
+          setUploadedPageIndices((prev) => new Set(prev).add(i));
         }
         toast.success(`Uploaded ${pdfPages.length} floor${pdfPages.length > 1 ? "s" : ""}`);
       } else {
         const floorName = name.trim() || "";
-        await uploadFloor(file, buildingId, floorName, num, setProgress);
+        await uploadFloor(file, buildingId, floorName, num, setProgress, (cancel) => { cancelUploadRef.current = cancel; });
         toast.success(`Floor "${floorName || `Level ${num}`}" uploaded`);
       }
       onClose();
     } catch (err) {
+      if (err instanceof Error && err.message === "CANCELLED") return;
       setError(err instanceof Error ? err.message : "Upload failed.");
       setProgress(null);
+    } finally {
+      cancelUploadRef.current = null;
     }
+  };
+
+  const handleCancelClick = () => {
+    if (progress !== null) cancelUploadRef.current?.();
+    onClose();
   };
 
   // Revoke any object URLs we created when the modal unmounts.
@@ -385,7 +404,7 @@ function AddFloorModal({
       <div className="w-full max-w-sm rounded-xl overflow-hidden" style={{ background: "var(--glass-bg)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--glass-border)", boxShadow: "var(--glass-shadow)" }}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-s-border">
           <h2 className="font-mono text-xs text-s-muted tracking-widest uppercase">Add Floor</h2>
-          <button onClick={onClose} className="text-s-muted hover:text-s-text transition-colors">
+          <button onClick={handleCancelClick} className="text-s-muted hover:text-s-text transition-colors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
@@ -540,7 +559,7 @@ function AddFloorModal({
           )}
         </div>
         <div className="flex gap-2 px-5 py-4 border-t border-s-border">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors">Cancel</button>
+          <button onClick={handleCancelClick} className="px-4 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors">Cancel</button>
           <button onClick={handleUpload} disabled={progress !== null || !file || rasterising} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
             {progress !== null && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
             {progress !== null

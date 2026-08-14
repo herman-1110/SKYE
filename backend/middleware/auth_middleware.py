@@ -43,7 +43,16 @@ async def require_auth(authorization: str = Header(..., alias="Authorization")) 
 
 
 async def require_admin(user: UserRecord = Depends(require_auth)) -> UserRecord:
-    """Calls require_auth then asserts role == admin. Raises 403 if not."""
-    if user.role != "admin":
+    """Calls require_auth then asserts role is admin or owner (owner is a superset of
+    admin). Raises 403 if not."""
+    if user.role not in ("admin", "owner"):
         raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+async def require_owner(user: UserRecord = Depends(require_auth)) -> UserRecord:
+    """Calls require_auth then asserts role == owner. Raises 403 if not. Reserved for
+    owner-only actions like switching another user's role between admin and user."""
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner access required")
     return user

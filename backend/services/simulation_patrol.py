@@ -198,7 +198,7 @@ def _build_payload(beacon: Dict, timestamp: str) -> Dict:
             continue
         readings.append({"ap_mac": ap["mac"], "rssi": rssi, "ap_x": ap["x_m"], "ap_y": ap["y_m"]})
     return {
-        "reporter_mac": beacon["person_id"],
+        "reporter_mac": beacon["mac"],
         "timestamp": timestamp,
         "readings": readings,
         "person_id": beacon["person_id"],
@@ -312,8 +312,8 @@ async def run_simulation() -> None:
         return
 
     fetched_aps = ap_repository.get_all(active_floor.building_id, active_floor.id)
-    if len(fetched_aps) < 2:
-        print("[SIM] Need at least 2 APs on the active floor")
+    if len(fetched_aps) < 3:
+        print("[SIM] Need at least 3 APs on the active floor for positioning to work")
         return
 
     # Build AP lookup by ID
@@ -326,12 +326,12 @@ async def run_simulation() -> None:
             ap = ap_by_id.get(ap_id)
             if ap:
                 ordered_aps.append(ap)
-        if len(ordered_aps) >= 2:
+        if len(ordered_aps) >= 3:
             _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
                            "x_m": ap.x_m, "y_m": ap.y_m} for ap in ordered_aps]
             print(f"[SIM] Using configured patrol route ({len(_floor_aps)} APs)")
         else:
-            print("[SIM] WARNING: patrol_route has < 2 valid APs — falling back to coordinate sort")
+            print("[SIM] WARNING: patrol_route has < 3 valid APs — falling back to coordinate sort")
             _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
                            "x_m": ap.x_m, "y_m": ap.y_m} for ap in fetched_aps]
             _floor_aps.sort(key=lambda a: (a["x_m"], a["y_m"]))
@@ -395,14 +395,15 @@ async def run_simulation() -> None:
     headers = {"Authorization": f"Bearer {token}"}
     tick = 0
 
-    # Clear stale positions for all sim person_id nodes (guards + worker + forklift).
-    # Keyed by person_id now (not MAC), matching what compute_position() writes.
-    sim_person_ids = [b["person_id"] for b in SIMULATED_BEACONS] + [
-        "sim-worker-001", "sim-forklift-001",
+    # Clear stale positions for all sim beacon MACs (guards + worker/forklift
+    # ghosts that simulation_events.py may have left behind). RTDB is keyed by
+    # beacon_mac (the reporter_mac sent to /telemetry), matching what compute_position() writes.
+    sim_macs = [b["mac"].replace(":", "_") for b in SIMULATED_BEACONS] + [
+        "AA_BB_CC_DD_EE_02", "AA_BB_CC_DD_EE_03",  # sim-worker-001 / sim-forklift-001 (simulation_events.py)
     ]
     print("[SIM] Clearing stale RTDB positions…")
-    for pid in sim_person_ids:
-        rtdb.reference(f"/positions/{pid}").delete()
+    for mac_key in sim_macs:
+        rtdb.reference(f"/positions/{mac_key}").delete()
     print("[SIM] Stale positions cleared.")
 
     async with httpx.AsyncClient() as client:
@@ -421,7 +422,7 @@ async def run_simulation() -> None:
             for beacon in SIMULATED_BEACONS:
                 payload = _build_payload(beacon, now_ts)
                 n_readings = len(payload["readings"])
-                pos_data = rtdb.reference(f"/positions/{beacon['person_id']}").get() or {}
+                pos_data = rtdb.reference(f"/positions/{beacon['mac'].replace(':', '_')}").get() or {}
                 pred_x = pos_data.get("predicted_x")
                 pred_y = pos_data.get("predicted_y")
                 smooth_x = pos_data.get("x")

@@ -24,10 +24,9 @@ class BuildingRepository:
         self._db().collection(self._COL).document(record.id).set(record.__dict__)
         return record
 
-    def get_all(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_all(self) -> List[Dict[str, Any]]:
         docs = (
             self._db().collection(self._COL)
-            .where("user_id", "==", user_id)
             .order_by("created_at", direction=firestore.Query.DESCENDING)
             .stream()
         )

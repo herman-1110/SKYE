@@ -204,9 +204,17 @@ class SafetyService:
         """Run man-down and collision checks for a freshly computed position."""
         self.check_man_down(current)
         raw_all = position_repository.get_all()
-        all_positions = [
-            PositionRecord(**v) for v in raw_all.values() if isinstance(v, dict)
-        ]
+        all_positions: List[PositionRecord] = []
+        for key, v in raw_all.items():
+            if not isinstance(v, dict):
+                continue
+            try:
+                all_positions.append(PositionRecord(**v))
+            except TypeError as e:
+                # A stray/partial RTDB node (e.g. a label patch that landed before
+                # any full position record existed at this key) shouldn't take down
+                # every telemetry request — skip it and keep going.
+                print(f"[SAFETY] WARNING: skipping malformed /positions/{key}: {e}")
         self.check_collision(all_positions)
 
 

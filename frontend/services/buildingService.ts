@@ -1,4 +1,4 @@
-import { collection, onSnapshot, query, where, type Unsubscribe } from "firebase/firestore";
+import { collection, onSnapshot, query, type Unsubscribe } from "firebase/firestore";
 import { auth, fsdb } from "@/config/firebase";
 import type { BuildingRecord } from "@/types/building";
 
@@ -25,10 +25,9 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 }
 
 export function subscribeToBuildings(
-  userId: string,
   callback: (buildings: BuildingRecord[]) => void,
 ): Unsubscribe {
-  const q = query(collection(fsdb, "buildings"), where("user_id", "==", userId));
+  const q = query(collection(fsdb, "buildings"));
   return onSnapshot(q, (snap) => {
     const buildings = snap.docs
       .map((d) => d.data() as BuildingRecord)

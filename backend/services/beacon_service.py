@@ -51,9 +51,13 @@ class BeaconService:
         # the Sidebar reflects the new name without waiting for the next solve.
         if "label" in patch and updated.person_id:
             try:
-                rtdb.reference(f"/positions/{updated.person_id}").update({
-                    "label": patch["label"],
-                })
+                ref = rtdb.reference(f"/positions/{updated.person_id}")
+                # Only patch an existing record — never create one. person_id only
+                # matches the /positions key for real Omada devices (reporter_mac ==
+                # person_id there); for simulated beacons the key is a MAC instead,
+                # so blindly updating here would create an orphaned partial node.
+                if ref.get() is not None:
+                    ref.update({"label": patch["label"]})
             except Exception as e:
                 print(f"[BEACON] WARNING: RTDB label patch failed for {updated.person_id}: {e}")
 

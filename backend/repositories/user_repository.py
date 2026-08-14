@@ -15,10 +15,11 @@ class UserRepository:
         return firestore.client().collection("users")
 
     def create(self, uid: str, email: str, display_name: str, person_id: str = "", email_verified: bool = False) -> UserRecord:
-        """Create a user doc. The first user ever gets role=admin and status=approved automatically."""
+        """Create a user doc. The first user ever becomes the workspace owner (role=owner,
+        status=approved) automatically — every subsequent registrant starts as a pending user."""
         existing = list(self._col().limit(1).stream())
         is_first = len(existing) == 0
-        role = "admin" if is_first else "user"
+        role = "owner" if is_first else "user"
         status = "approved" if is_first else "pending"
 
         print(f"[user_repository.create] uid={uid} is_first={is_first} role={role} status={status}")

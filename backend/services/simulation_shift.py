@@ -178,7 +178,7 @@ def _build_payload(beacon: Dict, timestamp: str) -> Dict:
             continue
         readings.append({"ap_mac": ap["mac"], "rssi": rssi, "ap_x": ap["x_m"], "ap_y": ap["y_m"]})
     return {
-        "reporter_mac": beacon["person_id"],
+        "reporter_mac": beacon["mac"],
         "timestamp": timestamp,
         "readings": readings,
         "person_id": beacon["person_id"],
@@ -308,15 +308,15 @@ async def run_simulation() -> None:
         return
 
     fetched_aps = ap_repository.get_all(active_floor.building_id, active_floor.id)
-    if len(fetched_aps) < 2:
-        print("[SIM] Need at least 2 APs on the active floor")
+    if len(fetched_aps) < 3:
+        print("[SIM] Need at least 3 APs on the active floor for positioning to work")
         return
 
     ap_by_id = {ap.id: ap for ap in fetched_aps}
 
     if active_floor.patrol_enabled and active_floor.patrol_route:
         ordered_aps = [ap_by_id[ap_id] for ap_id in active_floor.patrol_route if ap_id in ap_by_id]
-        if len(ordered_aps) >= 2:
+        if len(ordered_aps) >= 3:
             _floor_aps = [{"id": ap.id, "mac": ap.mac, "name": ap.name,
                            "x_m": ap.x_m, "y_m": ap.y_m} for ap in ordered_aps]
             print(f"[SIM] Using configured patrol route ({len(_floor_aps)} APs)")
@@ -386,14 +386,15 @@ async def run_simulation() -> None:
     _shift_complete[1] = False
     _shift_triggered = False
 
-    # Clear stale positions for all sim person_id nodes (all 4 guards + other sim actors).
-    # Keyed by person_id now (not MAC), matching what compute_position() writes.
-    sim_person_ids = [b["person_id"] for b in OUTGOING_BEACONS + INCOMING_BEACONS] + [
-        "sim-worker-001", "sim-forklift-001",
+    # Clear stale positions for all sim beacon MACs (all 4 guards + worker/forklift
+    # ghosts that simulation_events.py may have left behind). RTDB is keyed by
+    # beacon_mac (the reporter_mac sent to /telemetry), matching what compute_position() writes.
+    sim_macs = [b["mac"].replace(":", "_") for b in OUTGOING_BEACONS + INCOMING_BEACONS] + [
+        "AA_BB_CC_DD_EE_02", "AA_BB_CC_DD_EE_03",  # sim-worker-001 / sim-forklift-001 (simulation_events.py)
     ]
     print("[SIM] Clearing stale RTDB positions…")
-    for pid in sim_person_ids:
-        rtdb.reference(f"/positions/{pid}").delete()
+    for mac_key in sim_macs:
+        rtdb.reference(f"/positions/{mac_key}").delete()
     print("[SIM] Stale positions cleared.")
 
     route_str = " → ".join(ap["name"] for ap in _floor_aps)
@@ -432,7 +433,7 @@ async def run_simulation() -> None:
             for beacon in OUTGOING_BEACONS + INCOMING_BEACONS:
                 payload = _build_payload(beacon, now_ts)
                 n_readings = len(payload["readings"])
-                pos_data = rtdb.reference(f"/positions/{beacon['person_id']}").get() or {}
+                pos_data = rtdb.reference(f"/positions/{beacon['mac'].replace(':', '_')}").get() or {}
                 pred_x   = pos_data.get("predicted_x")
                 smooth_x = pos_data.get("x")
                 pred_y   = pos_data.get("predicted_y")

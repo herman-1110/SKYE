@@ -9,8 +9,8 @@ router = APIRouter(prefix="/buildings", tags=["buildings"])
 
 
 @router.get("")
-def get_buildings(user_id: str, caller: UserRecord = Depends(require_auth)) -> list:
-    return building_service.get_all(user_id)
+def get_buildings(caller: UserRecord = Depends(require_auth)) -> list:
+    return building_service.get_all()
 
 
 @router.post("")

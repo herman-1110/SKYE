@@ -54,11 +54,15 @@ export async function uploadFloor(
   name: string,
   floorNumber: number,
   onProgress?: (pct: number) => void,
+  onTaskReady?: (cancel: () => void) => void,
 ): Promise<FloorRecord> {
+  if (file.size === 0) throw new Error("File is empty");
   if (file.size > MAX_BYTES) throw new Error("File too large — maximum 10MB");
   if (!ALLOWED_TYPES.includes(file.type)) throw new Error("Invalid file type — PNG, JPG, PDF only");
 
-  // Read natural pixel dimensions before upload (images only; PDFs → null)
+  // Read natural pixel dimensions before upload (images only; PDFs → null).
+  // A decode failure means the file is corrupt/truncated — reject it here
+  // rather than uploading an image that will never render.
   let image_width_px: number | null = null;
   let image_height_px: number | null = null;
   if (file.type.startsWith("image/")) {
@@ -68,7 +72,9 @@ export async function uploadFloor(
       img.onerror = () => resolve(null);
       img.src = URL.createObjectURL(file);
     });
-    if (dims) { image_width_px = dims.w; image_height_px = dims.h; console.log("[uploadFloor] image dimensions:", dims.w, "×", dims.h); }
+    if (!dims) throw new Error("Could not read this image — it may be corrupt or empty.");
+    image_width_px = dims.w; image_height_px = dims.h;
+    console.log("[uploadFloor] image dimensions:", dims.w, "×", dims.h);
   }
 
   if (!auth.currentUser) {
@@ -83,13 +89,16 @@ export async function uploadFloor(
   const storagePath = `buildings/${buildingId}/floors/${Date.now()}_${file.name}`;
   const storageRef = ref(storage, storagePath);
   const task = uploadBytesResumable(storageRef, file);
+  onTaskReady?.(() => task.cancel());
 
   return new Promise((resolve, reject) => {
     task.on(
       "state_changed",
       (snap) => onProgress?.(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
       (err) => {
-        if (err.code === "storage/unauthorized") {
+        if (err.code === "storage/canceled") {
+          reject(new Error("CANCELLED"));
+        } else if (err.code === "storage/unauthorized") {
           reject(new Error("Storage permission denied — check Firebase Storage rules"));
         } else {
           reject(new Error("Upload failed. Please try again."));

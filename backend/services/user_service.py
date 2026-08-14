@@ -79,8 +79,14 @@ class UserService:
             return users
 
     def update_role(self, uid: str, role: str, approver_uid: str) -> None:
-        """Update role. Approver must be admin."""
-        self._assert_admin(approver_uid)
+        """Switch a user's role between admin and user. Approver must be the workspace
+        owner — role-switching is an owner-only capability, not a general admin one."""
+        self._assert_owner(approver_uid)
+        target = user_repository.get_by_uid(uid)
+        if target is None:
+            raise ValueError("User not found")
+        if target.role == "owner":
+            raise ValueError("Cannot change the workspace owner's role")
         user_repository.update_role(uid, role)
 
     def update_status(self, uid: str, status: str, approver_uid: str) -> None:
@@ -113,8 +119,13 @@ class UserService:
 
     def _assert_admin(self, uid: str) -> None:
         user = user_repository.get_by_uid(uid)
-        if user is None or user.role != "admin":
+        if user is None or user.role not in ("admin", "owner"):
             raise PermissionError("Admin access required")
+
+    def _assert_owner(self, uid: str) -> None:
+        user = user_repository.get_by_uid(uid)
+        if user is None or user.role != "owner":
+            raise PermissionError("Owner access required")
 
 
 user_service = UserService()
