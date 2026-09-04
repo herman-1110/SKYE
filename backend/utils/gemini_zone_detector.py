@@ -2,12 +2,14 @@ import io
 import json
 import logging
 
+import httpx
 import PIL.Image
 import requests
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+from google.genai.errors import ClientError, ServerError
 from fastapi import HTTPException
-from google.api_core.exceptions import DeadlineExceeded, InvalidArgument, ResourceExhausted
 
 from config.settings import settings
 
@@ -83,7 +85,7 @@ def detect_zones_from_image(image_url: str, scale_pixels_per_meter: float) -> li
     orig = PIL.Image.open(io.BytesIO(response.content))
 
     image_bytes, img_width_px, img_height_px = _compress_for_gemini(orig)
-    image = {"mime_type": "image/jpeg", "data": image_bytes}
+    image = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
 
     # The calibration scale was measured on the original image. After resizing,
     # the compressed image has fewer pixels per metre — adjust accordingly.
@@ -99,21 +101,41 @@ def detect_zones_from_image(image_url: str, scale_pixels_per_meter: float) -> li
 
     prompt = f"The image is {img_width_px} x {img_height_px} pixels.\n" + ZONE_DETECTION_PROMPT
 
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-    model = genai.GenerativeModel(settings.LLM_MODEL_NAME)
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
     try:
-        result = model.generate_content(
-            [image, prompt],
-            request_options={"timeout": 120},
+        result = client.models.generate_content(
+            model=settings.LLM_MODEL_NAME,
+            contents=[image, prompt],
+            # timeout is milliseconds here (was seconds under the old SDK's
+            # request_options). 504/DEADLINE_EXCEEDED responses land as
+            # ServerError below; a client-side timeout with no response at
+            # all raises httpx.TimeoutException directly instead (caught
+            # separately — the new SDK doesn't wrap it into ServerError).
+            # No tools passed, so automatic function calling is a no-op —
+            # disabled to silence the SDK's per-call "AFC is enabled..."
+            # log noise, not a behaviour change.
+            config=types.GenerateContentConfig(
+                http_options=types.HttpOptions(timeout=120_000),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            ),
         )
-    except DeadlineExceeded:
+    except httpx.TimeoutException:
         logger.warning("Gemini deadline exceeded for image: %s", image_url)
         raise HTTPException(status_code=504, detail="AI detection timed out. Please try again.")
-    except ResourceExhausted as e:
-        logger.warning("Gemini quota exhausted: %s", e)
-        raise HTTPException(status_code=503, detail="AI service quota exceeded — try again later.")
-    except InvalidArgument as e:
+    except ServerError as e:
+        if e.code == 504:
+            logger.warning("Gemini deadline exceeded for image: %s", image_url)
+            raise HTTPException(status_code=504, detail="AI detection timed out. Please try again.")
+        logger.exception("Gemini generate_content failed")
+        raise HTTPException(status_code=500, detail=f"AI zone detection failed: {e}")
+    except ClientError as e:
+        # RESOURCE_EXHAUSTED (quota) comes back as HTTP 429, a 4xx — still
+        # ClientError under the new SDK's code<500 split, unlike the old
+        # SDK's distinct ResourceExhausted exception type.
+        if e.code == 429:
+            logger.warning("Gemini quota exhausted: %s", e)
+            raise HTTPException(status_code=503, detail="AI service quota exceeded — try again later.")
         logger.warning("Gemini invalid argument: %s", e)
         raise HTTPException(status_code=400, detail=f"AI request rejected: {e}")
     except Exception as e:

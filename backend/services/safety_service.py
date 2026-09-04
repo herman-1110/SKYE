@@ -1,7 +1,7 @@
 import math
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from config.settings import settings
 from models.alert import AlertRecord
@@ -20,6 +20,11 @@ _last_collision: Dict[str, str] = {}   # "worker_id|forklift_id" → ISO timesta
 # genuinely moving, and when. Man-down fires if they stay within
 # MAN_DOWN_MOVEMENT_EPSILON_M of the anchor past the threshold.
 _man_down_tracker: Dict[str, tuple[float, float, str]] = {}
+# person_ids that have already fired a signal-loss man-down and haven't been
+# seen again since. Prevents the stale sweep from re-alerting every tick for
+# a beacon that's simply staying dead. Cleared in check_man_down() the moment
+# a fresh position for that person arrives.
+_stale_alerted: Set[str] = set()
 
 
 class SafetyService:
@@ -63,6 +68,11 @@ class SafetyService:
         single/dual-AP coverage cannot reliably tell 'still' from 'small movement',
         so the alert is treated as a low-confidence welfare check, not a precise fix.
         """
+        # A fresh position means this beacon is transmitting again — let it
+        # fire a signal-loss alert a second time if it goes dark again later.
+        # Before the forklift early-return so it applies regardless of type.
+        _stale_alerted.discard(current.person_id)
+
         if current.person_type == "forklift":
             return None
 
@@ -109,6 +119,63 @@ class SafetyService:
         alert_repository.save(record)
         _last_man_down[pid] = record.timestamp
         return record
+
+    def check_man_down_stale(self) -> List[AlertRecord]:
+        """Fire a signal-loss man-down for any beacon whose last known /positions
+        record has gone stale, independent of the telemetry path. Catches battery
+        death, a guard leaving AP coverage, or a beacon destroyed in the incident
+        itself — none of which ever produce a fresh position, so check_man_down()
+        (which only runs after a position is successfully computed) never sees them.
+
+        Called from a background sweep, not per-telemetry-packet.
+        """
+        now = utcnow_iso()
+        raw_all = position_repository.get_all()
+        fired: List[AlertRecord] = []
+
+        for key, v in raw_all.items():
+            if not isinstance(v, dict):
+                continue
+            try:
+                record = PositionRecord(**v)
+            except TypeError as e:
+                print(f"[SAFETY] WARNING: skipping malformed /positions/{key}: {e}")
+                continue
+
+            if record.person_type == "forklift":
+                continue
+
+            pid = record.person_id
+            if pid in _stale_alerted:
+                continue
+
+            age = seconds_between(record.timestamp, now)
+            if age < settings.MAN_DOWN_STALE_SECONDS:
+                continue
+            if age > settings.MAN_DOWN_STALE_MAX_AGE_S:
+                # Dead record, not an active incident — see MAN_DOWN_STALE_MAX_AGE_S.
+                continue
+
+            # Second dedup layer, same suppressor check_man_down() uses.
+            last_ts = _last_man_down.get(pid)
+            if last_ts and seconds_between(last_ts, now) < 30:
+                continue
+
+            alert = AlertRecord(
+                alert_id=str(uuid.uuid4()),
+                alert_type="man_down",
+                person_id=pid,
+                zone=record.zone,
+                timestamp=now,
+                approximate=record.is_approximate,
+                cause="signal_loss",
+            )
+            alert_repository.save(alert)
+            _last_man_down[pid] = alert.timestamp
+            _stale_alerted.add(pid)
+            fired.append(alert)
+
+        return fired
 
     # ------------------------------------------------------------------
     # FR4 / NFR2 / UC5 — Collision prediction

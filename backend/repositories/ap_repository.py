@@ -40,6 +40,21 @@ class APRepository:
             "y_m": round(y_m, 4),
         })
 
+    def update_position(
+        self, building_id: str, floor_id: str, ap_id: str,
+        x_pct: float, y_pct: float, x_m: float, y_m: float,
+    ) -> None:
+        """User dragged the marker on the map — x_pct/y_pct are the new image
+        fraction, x_m/y_m the frontend's re-derivation from the floor's current
+        scale (same formula as placement). Both stored together so they never
+        drift apart the way a scale-only recompute could leave them."""
+        self._col(building_id, floor_id).document(ap_id).update({
+            "x_pct": x_pct,
+            "y_pct": y_pct,
+            "x_m": round(x_m, 4),
+            "y_m": round(y_m, 4),
+        })
+
     def delete(self, building_id: str, floor_id: str, ap_id: str) -> str | None:
         """Delete AP document from Firestore. Returns the AP's MAC address, or None if not found."""
         doc_ref = self._col(building_id, floor_id).document(ap_id)

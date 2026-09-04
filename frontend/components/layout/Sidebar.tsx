@@ -6,8 +6,14 @@ import { useDashboardStore } from "@/store/dashboardStore";
 import { subscribeToPendingCount } from "@/services/userService";
 import { useAuth } from "@/hooks/useAuth";
 import { isAdminRole } from "@/types/user";
+import { useBeaconScans } from "@/hooks/useBeaconScans";
 import type { PositionRecord } from "@/types/position";
 import type { AlertRecord } from "@/types/alert";
+
+// Matches BeaconManager's UnknownBeaconsPanel — a beacon drops off the badge
+// count within ~10s of going quiet rather than lingering forever (RTDB scan
+// nodes persist after the beacon is gone).
+const UNKNOWN_BEACON_ONLINE_THRESHOLD_S = 10;
 
 const NAV_ALL = [
   {
@@ -62,6 +68,10 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
   const alerts = useDashboardStore((s) => s.alerts);
   const activeAlertCount = Object.values(alerts as Record<string, AlertRecord>)
     .filter((a) => !a.resolved).length;
+  const beaconScans = useBeaconScans();
+  const unknownBeaconCount = Object.values(beaconScans).filter(
+    (s) => !s.registered && Date.now() / 1000 - s.last_seen < UNKNOWN_BEACON_ONLINE_THRESHOLD_S
+  ).length;
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -95,11 +105,13 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
       <nav className={`pt-3 ${collapsed ? "flex flex-col items-center gap-2 px-2" : "flex flex-col gap-0.5 px-2"}`}>
         {navItems.map(({ href, label, icon }) => {
           const active = pathname === href;
-          const isUsers  = href === "/dashboard/users";
-          const isAlerts = href === "/dashboard/alerts";
+          const isUsers   = href === "/dashboard/users";
+          const isAlerts  = href === "/dashboard/alerts";
+          const isBeacons = href === "/dashboard/beacons";
           const badgeCount =
-            isUsers  ? pendingCount :
-            isAlerts ? activeAlertCount : 0;
+            isUsers   ? pendingCount :
+            isAlerts  ? activeAlertCount :
+            isBeacons ? unknownBeaconCount : 0;
           const showBadge = badgeCount > 0;
 
           if (collapsed) {

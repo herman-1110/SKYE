@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+from starlette.concurrency import run_in_threadpool
 
 from middleware.auth_middleware import verify_omada_body_token
 from services.omada_ingest_service import omada_ingest_service
@@ -16,6 +17,12 @@ async def ingest_omada_telemetry(request: Request) -> dict:
 
     Rate limit is higher than /telemetry because each AP posts independently
     (~3 APs × 1/s = ~180/min baseline, with headroom for more APs or faster intervals).
+
+    ingest() is synchronous and does several blocking Firebase round-trips
+    (RTDB writes, Firestore cache-refresh reads, a full /positions read via
+    safety checks). Run it off the event loop — otherwise every telemetry
+    POST freezes the entire server for its full duration, since this route
+    is declared async and nothing else yields control while it runs.
     """
     raw = await request.json()
-    return omada_ingest_service.ingest(raw)
+    return await run_in_threadpool(omada_ingest_service.ingest, raw)

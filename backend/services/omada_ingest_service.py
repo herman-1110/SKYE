@@ -60,6 +60,8 @@ class _BeaconReading:
     rssi: float
     ap_x: float
     ap_y: float
+    floor_id: str
+    building_id: str
     received_at: float  # time.monotonic() when buffered
 
 
@@ -72,15 +74,16 @@ class OmadaIngestService:
     def __init__(self) -> None:
         # beacon MAC (colon-less) → buffer of per-AP readings
         self._buffers: Dict[str, _BeaconBuffer] = {}
-        # AP MAC (colons) → (x_m, y_m); refreshed lazily every AP_CACHE_TTL_S seconds
-        self._ap_coords: Dict[str, tuple[float, float]] = {}
-        self._ap_cache_loaded_at: float = 0.0
+        # Floor is resolved per-AP (which floor is THIS AP actually placed on),
+        # not from a single global "active floor" — two floors can be active in
+        # two different buildings at once, and this must not conflate them.
+        #   floor_id -> {ap_mac (colons, upper): (x_m, y_m)}
+        self._ap_coords: Dict[str, Dict[str, tuple[float, float]]] = {}
+        #   floor_id -> time.monotonic() this floor's AP set was last loaded
+        self._ap_cache_loaded_at: Dict[str, float] = {}
+        #   ap_mac (colons, upper) -> (floor_id, building_id) it currently resolves to
+        self._ap_floor_of: Dict[str, tuple[str, str]] = {}
         self._AP_CACHE_TTL_S = 30.0
-        # Active floor/building — refreshed alongside _ap_coords, tagged onto
-        # every position record (exact or proximity) so the frontend's
-        # floor_id filter picks the marker up.
-        self._active_floor_id: str = ""
-        self._active_building_id: str = ""
         # beacon key (uuid:major:minor) -> time.monotonic() of last positioning emit
         self._last_emit: Dict[str, float] = {}
         # iBeacon identity cache (hot path) — mirrors the AP cache above
@@ -96,25 +99,73 @@ class OmadaIngestService:
 
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
-    def _refresh_ap_cache(self) -> None:
-        active_floor = floor_repository.get_any_active()
-        if not active_floor:
+    def _refresh_ap_cache(self, ap_mac: str) -> None:
+        """Resolve which floor `ap_mac` is actually placed on (via a global,
+        cross-building lookup by MAC — not "whichever floor happens to be
+        active"), then load that whole floor's AP set in one shot so peers on
+        the same floor benefit from this same refresh."""
+        mac_key = ap_mac.upper()
+        matches = ap_repository.get_by_mac_global(ap_mac)
+        if not matches:
+            # AP is online but not placed on any floor. Leave it unresolved —
+            # the caller falls back to the online_unregistered response.
+            self._ap_floor_of.pop(mac_key, None)
             return
-        aps = ap_repository.get_all(active_floor.building_id, active_floor.id)
-        self._ap_coords = {ap.mac.upper(): (ap.x_m, ap.y_m) for ap in aps}
-        self._ap_cache_loaded_at = time.monotonic()
-        self._active_floor_id = active_floor.id
-        self._active_building_id = active_floor.building_id
+        if len(matches) > 1:
+            matches = sorted(matches, key=lambda a: a.floor_id)
+            competing = sorted({a.floor_id for a in matches})
+            print(
+                f"[OMADA] WARNING: AP {ap_mac} is placed on multiple floors "
+                f"{competing} — using {matches[0].floor_id} deterministically"
+            )
+        resolved = matches[0]
+        floor_id, building_id = resolved.floor_id, resolved.building_id
 
-    def _get_ap_coords(self, ap_mac_colons: str) -> Optional[tuple[float, float]]:
-        if time.monotonic() - self._ap_cache_loaded_at > self._AP_CACHE_TTL_S:
-            self._refresh_ap_cache()
-        coords = self._ap_coords.get(ap_mac_colons.upper())
+        aps = ap_repository.get_all(building_id, floor_id)
+
+        # Every AP on the floor sitting at exactly (0, 0) means they were
+        # placed before the floor was calibrated (create-time guard now
+        # prevents new instances of this, but pre-existing data isn't
+        # migrated). Cheap to check here since it only runs on a cache
+        # miss/TTL-expiry — names the exact fix rather than leaving the
+        # symptom (everyone clamped into a corner) to be debugged from scratch.
+        if aps and all(a.x_m == 0.0 and a.y_m == 0.0 for a in aps):
+            print(
+                f"[OMADA] WARNING: all {len(aps)} APs on floor {floor_id} have zeroed "
+                f"coordinates — re-save the floor scale to re-derive them."
+            )
+
+        self._ap_coords[floor_id] = {a.mac.upper(): (a.x_m, a.y_m) for a in aps}
+        self._ap_cache_loaded_at[floor_id] = time.monotonic()
+        for a in aps:
+            self._ap_floor_of[a.mac.upper()] = (floor_id, building_id)
+
+    def _get_ap_coords(self, ap_mac_colons: str) -> Optional[tuple[float, float, str, str]]:
+        """Returns (x_m, y_m, floor_id, building_id) for this AP, resolved from
+        whichever floor it's actually placed on. None if the AP is online but
+        not placed anywhere — callers must not fall back to any other floor."""
+        mac_key = ap_mac_colons.upper()
+
+        resolution = self._ap_floor_of.get(mac_key)
+        if resolution is not None:
+            floor_id, building_id = resolution
+            loaded_at = self._ap_cache_loaded_at.get(floor_id, 0.0)
+            if time.monotonic() - loaded_at <= self._AP_CACHE_TTL_S:
+                coords = self._ap_coords.get(floor_id, {}).get(mac_key)
+                if coords is not None:
+                    return (coords[0], coords[1], floor_id, building_id)
+
+        # Not yet resolved, this floor's cache TTL expired, or this specific AP
+        # is missing from it (e.g. just placed) — force a resolve for this AP.
+        self._refresh_ap_cache(ap_mac_colons)
+        resolution = self._ap_floor_of.get(mac_key)
+        if resolution is None:
+            return None
+        floor_id, building_id = resolution
+        coords = self._ap_coords.get(floor_id, {}).get(mac_key)
         if coords is None:
-            # One forced refresh in case a new AP was just added
-            self._refresh_ap_cache()
-            coords = self._ap_coords.get(ap_mac_colons.upper())
-        return coords
+            return None
+        return (coords[0], coords[1], floor_id, building_id)
 
     # ── Beacon identity cache (resolve iBeacon triple → person) ──────────────────
 
@@ -213,7 +264,20 @@ class OmadaIngestService:
         """
         Process one raw Omada payload (one AP's scan results).
         Returns a summary dict for the HTTP response.
+
+        Holds positioning_service.pipeline_lock for the full call — this
+        service's beacon buffers (_buffers, _last_emit, _ap_coords, etc.)
+        are plain unlocked dicts, only ever safe because every call used to
+        run serialized on the event loop. Now that the route offloads this
+        to a threadpool, concurrent AP POSTs (routinely ~3 per cycle, per
+        BUFFER_WINDOW_S above) must stay mutually exclusive, and mutually
+        exclusive with the /telemetry (simulation) path, which shares
+        positioning_service/safety_service state with this one.
         """
+        with positioning_service.pipeline_lock:
+            return self._ingest_locked(raw)
+
+    def _ingest_locked(self, raw: dict) -> dict:
         reporter = raw.get("reporter", {})
         ap_mac_raw = reporter.get("mac", "")
         reported: List[dict] = raw.get("reported", [])
@@ -235,17 +299,11 @@ class OmadaIngestService:
         # so the dashboard can surface online-but-unplaced APs (with their name).
         self._write_ap_heartbeat(ap_mac_colons, reporter.get("name", ""))
 
-        ap_coords = self._get_ap_coords(ap_mac_colons)
-        if ap_coords is None:
-            return {
-                "status": "online_unregistered",
-                "ap": ap_mac_colons,
-                "reason": "AP online but not placed on active floor — heartbeat written",
-            }
-        ap_x, ap_y = ap_coords
-
-        # ── DEBUG: full raw Omada payload dump (registered APs only) ─────
-        # TEMP: gated on registration to cut console noise from unplaced APs.
+        # ── DEBUG: full raw Omada payload dump — every reporting AP ──────
+        # Runs before the registration gate below: an AP that hasn't been
+        # placed on a floor yet still returns "online_unregistered" and never
+        # reaches the positioning pipeline, but you still want to see exactly
+        # what it sent while wiring it up.
         print("[OMADA] ═══════════════════════════════════════════════════════════")
         print(f"[OMADA] AP REPORT from '{ap_name}' ({ap_mac_raw or 'NO MAC'})")
         print(f"[OMADA] ── Reporter block ──")
@@ -284,6 +342,16 @@ class OmadaIngestService:
         print(f"[OMADA] {json.dumps(raw, separators=(',', ':'))}")
         print("[OMADA] ═══════════════════════════════════════════════════════════")
         # ─────────────────────────────────────────────────────────────────
+
+        ap_coords = self._get_ap_coords(ap_mac_colons)
+        if ap_coords is None:
+            return {
+                "status": "online_unregistered",
+                "ap": ap_mac_colons,
+                "reason": "AP online but not placed on any floor — heartbeat written",
+            }
+        ap_x, ap_y, ap_floor_id, ap_building_id = ap_coords
+
         now_mono = time.monotonic()
         buffered = 0
 
@@ -330,6 +398,8 @@ class OmadaIngestService:
                 rssi=float(rssi_avg),
                 ap_x=ap_x,
                 ap_y=ap_y,
+                floor_id=ap_floor_id,
+                building_id=ap_building_id,
                 received_at=now_mono,
             )
             buffered += 1
@@ -391,6 +461,22 @@ class OmadaIngestService:
             ]
             tx_power = identity.get("tx_power", -59.0)
 
+            # Which floor is this beacon actually being heard on? Per-beacon, from
+            # its own fresh readings — never a global "active floor" guess. Usually
+            # every fresh reading agrees (all APs on one floor); on genuine
+            # cross-floor bleed, trust the strongest signal.
+            fresh_list = list(fresh.values())
+            floor_ids = {r.floor_id for r in fresh_list if r.floor_id}
+            if len(floor_ids) > 1:
+                strongest = max(fresh_list, key=lambda r: r.rssi)
+                beacon_floor_id, beacon_building_id = strongest.floor_id, strongest.building_id
+                print(
+                    f"[OMADA] beacon {beacon_key} heard across floors "
+                    f"{sorted(floor_ids)}, using {beacon_floor_id}"
+                )
+            else:
+                beacon_floor_id, beacon_building_id = fresh_list[0].floor_id, fresh_list[0].building_id
+
             # Stamp BEFORE solving so a thrown exception can't bypass the rate-limit.
             self._last_emit[beacon_key] = now_mono
 
@@ -405,8 +491,8 @@ class OmadaIngestService:
                         label=identity["label"],
                         readings=readings,
                         tx_power=tx_power,
-                        floor_id=self._active_floor_id,
-                        building_id=self._active_building_id,
+                        floor_id=beacon_floor_id,
+                        building_id=beacon_building_id,
                     )
                     if position:
                         safety_service.run_all_checks(position)
@@ -428,7 +514,9 @@ class OmadaIngestService:
             )
 
             try:
-                position = positioning_service.compute_position(payload)
+                position = positioning_service.compute_position(
+                    payload, floor_id=beacon_floor_id, building_id=beacon_building_id
+                )
                 if position:
                     safety_service.run_all_checks(position)
                 emitted += 1

@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 import firebase_admin
 from firebase_admin import credentials
@@ -26,11 +28,51 @@ from routes.simulation_routes import router as simulation_router
 from routes.user_routes import router as user_router
 from routes.vigi_routes import router as vigi_router
 from routes.zone_routes import router as zone_router
+from services.safety_service import safety_service
 from utils.limiter import limiter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 _MAX_BODY_BYTES = 1_048_576  # 1 MB
+_MAN_DOWN_STALE_TICK_S = 60.0
+
+
+async def _man_down_stale_loop() -> None:
+    """Background sweep for signal-loss man-down: fires independently of the
+    telemetry path, so a beacon that goes silent (battery death, lost coverage,
+    or destroyed in the incident itself) still gets caught.
+
+    Multi-worker note: _stale_alerted (in safety_service) is per-process
+    in-memory state. Under --reload (single worker, the current documented
+    startup) this runs once. Under gunicorn/uvicorn with N workers it would
+    run N times and produce N duplicate alerts per beacon — not an issue today,
+    but worth revisiting the moment this is productionised behind >1 worker.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_MAN_DOWN_STALE_TICK_S)
+            fired = await asyncio.to_thread(safety_service.check_man_down_stale)
+            if fired:
+                logging.info(
+                    "[SAFETY] signal-loss man-down: %d alert(s) — %s",
+                    len(fired),
+                    ", ".join(a.person_id for a in fired),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("[SAFETY] man-down stale sweep failed, will retry next tick")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(_man_down_stale_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 class MaxBodySizeMiddleware(BaseHTTPMiddleware):
@@ -62,7 +104,7 @@ def create_app() -> FastAPI:
     if promoted_uid:
         logging.info("[SEED] promoted existing admin %s to owner (no owner found)", promoted_uid)
 
-    app = FastAPI(title="SKYE Sentinel-AI", version="0.1.0")
+    app = FastAPI(title="SKYE Sentinel-AI", version="0.1.0", lifespan=lifespan)
 
     # Rate limiting
     app.state.limiter = limiter
@@ -93,7 +135,8 @@ def create_app() -> FastAPI:
     app.include_router(telemetry_router)
     app.include_router(omada_telemetry_router)
 
-    # Firebase-token protected
+    # Routers below enforce auth per-route via Depends(require_auth/require_admin).
+    # No router-level dependencies= is applied here — check the route, not this comment.
     app.include_router(alert_router)
     app.include_router(beacon_router)
     app.include_router(building_router)

@@ -34,28 +34,13 @@ const WORKER_TYPE_COLOUR: Record<string, string> = {
 // dropped AP POSTs. Tune here after watching the demo.
 const STALE_POSITION_MS = 12_000;
 
-function WorkerTooltip({ position, x, y }: { position: PositionRecord; x: number; y: number }) {
+function WorkerInfoBlock({ position }: { position: PositionRecord }) {
   const displayName = position.label || position.person_id;
   const typeLabel   = WORKER_TYPE_LABEL[position.person_type] ?? position.person_type;
   const fill        = WORKER_TYPE_COLOUR[position.person_type] ?? "var(--text-secondary)";
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        left: x + 14,
-        top: y - 48,
-        zIndex: 9999,
-        pointerEvents: "none",
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--border)",
-        borderRadius: "10px",
-        padding: "8px 12px",
-        minWidth: 160,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-        fontFamily: "IBM Plex Sans, sans-serif",
-      }}
-    >
+    <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: fill, flexShrink: 0, display: "inline-block" }} />
         <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>
@@ -82,6 +67,39 @@ function WorkerTooltip({ position, x, y }: { position: PositionRecord; x: number
   );
 }
 
+// Renders one block per beacon under the cursor — plural because overlapping
+// circles (most commonly: multiple beacons anchored to the same single AP)
+// can mean more than one beacon is "here" at once. See handleMapMouseMove.
+function WorkerTooltip({ positions, x, y }: { positions: PositionRecord[]; x: number; y: number }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: x + 14,
+        top: y - 48,
+        zIndex: 9999,
+        pointerEvents: "none",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border)",
+        borderRadius: "10px",
+        padding: "8px 12px",
+        minWidth: 160,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+        fontFamily: "IBM Plex Sans, sans-serif",
+      }}
+    >
+      {positions.map((position, i) => (
+        <div
+          key={position.beacon_mac}
+          style={i > 0 ? { marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" } : undefined}
+        >
+          <WorkerInfoBlock position={position} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function FloorMap({ positions, buildingId, activeFloor }: Props) {
   // Zone-overlay toggle lives in the Zustand store so the user's choice survives
   // navigating away to /dashboard/alerts and back (the dashboard layout's
@@ -97,9 +115,15 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   const [aps, setAps] = useState<APRecord[]>([]);
   const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
-  const [hoveredWorker, setHoveredWorker] = useState<{ position: PositionRecord; x: number; y: number } | null>(null);
+  // Every beacon whose marker/circle currently contains the cursor — not just
+  // one. Computed in JS (handleMapMouseMove) rather than via per-marker DOM
+  // hover, because the DOM can only ever deliver a mouse event to one topmost
+  // element at a pixel; two overlapping beacons (e.g. both anchored to the
+  // same AP) would otherwise silently hide one another.
+  const [hoveredWorkers, setHoveredWorkers] = useState<{ positions: PositionRecord[]; x: number; y: number } | null>(null);
 
   const outerRef = useRef<HTMLDivElement>(null);
+  const workerSvgRef = useRef<SVGSVGElement>(null);
   const { zones } = useZones(buildingId, activeFloor?.id ?? null);
   const apStatuses = useAPHeartbeats();
   const cctvStatuses = useCCTVHeartbeats();
@@ -174,6 +198,37 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
     return { px: 0, py: 0 };
   };
 
+  // Minimum hit radius in SVG px — matches the visual halo (r=12) drawn around
+  // every worker dot, so exact-position beacons (no approximate circle) stay
+  // comfortably hoverable too, not just a 7px pinpoint.
+  const MIN_HIT_RADIUS_PX = 12;
+
+  // Attached on the outer container (not the worker <svg>, which is
+  // pointer-events:none) so it reliably fires no matter what's visually on
+  // top at that pixel — a zone, an AP icon, or empty floor plan. Checks every
+  // live beacon's distance from the cursor directly in JS rather than relying
+  // on DOM hover, which only ever hands the event to one topmost element.
+  const handleMapMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!workerSvgRef.current || !naturalSize) { setHoveredWorkers(null); return; }
+    const rect = workerSvgRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) { setHoveredWorkers(null); return; }
+
+    const svgX = ((e.clientX - rect.left) / rect.width) * naturalSize.w;
+    const svgY = ((e.clientY - rect.top) / rect.height) * naturalSize.h;
+
+    const hits = livePositions.filter((p) => {
+      const { px, py } = toPixel(p);
+      const hitRadius =
+        p.is_approximate && p.radius_m != null && scale
+          ? Math.max(p.radius_m * scale, MIN_HIT_RADIUS_PX)
+          : MIN_HIT_RADIUS_PX;
+      const dx = svgX - px, dy = svgY - py;
+      return dx * dx + dy * dy <= hitRadius * hitRadius;
+    });
+
+    setHoveredWorkers(hits.length > 0 ? { positions: hits, x: e.clientX, y: e.clientY } : null);
+  };
+
   if (!activeFloor) {
     return (
       <div className="flex items-center justify-center h-64 rounded-xl bg-s-surface border border-s-border text-s-muted">
@@ -183,7 +238,12 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   }
 
   return (
-    <div ref={outerRef} className="relative w-full rounded-xl overflow-hidden border border-s-border bg-s-elevated shadow-sm">
+    <div
+      ref={outerRef}
+      className="relative w-full rounded-xl overflow-hidden border border-s-border bg-s-elevated shadow-sm"
+      onMouseMove={handleMapMouseMove}
+      onMouseLeave={() => setHoveredWorkers(null)}
+    >
       {/* Image — h-auto so the card height matches the floor plan aspect ratio exactly */}
       <img
         src={activeFloor.url}
@@ -285,8 +345,9 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
             );
           })}
 
-          {/* Worker markers */}
+          {/* Worker markers — purely visual; hover is computed in handleMapMouseMove */}
           <svg
+            ref={workerSvgRef}
             viewBox={naturalSize ? `0 0 ${naturalSize.w} ${naturalSize.h}` : "0 0 1 1"}
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
             aria-label="Worker positions overlay"
@@ -300,7 +361,6 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
                   px={px}
                   py={py}
                   scale={scale}
-                  onHover={setHoveredWorker}
                 />
               );
             })}
@@ -337,9 +397,9 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
         document.body
       )}
 
-      {/* Worker tooltip */}
-      {hoveredWorker && typeof document !== "undefined" && createPortal(
-        <WorkerTooltip position={hoveredWorker.position} x={hoveredWorker.x} y={hoveredWorker.y} />,
+      {/* Worker tooltip — one block per beacon under the cursor */}
+      {hoveredWorkers && typeof document !== "undefined" && createPortal(
+        <WorkerTooltip positions={hoveredWorkers.positions} x={hoveredWorkers.x} y={hoveredWorkers.y} />,
         document.body
       )}
     </div>

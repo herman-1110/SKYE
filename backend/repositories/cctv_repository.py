@@ -25,6 +25,12 @@ class CCTVRepository:
         docs = self._col(building_id, floor_id).stream()
         return [CCTV(**d.to_dict()) for d in docs]
 
+    def update_position(self, building_id: str, floor_id: str, cctv_id: str, x_pct: float, y_pct: float) -> None:
+        self._col(building_id, floor_id).document(cctv_id).update({
+            "x_pct": x_pct,
+            "y_pct": y_pct,
+        })
+
     def delete(self, building_id: str, floor_id: str, cctv_id: str) -> None:
         self._col(building_id, floor_id).document(cctv_id).delete()
 

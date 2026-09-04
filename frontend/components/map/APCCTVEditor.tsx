@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { FloorRecord } from "@/types/floor";
 import {
-  subscribeToAPs, createAP, deleteAP,
-  subscribeToCCTVs, createCCTV, deleteCCTV,
+  subscribeToAPs, createAP, deleteAP, updateAPPosition,
+  subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTVPosition,
   type APRecord, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
@@ -56,11 +56,90 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
+  // Drag-to-reposition an already-placed device. dragPct overlays the live
+  // pointer position on top of whatever's in Firestore; the underlying
+  // aps/cctvs arrays are never optimistically mutated, so if the PATCH on
+  // release fails, clearing dragPct alone puts the marker right back where
+  // it started — no separate revert logic needed.
+  const [dragTarget, setDragTarget] = useState<{ type: "ap" | "cctv"; id: string } | null>(null);
+  const [dragPct, setDragPct] = useState<{ x: number; y: number } | null>(null);
+  const dragPctRef = useRef<{ x: number; y: number } | null>(null);
+  // Grab origin, in both cursor and marker-pct space — lets handleMove apply
+  // the cursor's DELTA rather than snapping the marker's center to wherever
+  // the cursor currently is. Without this, an off-center grab (you rarely
+  // click the exact pixel-center of a 22px icon) makes the marker visibly
+  // jump to re-center under the cursor the instant you move it.
+  const dragOriginRef = useRef<{ clientX: number; clientY: number; xPct: number; yPct: number } | null>(null);
+
   useEffect(() => {
     const unsubAPs = subscribeToAPs(buildingId, floor.id, setAps);
     const unsubCCTVs = subscribeToCCTVs(buildingId, floor.id, setCctvs);
     return () => { unsubAPs(); unsubCCTVs(); };
   }, [buildingId, floor.id]);
+
+  const handleMarkerPointerDown =
+    (type: "ap" | "cctv", id: string, xPct: number, yPct: number) => (e: React.PointerEvent) => {
+      if ((e.target as HTMLElement).closest("button")) return;
+      if (placementMode || dragTarget) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragOriginRef.current = { clientX: e.clientX, clientY: e.clientY, xPct, yPct };
+      dragPctRef.current = { x: xPct, y: yPct };
+      setDragTarget({ type, id });
+      setDragPct({ x: xPct, y: yPct });
+    };
+
+  useEffect(() => {
+    if (!dragTarget) return;
+
+    const handleMove = (e: PointerEvent) => {
+      if (!imgRef.current || !dragOriginRef.current) return;
+      const rect = imgRef.current.getBoundingClientRect();
+      const origin = dragOriginRef.current;
+      const dxPct = (e.clientX - origin.clientX) / rect.width;
+      const dyPct = (e.clientY - origin.clientY) / rect.height;
+      const x = Math.max(0, Math.min(1, origin.xPct + dxPct));
+      const y = Math.max(0, Math.min(1, origin.yPct + dyPct));
+      dragPctRef.current = { x, y };
+      setDragPct({ x, y });
+    };
+
+    const handleUp = async () => {
+      const final = dragPctRef.current;
+      const target = dragTarget;
+      dragOriginRef.current = null;
+      if (!final) { setDragTarget(null); setDragPct(null); return; }
+
+      // Deliberately keep rendering from dragPct (the exact drop point) until
+      // the PATCH resolves — clearing it immediately made the marker jump
+      // back to its stale pre-drag position for the round-trip, then jump
+      // forward again once Firestore's onSnapshot caught up. x_m/y_m are no
+      // longer computed here — the backend derives them from x_pct/y_pct +
+      // the floor's calibrated scale (see floorService.ts).
+      try {
+        if (target.type === "ap") {
+          await updateAPPosition(buildingId, floor.id, target.id, { x_pct: final.x, y_pct: final.y });
+        } else {
+          await updateCCTVPosition(buildingId, floor.id, target.id, { x_pct: final.x, y_pct: final.y });
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "";
+        toast.error(msg.toLowerCase().includes("not calibrated") ? msg : "Failed to update device position");
+      } finally {
+        setDragTarget(null);
+        setDragPct(null);
+      }
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [dragTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!placementMode || !imgRef.current) return;
@@ -76,18 +155,16 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     if (!isValidMac(apMac))    { setMacError("Invalid MAC address format"); return; }
     setMacError("");
     setSaving(true);
-    const scale = floor.scale_pixels_per_meter;
-    const img = imgRef.current;
-    const x_m = scale && img ? (pendingPct.x * img.naturalWidth)  / scale : 0;
-    const y_m = scale && img ? (pendingPct.y * img.naturalHeight) / scale : 0;
+    // x_m/y_m are no longer computed here — the backend derives them from
+    // x_pct/y_pct + the floor's calibrated scale (see floorService.ts). The
+    // "Add AP" button is disabled on an uncalibrated floor, so the 409 below
+    // is a defensive path (direct API call), not something normal use hits.
     try {
       const ap = await createAP(buildingId, floor.id, {
         name: apName.trim() || "AP",
         mac: apMac,
         x_pct: pendingPct.x,
         y_pct: pendingPct.y,
-        x_m,
-        y_m,
       });
       toast.success(`AP "${ap.name}" placed`);
       setPendingPct(null); setApName(""); setApMac(""); setPlacementMode(null);
@@ -99,6 +176,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         } else {
           setMacError("An AP with this MAC already exists on this floor.");
         }
+      } else if (msg.toLowerCase().includes("not calibrated")) {
+        toast.error(msg);
       } else {
         toast.error("Failed to place AP");
       }
@@ -241,7 +320,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       {/* Map canvas */}
       <div
         className="relative w-full rounded-xl overflow-hidden border border-s-border bg-s-elevated select-none"
-        style={{ cursor: placementMode ? "crosshair" : "default" }}
+        style={{ cursor: placementMode ? "crosshair" : "default", userSelect: dragTarget ? "none" : undefined }}
         onClick={handleMapClick}
       >
         <img
@@ -252,49 +331,83 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           draggable={false}
         />
 
-        {/* AP markers */}
-        {aps.map((ap) => (
-          <div
-            key={ap.id}
-            className="group absolute"
-            style={{ left: `${ap.x_pct * 100}%`, top: `${ap.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10 }}
-            onMouseEnter={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
-            onMouseMove={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
-            onMouseLeave={() => setHoveredMarker(null)}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
-            </svg>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleDeleteAP(ap.id); }}
-              disabled={deletingId === ap.id}
-              className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-s-danger text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center disabled:opacity-40"
-              style={{ fontSize: 8 }}
-            >✕</button>
-          </div>
-        ))}
+        {/* AP markers — drag an existing one to reposition it */}
+        {aps.map((ap) => {
+          const isDragging = dragTarget?.type === "ap" && dragTarget.id === ap.id;
+          const xPct = isDragging && dragPct ? dragPct.x : ap.x_pct;
+          const yPct = isDragging && dragPct ? dragPct.y : ap.y_pct;
+          return (
+            <div
+              key={ap.id}
+              className="group absolute"
+              style={{
+                left: `${xPct * 100}%`, top: `${yPct * 100}%`,
+                transform: `translate(-50%, -50%) scale(${isDragging ? 1.15 : 1})`,
+                // Only the scale/shadow pop eases in — left/top must stay
+                // untransitioned so the marker tracks the cursor instantly.
+                transition: "transform 0.12s ease-out, filter 0.12s ease-out",
+                pointerEvents: "auto",
+                zIndex: isDragging ? 20 : 10,
+                cursor: placementMode ? "default" : isDragging ? "grabbing" : "grab",
+                filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" : undefined,
+                touchAction: "none",
+              }}
+              onPointerDown={handleMarkerPointerDown("ap", ap.id, ap.x_pct, ap.y_pct)}
+              onMouseEnter={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
+              onMouseMove={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
+              onMouseLeave={() => setHoveredMarker(null)}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
+              </svg>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeleteAP(ap.id); }}
+                disabled={deletingId === ap.id}
+                className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-s-danger text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center disabled:opacity-40"
+                style={{ fontSize: 8 }}
+              >✕</button>
+            </div>
+          );
+        })}
 
-        {/* CCTV markers */}
-        {cctvs.map((cctv) => (
-          <div
-            key={cctv.id}
-            className="group absolute"
-            style={{ left: `${cctv.x_pct * 100}%`, top: `${cctv.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10 }}
-            onMouseEnter={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
-            onMouseMove={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
-            onMouseLeave={() => setHoveredMarker(null)}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
-            </svg>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleDeleteCCTV(cctv.id); }}
-              disabled={deletingId === cctv.id}
-              className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-s-danger text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center disabled:opacity-40"
-              style={{ fontSize: 8 }}
-            >✕</button>
-          </div>
-        ))}
+        {/* CCTV markers — drag an existing one to reposition it */}
+        {cctvs.map((cctv) => {
+          const isDragging = dragTarget?.type === "cctv" && dragTarget.id === cctv.id;
+          const xPct = isDragging && dragPct ? dragPct.x : cctv.x_pct;
+          const yPct = isDragging && dragPct ? dragPct.y : cctv.y_pct;
+          return (
+            <div
+              key={cctv.id}
+              className="group absolute"
+              style={{
+                left: `${xPct * 100}%`, top: `${yPct * 100}%`,
+                transform: `translate(-50%, -50%) scale(${isDragging ? 1.15 : 1})`,
+                // Only the scale/shadow pop eases in — left/top must stay
+                // untransitioned so the marker tracks the cursor instantly.
+                transition: "transform 0.12s ease-out, filter 0.12s ease-out",
+                pointerEvents: "auto",
+                zIndex: isDragging ? 20 : 10,
+                cursor: placementMode ? "default" : isDragging ? "grabbing" : "grab",
+                filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" : undefined,
+                touchAction: "none",
+              }}
+              onPointerDown={handleMarkerPointerDown("cctv", cctv.id, cctv.x_pct, cctv.y_pct)}
+              onMouseEnter={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
+              onMouseMove={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
+              onMouseLeave={() => setHoveredMarker(null)}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
+              </svg>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeleteCCTV(cctv.id); }}
+                disabled={deletingId === cctv.id}
+                className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-s-danger text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center disabled:opacity-40"
+                style={{ fontSize: 8 }}
+              >✕</button>
+            </div>
+          );
+        })}
 
         {/* Marker tooltip */}
         {hoveredMarker && typeof document !== "undefined" && createPortal(

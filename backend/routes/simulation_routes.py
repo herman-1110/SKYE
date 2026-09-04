@@ -9,8 +9,10 @@ GET  /simulation/status              → returns running/stopped + current mode
 """
 import asyncio
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from middleware.auth_middleware import require_admin, require_auth
+from models.user import UserRecord
 from services.simulation_patrol import run_simulation as run_patrol
 from services.simulation_events import run_simulation as run_events
 from services.simulation_shift  import run_simulation as run_shift
@@ -26,7 +28,10 @@ def _is_running() -> bool:
 
 
 @router.post("/simulation/start")
-async def start_simulation(mode: str = Query(default="events", pattern="^(patrol|events|shift)$")):
+async def start_simulation(
+    mode: str = Query(default="events", pattern="^(patrol|events|shift)$"),
+    admin: UserRecord = Depends(require_admin),
+):
     global _task, _current_mode
 
     if _is_running():
@@ -48,7 +53,7 @@ async def start_simulation(mode: str = Query(default="events", pattern="^(patrol
 
 
 @router.post("/simulation/stop")
-async def stop_simulation():
+async def stop_simulation(admin: UserRecord = Depends(require_admin)):
     global _task, _current_mode
 
     if not _is_running():
@@ -68,7 +73,7 @@ async def stop_simulation():
 
 
 @router.get("/simulation/status")
-async def simulation_status():
+async def simulation_status(caller: UserRecord = Depends(require_auth)):
     return {
         "running": _is_running(),
         "mode": _current_mode if _is_running() else None,

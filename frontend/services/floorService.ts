@@ -26,7 +26,17 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText);
+    const raw = await res.text().catch(() => res.statusText);
+    // FastAPI error bodies are JSON — {"detail": "message"} — not the plain
+    // message text. Extract it so callers showing err.message directly (e.g.
+    // via toast) get a readable string instead of a raw JSON blob.
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+    } catch {
+      // Not JSON — use the raw text as-is.
+    }
     throw new Error(detail);
   }
   return res.json();
@@ -186,12 +196,23 @@ export interface CCTVRecord {
 export const listAPs = (buildingId: string, floorId: string): Promise<APRecord[]> =>
   req("GET", `/api/buildings/${buildingId}/floors/${floorId}/aps`);
 
+// x_m/y_m are not part of either request body — the backend derives them
+// server-side from x_pct/y_pct + the floor's calibrated scale and ignores
+// anything sent here (see floor_routes.py's create_ap/update_ap_position).
 export const createAP = (
   buildingId: string,
   floorId: string,
-  body: { name: string; mac: string; x_pct: number; y_pct: number; x_m: number; y_m: number },
+  body: { name: string; mac: string; x_pct: number; y_pct: number },
 ): Promise<APRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/aps`, body);
+
+export const updateAPPosition = (
+  buildingId: string,
+  floorId: string,
+  apId: string,
+  body: { x_pct: number; y_pct: number },
+): Promise<void> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}/position`, body);
 
 export const deleteAP = (buildingId: string, floorId: string, apId: string): Promise<void> =>
   req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}`);
@@ -205,6 +226,14 @@ export const createCCTV = (
   body: { name: string; x_pct: number; y_pct: number; mac?: string | null },
 ): Promise<CCTVRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`, body);
+
+export const updateCCTVPosition = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+  body: { x_pct: number; y_pct: number },
+): Promise<void> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}/position`, body);
 
 export const deleteCCTV = (buildingId: string, floorId: string, cctvId: string): Promise<void> =>
   req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`);

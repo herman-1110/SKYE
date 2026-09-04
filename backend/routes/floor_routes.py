@@ -25,8 +25,11 @@ class APCreateRequest(BaseModel):
     mac: str
     x_pct: float
     y_pct: float
-    x_m: float = 0.0
-    y_m: float = 0.0
+    # x_m/y_m intentionally NOT accepted here — server-derived in create_ap()
+    # from x_pct/y_pct + the floor's calibrated scale. Trusting the client's
+    # own copy was the root cause of every pre-calibration AP landing at
+    # (0, 0); a client that still sends these fields has them silently
+    # ignored (Pydantic drops undeclared fields), not merged or fallen back to.
 
     @field_validator("mac")
     @classmethod
@@ -50,6 +53,14 @@ class CCTVCreateRequest(BaseModel):
         if not _MAC_RE.match(v.strip()):
             raise ValueError("MAC must be in format XX:XX:XX:XX:XX:XX")
         return v.strip().upper()
+
+
+class PositionUpdateRequest(BaseModel):
+    x_pct: float
+    y_pct: float
+    # x_m/y_m intentionally NOT accepted — see APCreateRequest. CCTV has no
+    # metre coordinates at all, so this only matters for the AP variant of
+    # this endpoint, which re-derives them server-side same as create_ap.
 
 router = APIRouter(prefix="/buildings/{building_id}/floors", tags=["floors"])
 
@@ -177,6 +188,13 @@ def create_ap(
                 status_code=409,
                 detail=f"AP with MAC {body.mac} is already registered on another floor (floor_id: {match.floor_id}). Each AP MAC must be globally unique."
             )
+    try:
+        x_m, y_m = floor_service.derive_ap_metres(building_id, floor_id, body.x_pct, body.y_pct)
+    except ValueError as e:
+        # 409, not 400: the request itself is well-formed — the floor is just
+        # in the wrong state (uncalibrated) to place an AP on right now.
+        raise HTTPException(status_code=409, detail=str(e))
+
     ap = AccessPoint(
         id=str(uuid.uuid4()),
         floor_id=floor_id,
@@ -186,11 +204,32 @@ def create_ap(
         x_pct=body.x_pct,
         y_pct=body.y_pct,
         created_at=utcnow_iso(),
-        x_m=body.x_m,
-        y_m=body.y_m,
+        x_m=x_m,
+        y_m=y_m,
     )
     ap_repository.save(building_id, floor_id, ap)
     return ap.__dict__
+
+
+@router.patch("/{floor_id}/aps/{ap_id}/position")
+def update_ap_position(
+    building_id: str,
+    floor_id: str,
+    ap_id: str,
+    body: PositionUpdateRequest,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    """Marker was dragged on the map. x_m/y_m are re-derived server-side from
+    the floor's current scale — same as create_ap, and for the same reason:
+    an already-placed AP requires calibration to exist, but re-deriving here
+    too (rather than trusting whatever the client last computed) means this
+    endpoint can't reintroduce a zeroed-coordinate AP either."""
+    try:
+        x_m, y_m = floor_service.derive_ap_metres(building_id, floor_id, body.x_pct, body.y_pct)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    ap_repository.update_position(building_id, floor_id, ap_id, body.x_pct, body.y_pct, x_m, y_m)
+    return {"status": "ok"}
 
 
 @router.delete("/{floor_id}/aps/{ap_id}")
@@ -235,6 +274,18 @@ def create_cctv(
     )
     cctv_repository.save(building_id, floor_id, cctv)
     return cctv.__dict__
+
+
+@router.patch("/{floor_id}/cctvs/{cctv_id}/position")
+def update_cctv_position(
+    building_id: str,
+    floor_id: str,
+    cctv_id: str,
+    body: PositionUpdateRequest,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    cctv_repository.update_position(building_id, floor_id, cctv_id, body.x_pct, body.y_pct)
+    return {"status": "ok"}
 
 
 @router.delete("/{floor_id}/cctvs/{cctv_id}")

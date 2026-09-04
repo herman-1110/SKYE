@@ -15,4 +15,5 @@ export interface AlertRecord {
   timestamp: string;    // ISO 8601
   resolved: boolean;
   other_person_id?: string;   // collision only: the other party
+  cause?: "stillness" | "signal_loss";   // man_down only: absent on alerts predating this field
 }

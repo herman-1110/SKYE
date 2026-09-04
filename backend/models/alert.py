@@ -12,3 +12,4 @@ class AlertRecord:
     resolved: bool = False
     other_person_id: Optional[str] = None   # collision only: the other party
     approximate: bool = False               # man_down: raised from a single/dual-AP proximity fix (low-confidence)
+    cause: str = "stillness"                # man_down: "stillness" (not moving) | "signal_loss" (beacon went dark)
