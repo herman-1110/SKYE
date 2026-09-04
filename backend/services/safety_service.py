@@ -268,8 +268,20 @@ class SafetyService:
     # Convenience entry point called from telemetry route
     # ------------------------------------------------------------------
     def run_all_checks(self, current: PositionRecord) -> None:
-        """Run man-down and collision checks for a freshly computed position."""
+        """Run man-down, patrol-tracking, and collision checks for a freshly computed position."""
         self.check_man_down(current)
+
+        # local import: keeps safety_service<->patrol_tracker_service decoupled
+        # at module-load time, same pattern zone_service uses for
+        # positioning_service. Wrapped defensively — a tracker bug must never
+        # take down position ingest or man-down detection, which both run in
+        # this same call. Same posture as RAG's failure handling (Prompt 109).
+        try:
+            from services.patrol_tracker_service import patrol_tracker_service
+            patrol_tracker_service.check_patrol_progress(current)
+        except Exception as e:
+            print(f"[SAFETY] WARNING: patrol tracker failed for a position update: {e}")
+
         raw_all = position_repository.get_all()
         all_positions: List[PositionRecord] = []
         for key, v in raw_all.items():

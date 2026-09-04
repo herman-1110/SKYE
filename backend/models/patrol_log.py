@@ -16,3 +16,5 @@ class PatrolLogRecord:
     vigi_detected: bool
     compliant: bool
     shift_id: str
+    cycle_id: str = ""  # groups checkpoint visits into one real-time patrol lap;
+                        # "" for pre-existing/simulated logs that predate this field
