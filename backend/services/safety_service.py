@@ -16,10 +16,13 @@ from utils.timestamp_utils import utcnow_iso, seconds_between
 
 _last_man_down: Dict[str, str] = {}    # person_id → ISO timestamp of last alert
 _last_collision: Dict[str, str] = {}   # "worker_id|forklift_id" → ISO timestamp
-# person_id → (anchor_x, anchor_y, since_iso): where the person was last seen
-# genuinely moving, and when. Man-down fires if they stay within
-# MAN_DOWN_MOVEMENT_EPSILON_M of the anchor past the threshold.
-_man_down_tracker: Dict[str, tuple[float, float, str]] = {}
+# person_id → (anchor_x, anchor_y, since_iso, anchor_is_approximate): where the
+# person was last seen genuinely moving, and when. Man-down fires if they stay
+# within MAN_DOWN_MOVEMENT_EPSILON_M of the anchor past the threshold.
+# anchor_is_approximate records whether that anchor came from an exact solve or
+# a proximity-fallback estimate, so a later reading of the OTHER kind can be
+# recognised as incomparable rather than measured as movement (Prompt 111 §2).
+_man_down_tracker: Dict[str, tuple[float, float, str, bool]] = {}
 # person_ids that have already fired a signal-loss man-down and haven't been
 # seen again since. Prevents the stale sweep from re-alerting every tick for
 # a beacon that's simply staying dead. Cleared in check_man_down() the moment
@@ -86,17 +89,27 @@ class SafetyService:
         # (Cold-start case — including a beacon that appears in a dead zone and
         # never moves — begins counting from first sighting.)
         if prev is None:
-            _man_down_tracker[pid] = (current.x, current.y, now)
+            _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
             return None
 
-        anchor_x, anchor_y, since_iso = prev
+        anchor_x, anchor_y, since_iso, anchor_is_approximate = prev
+
+        # An approximate position's x/y is the anchor AP's own coordinate, not
+        # a comparable fix to an exact solve's x/y (or vice versa). Comparing
+        # across a type transition would read as a multi-metre teleport and
+        # falsely reset the stillness clock. Leave the anchor and clock
+        # untouched — this reading is neither confirmed movement nor confirmed
+        # stillness, so it contributes nothing either way (Prompt 111 §2).
+        if current.is_approximate != anchor_is_approximate:
+            return None
+
         moved = math.hypot(current.x - anchor_x, current.y - anchor_y)
 
         # Genuine movement: re-anchor to the new spot and reset the clock.
         # Do NOT re-anchor on every call — only when epsilon is broken — or the
         # anchor chases position jitter and the person never appears still.
         if moved >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
-            _man_down_tracker[pid] = (current.x, current.y, now)
+            _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
             return None
 
         # Within epsilon: still. Has the clock run past the threshold?

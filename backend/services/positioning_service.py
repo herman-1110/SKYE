@@ -76,6 +76,11 @@ class PositioningService:
         self.pipeline_lock: threading.Lock = threading.Lock()
         # person_id -> monotonic ts of the last degenerate-geometry warning
         self._last_degenerate_warning: Dict[str, float] = {}
+        # person_id -> monotonic ts of the last successful EXACT solve here.
+        # Read by omada_ingest_service to decide whether a fresh approximate
+        # (proximity-fallback) estimate should be suppressed in favour of a
+        # still-recent exact position (POSITION_EXACT_HOLD_SECONDS, Prompt 111).
+        self._last_exact_solve: Dict[str, float] = {}
 
     def _get_filter(self, beacon_mac: str) -> KalmanService:
         if beacon_mac not in self._filters:
@@ -153,6 +158,13 @@ class PositioningService:
         """Call this after a floor scale, activation, or zone change."""
         self._contexts.clear()
         self._last_seen.clear()
+
+    def had_recent_exact_solve(self, person_id: str, within_seconds: float) -> bool:
+        """True if this person's last successful exact solve happened within
+        the given window. Used to suppress a strictly-worse approximate
+        estimate that would otherwise overwrite it (Prompt 111 §1)."""
+        ts = self._last_exact_solve.get(person_id)
+        return ts is not None and (time.monotonic() - ts) < within_seconds
 
     def compute_position(
         self,
@@ -246,7 +258,12 @@ class PositioningService:
             floor_id=ctx.floor_id or "",
             building_id=ctx.building_id or "",
             label=payload.label,
+            # Explicit, not the dataclass default — this flag is now load-bearing
+            # for man-down (Prompt 111) and a silent default is the wrong
+            # mechanism to carry it.
+            is_approximate=False,
         )
+        self._last_exact_solve[payload.person_id] = time.monotonic()
         position_repository.save(record)
         return record
 

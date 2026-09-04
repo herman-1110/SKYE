@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 from firebase_admin import db as rtdb
 
 from config.beacon_registry import make_ibeacon_key, BeaconIdentity
+from config.settings import settings
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
 from repositories.ap_repository import ap_repository
 from repositories.beacon_repository import beacon_repository
@@ -96,6 +97,16 @@ class OmadaIngestService:
         self._last_janitor_run: float = 0.0
         self._JANITOR_INTERVAL_S = 60.0      # run no more than once per 60 s
         self._STALE_BEACON_S = 300.0         # unregistered + last_seen > 300 s ago → delete
+        # beacon_key -> monotonic ts of the last "too few fresh APs" log for that
+        # beacon. This fires on the hot path every time a flush sees fewer than
+        # MIN_APS_FOR_POSITION APs — rate-limited so a persistently under-covered
+        # beacon logs once a minute instead of drowning [OMADA]'s output. Kept
+        # permanently (unlike the temporary MEASURE instrumentation, Prompt 111)
+        # because suppressing the approximate emission is not the same as the
+        # APs consistently hearing the beacon, and that difference must stay
+        # observable.
+        self._last_low_ap_warning: Dict[str, float] = {}
+        self._LOW_AP_WARNING_RATE_LIMIT_S = 60.0
 
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
@@ -413,6 +424,25 @@ class OmadaIngestService:
             "beacons_positioned": emitted,
         }
 
+    # ── Low-AP-count visibility (Prompt 111 §3) ──────────────────────────────────
+
+    def _log_low_ap_count(self, beacon_key: str, fresh: "Dict[str, _BeaconReading]") -> None:
+        """Rate-limited log for a beacon heard by fewer than MIN_APS_FOR_POSITION
+        fresh APs this flush — independent of whatever emission decision follows
+        (a proximity-fallback estimate, or one suppressed under
+        POSITION_EXACT_HOLD_SECONDS). Kept permanently, not removed with the
+        temporary MEASURE instrumentation: suppressing the emission must not
+        also suppress visibility into the underlying AP-dropout condition."""
+        now_mono = time.monotonic()
+        last_warned = self._last_low_ap_warning.get(beacon_key, 0.0)
+        if now_mono - last_warned < self._LOW_AP_WARNING_RATE_LIMIT_S:
+            return
+        self._last_low_ap_warning[beacon_key] = now_mono
+        print(
+            f"[OMADA] WARNING: beacon {beacon_key} heard by only {len(fresh)}/"
+            f"{MIN_APS_FOR_POSITION} fresh AP(s) — {sorted(fresh.keys())}"
+        )
+
     # ── Buffer flush ────────────────────────────────────────────────────────────
 
     def _flush_ready_beacons(self) -> int:
@@ -432,6 +462,10 @@ class OmadaIngestService:
                 if now_mono - r.received_at <= BUFFER_WINDOW_S
             }
             buf.readings = fresh
+
+            # TEMP-MEASURE-112: every flush, unconditionally — remove via grep once the capture is done
+            ts_measure_112 = utcnow_iso()  # TEMP-MEASURE-112
+            print(f"[MEASURE-112] ts={ts_measure_112} id={beacon_key} ap_count={len(fresh)} aps={sorted(fresh.keys())}")  # TEMP-MEASURE-112
 
             if not fresh:
                 continue
@@ -481,6 +515,24 @@ class OmadaIngestService:
             self._last_emit[beacon_key] = now_mono
 
             if len(fresh) < MIN_APS_FOR_POSITION:
+                # Visible regardless of what happens next — suppressing the
+                # emission below must not also suppress visibility into the
+                # underlying AP-dropout condition (Prompt 111 §3).
+                self._log_low_ap_count(beacon_key, fresh)
+
+                # A recent exact solve is strictly better information than a
+                # fresh approximate estimate would be — the approximate x/y IS
+                # the anchor AP's own coordinate, not a real fix, and emitting
+                # it costs a multi-metre teleport (man-down, collision, the map)
+                # for no gain. Let the last exact position stand instead.
+                # Beyond the hold window this falls through and emits as before
+                # — a genuinely stale position should degrade, not freeze
+                # permanently (Prompt 111 §1).
+                if positioning_service.had_recent_exact_solve(
+                    identity["person_id"], settings.POSITION_EXACT_HOLD_SECONDS
+                ):
+                    continue
+
                 # Too few APs for a multilateration solve — anchor to the closest
                 # AP instead of dropping the reading. Hops to a new AP on its own
                 # the next time a different one reports the strongest RSSI.
@@ -518,6 +570,7 @@ class OmadaIngestService:
                     payload, floor_id=beacon_floor_id, building_id=beacon_building_id
                 )
                 if position:
+                    print(f"[MEASURE-112-SOLVE] ts={ts_measure_112} id={beacon_key} x={position.x} y={position.y} is_approximate={position.is_approximate}")  # TEMP-MEASURE-112
                     safety_service.run_all_checks(position)
                 emitted += 1
             except Exception as e:

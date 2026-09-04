@@ -25,6 +25,7 @@ class Settings:
     MIN_DWELL_SECONDS: int
     RSSI_NOISE_STD: float
     PROXIMITY_RSSI_FLOOR: float
+    POSITION_EXACT_HOLD_SECONDS: float
     LLM_PROVIDER: str             # accepts: gemini | openai | ollama | claude
     LLM_MODEL_NAME: str           # passed directly to the active provider
     RAG_SIMILARITY_FLOOR: float
@@ -77,6 +78,15 @@ def _load() -> Settings:
         # Not a hardware sensitivity limit — the APs receive well below -90 dBm.
         # Tune after ceiling-mount and tx_power calibration.
         PROXIMITY_RSSI_FLOOR=float(os.environ.get("PROXIMITY_RSSI_FLOOR", "-90.0")),
+        # How long a recent EXACT solve outranks a fresh approximate (single/dual-AP
+        # proximity) estimate for the same beacon. An approximate estimate is
+        # strictly worse information than a few-seconds-old exact solve — it's the
+        # anchor AP's own coordinate, not a real fix — so within this window the
+        # approximate estimate is suppressed rather than emitted (Prompt 111).
+        # Uncalibrated — same family as MAN_DOWN_MOVEMENT_EPSILON_M and
+        # PROXIMITY_RSSI_FLOOR, to be tuned once the AP-count/flap measurement
+        # session runs.
+        POSITION_EXACT_HOLD_SECONDS=float(os.environ.get("POSITION_EXACT_HOLD_SECONDS", "10.0")),
         LLM_PROVIDER=os.environ.get("LLM_PROVIDER", "gemini"),
         LLM_MODEL_NAME=os.environ["LLM_MODEL_NAME"],
         # Minimum cosine similarity (0-1) for a retrieved feedback example to be
