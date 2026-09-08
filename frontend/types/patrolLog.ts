@@ -11,4 +11,5 @@ export interface PatrolLogRecord {
   vigi_detected: boolean;
   compliant: boolean;
   shift_id: string;
+  cycle_id?: string;  // absent on logs predating the real-time tracker (Prompt 110)
 }

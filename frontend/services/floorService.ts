@@ -1,5 +1,6 @@
 import {
   collection,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -9,6 +10,7 @@ import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebas
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, fsdb, storage } from "@/config/firebase";
 import type { FloorRecord } from "@/types/floor";
+import type { PatrolLogRecord } from "@/types/patrolLog";
 
 async function token(): Promise<string> {
   const t = await auth.currentUser?.getIdToken();
@@ -249,6 +251,25 @@ export function subscribeToAPs(
   );
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => d.data() as APRecord));
+  });
+}
+
+// Bounded and ordered — unlike patrolLogService.ts's unbounded getDocs() (which
+// has zero callers and stays that way). There is no backend endpoint for patrol
+// logs and no floor_id/cycle_id field to filter this query on server-side, so
+// this pulls the N most recent logs across ALL floors/guards and the caller
+// filters to its own floor client-side via checkpoint_id -> AP mac membership.
+export function subscribeToPatrolLogs(
+  limitN: number,
+  callback: (logs: PatrolLogRecord[]) => void,
+): Unsubscribe {
+  const q = query(
+    collection(fsdb, "patrol_logs"),
+    orderBy("expected_arrival", "desc"),
+    limit(limitN),
+  );
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => d.data() as PatrolLogRecord));
   });
 }
 

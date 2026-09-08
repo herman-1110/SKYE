@@ -45,7 +45,7 @@ def _load() -> Settings:
         # patrol-route checkpoint (an AP). Uncalibrated guess — same family as
         # TX_POWER_DEFAULT and PATH_LOSS_EXPONENT, belongs in the RF measurement
         # session once APs are ceiling-mounted, not in a code review.
-        PATROL_PROXIMITY_RADIUS_M=float(os.environ.get("PATROL_PROXIMITY_RADIUS_M", "5.0")),
+        PATROL_PROXIMITY_RADIUS_M=float(os.environ.get("PATROL_PROXIMITY_RADIUS_M", "1.0")),
         MAN_DOWN_MINUTES=int(os.environ.get("MAN_DOWN_MINUTES", "5")),
         # Radius (m) within which a person counts as "not moving" for man-down.
         # With RSSI_NOISE_STD=3.0 and PATH_LOSS_EXPONENT=2.5 a stationary beacon's

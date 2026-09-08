@@ -8,7 +8,14 @@ import { useAPHeartbeats } from "@/hooks/useAPHeartbeats";
 import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import { useDashboardStore } from "@/store/dashboardStore";
 import WorkerMarker from "./WorkerMarker";
-import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
+import PatrolRouteOverlay from "./PatrolRouteOverlay";
+import { subscribeToAPs, subscribeToCCTVs, subscribeToPatrolLogs, type APRecord, type CCTVRecord } from "@/services/floorService";
+import type { PatrolLogRecord } from "@/types/patrolLog";
+
+// Bounded read (Prompt 114) — most-recent-200 across all floors/guards, since
+// there's no backend endpoint or floor_id field to filter this server-side.
+// Filtered down to this floor's checkpoints client-side below.
+const PATROL_LOG_FETCH_LIMIT = 200;
 
 interface Props {
   positions: PositionRecord[];
@@ -106,6 +113,8 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   // key={pathname} on <main> forces this component to remount on every route change).
   const showZones = useDashboardStore((s) => s.showZones);
   const toggleShowZones = useDashboardStore((s) => s.toggleShowZones);
+  const showPatrolRoute = useDashboardStore((s) => s.showPatrolRoute);
+  const toggleShowPatrolRoute = useDashboardStore((s) => s.toggleShowPatrolRoute);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [outerSize, setOuterSize] = useState({ w: 0, h: 0 });
 
@@ -114,6 +123,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
 
   const [aps, setAps] = useState<APRecord[]>([]);
   const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
+  const [patrolLogs, setPatrolLogs] = useState<PatrolLogRecord[]>([]);
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
   // Every beacon whose marker/circle currently contains the cursor — not just
   // one. Computed in JS (handleMapMouseMove) rather than via per-marker DOM
@@ -145,6 +155,21 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
     const unsubCCTVs = subscribeToCCTVs(buildingId, activeFloor.id, setCctvs);
     return () => { unsubAPs(); unsubCCTVs(); };
   }, [buildingId, activeFloor?.id]);
+
+  // One bounded, global subscription — patrol_logs has no floor_id field to
+  // scope this server-side (114a recon), so this pulls the N most recent
+  // across every floor/guard and gets filtered down to this floor just below.
+  useEffect(() => {
+    const unsub = subscribeToPatrolLogs(PATROL_LOG_FETCH_LIMIT, setPatrolLogs);
+    return unsub;
+  }, []);
+
+  // checkpoint_id is an AP mac, patrol_route is AP ids — join on mac, not index.
+  const floorPatrolLogs = useMemo(() => {
+    if (aps.length === 0) return [];
+    const floorMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
+    return patrolLogs.filter((l) => floorMacs.has(l.checkpoint_id.toUpperCase()));
+  }, [patrolLogs, aps]);
 
   // With w-full h-auto on the image the container height equals the image height,
   // so imageRect will always be {x:0, y:0, w, h}. The calculation stays for
@@ -255,21 +280,35 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
         }}
       />
 
-      {/* Zone toggle — pinned to the outer card corner, always visible */}
-      {zones.length > 0 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); toggleShowZones(); }}
-          className="absolute top-2 right-2 z-20 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-[10px] tracking-widest transition-colors"
-          style={{ backgroundColor: showZones ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.45)", color: showZones ? "#f59e0b" : "rgba(255,255,255,0.7)" }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {showZones
-              ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
-              : <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></>}
-          </svg>
-          ZONES
-        </button>
-      )}
+      {/* Zone / patrol-route toggles — pinned to the outer card corner, always visible */}
+      <div className="absolute top-2 right-2 z-20 flex items-center gap-1.5">
+        {activeFloor.patrol_enabled && (activeFloor.patrol_route?.length ?? 0) > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleShowPatrolRoute(); }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-[10px] tracking-widest transition-colors"
+            style={{ backgroundColor: showPatrolRoute ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.45)", color: showPatrolRoute ? "#f59e0b" : "rgba(255,255,255,0.7)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 7l8 10"/>
+            </svg>
+            ROUTE
+          </button>
+        )}
+        {zones.length > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleShowZones(); }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-[10px] tracking-widest transition-colors"
+            style={{ backgroundColor: showZones ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.45)", color: showZones ? "#f59e0b" : "rgba(255,255,255,0.7)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {showZones
+                ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
+                : <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></>}
+            </svg>
+            ZONES
+          </button>
+        )}
+      </div>
 
       {/* All data overlays — positioned within the exact image area */}
       {imageRect && (
@@ -344,6 +383,19 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
               </div>
             );
           })}
+
+          {/* Patrol route overlay — rendered before the worker svg so the live
+              position dot stays visually on top of the static route/checkpoints. */}
+          {showPatrolRoute && activeFloor.patrol_enabled && (activeFloor.patrol_route?.length ?? 0) > 0 && (
+            <PatrolRouteOverlay
+              aps={aps}
+              route={activeFloor.patrol_route ?? []}
+              logs={floorPatrolLogs}
+              positions={livePositions}
+              naturalSize={naturalSize}
+              scale={scale}
+            />
+          )}
 
           {/* Worker markers — purely visual; hover is computed in handleMapMouseMove */}
           <svg
