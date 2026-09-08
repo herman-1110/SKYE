@@ -504,3 +504,39 @@ input[type='number']::-webkit-outer-spin-button {
   color: var(--accent);
   margin-bottom: 10px;
 }
+
+/* ─── Patrol report print (Prompt 115) ──────────────────────────────────────
+   Scoped to .patrol-report-root so this never leaks into any other page's
+   print output. Forces light colours regardless of the active theme — this
+   is a compliance document that gets photocopied, not a themed UI screen. */
+@media print {
+  body * { visibility: hidden; }
+  .patrol-report-root, .patrol-report-root * { visibility: visible; }
+  .patrol-report-root {
+    position: absolute; left: 0; top: 0; width: 100%;
+    background: #ffffff !important; color: #0f172a !important;
+    /* Fixed, print-safe values for every CSS var PatrolRouteOverlay draws
+       with — independent of the active theme. Chosen for luminance spread
+       (not just hue) so the four checkpoint states stay distinguishable
+       after greyscale photocopying, not only in colour. */
+    --bg-base: #ffffff;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f3f4f6;
+    --border: #cbd5e1;
+    --success: #16a34a;         /* visited   — luminance ~111 */
+    --warning: #92400e;         /* short-dwell — luminance ~83 */
+    --danger: #7f1d1d;          /* missed    — luminance ~58 */
+    --accent: #1d4ed8;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;  /* pending/no-record — luminance ~101 */
+  }
+  .no-print { display: none !important; }
+
+  .patrol-report-root table { page-break-inside: auto; }
+  .patrol-report-root thead { display: table-header-group; }
+  .patrol-report-root tr { page-break-inside: avoid; }
+
+  /* Keep the map block together on one page where it fits; the table is
+     allowed to break across pages (with its header repeating, above). */
+  .patrol-report-map { page-break-inside: avoid; }
+}

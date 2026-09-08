@@ -11,10 +11,20 @@ interface Props {
   positions: PositionRecord[];   // all live positions; guard matching happens here. Pass [] for historical review — no position can ever be "in progress".
   naturalSize: { w: number; h: number } | null;
   scale: number | null;
+  // Review-mode detail (Prompt 115): direction arrows per segment, an arrival
+  // time label at each visited/short-dwell checkpoint, and dwell encoded in
+  // marker radius. Off by default so the live dashboard overlay (Prompt 114,
+  // already validated) renders byte-for-byte as it did before this prop existed.
+  showDetails?: boolean;
 }
 
-// Fixed marker radius for the live dashboard overlay.
+// Dwell -> marker radius, only meaningful where a real dwell was measured
+// (visited/short-dwell). Bounded so one long stop can't dwarf the map.
 const BASE_RADIUS = 10;
+const MAX_RADIUS = 16;
+function dwellRadius(dwellSeconds: number): number {
+  return Math.min(MAX_RADIUS, BASE_RADIUS + dwellSeconds / 10);
+}
 
 type CheckpointState = "visited" | "short_dwell" | "missed" | "in_progress" | "pending";
 
@@ -69,7 +79,7 @@ function checkpointState(
   return "pending";
 }
 
-export default function PatrolRouteOverlay({ aps, route, logs, positions, naturalSize, scale }: Props) {
+export default function PatrolRouteOverlay({ aps, route, logs, positions, naturalSize, scale, showDetails = false }: Props) {
   const [selectedGuardId, setSelectedGuardId] = useState<string | null>(null);
   const warnedMissingIds = useRef<Set<string>>(new Set());
 
@@ -193,11 +203,32 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
           opacity={0.6}
         />
 
+        {/* Direction arrows — one per segment, at its midpoint. Deterministic
+            geometry from known checkpoint coordinates, not a rendered "path
+            taken": there is no position history, only straight segments
+            between checkpoints (see PatrolRouteOverlay's callers). */}
+        {showDetails && points.slice(1).map((to, i) => {
+          const from = points[i];
+          const mx = (from.px + to.px) / 2;
+          const my = (from.py + to.py) / 2;
+          const angleDeg = Math.atan2(to.py - from.py, to.px - from.px) * (180 / Math.PI);
+          return (
+            <polygon
+              key={`arrow-${i}`}
+              points="-5,-4 5,0 -5,4"
+              fill="var(--accent)"
+              opacity={0.85}
+              transform={`translate(${mx},${my}) rotate(${angleDeg})`}
+            />
+          );
+        })}
+
         {routeAps.map((ap, idx) => {
           const log = logByMac.get(ap.mac.toUpperCase());
           const state = checkpointState(log, livePosition, ap);
           const { px, py } = points[idx];
-          const radius = BASE_RADIUS;
+          const hasRealDwell = showDetails && log && log.actual_arrival !== null;
+          const radius = hasRealDwell ? dwellRadius(log!.dwell_time_seconds) : BASE_RADIUS;
           return (
             <g key={ap.id}>
               {state === "in_progress" && (
@@ -212,6 +243,16 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
               >
                 {idx + 1}
               </text>
+              {showDetails && log?.actual_arrival && (
+                <text
+                  x={px} y={py + radius + 14}
+                  textAnchor="middle"
+                  fontSize={9} fontFamily="IBM Plex Mono, monospace"
+                  fill="var(--text-primary)"
+                >
+                  {new Date(log.actual_arrival).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </text>
+              )}
             </g>
           );
         })}

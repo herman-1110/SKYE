@@ -1,5 +1,14 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "patrol_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "guard_id", "order": "ASCENDING" },
+        { "fieldPath": "expected_arrival", "order": "DESCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": [
     {
       "collectionGroup": "floors",

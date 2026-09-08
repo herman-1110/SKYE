@@ -4,6 +4,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
@@ -265,6 +266,28 @@ export function subscribeToPatrolLogs(
 ): Unsubscribe {
   const q = query(
     collection(fsdb, "patrol_logs"),
+    orderBy("expected_arrival", "desc"),
+    limit(limitN),
+  );
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => d.data() as PatrolLogRecord));
+  });
+}
+
+// One guard's full log history, newest first. Requires a composite index on
+// patrol_logs (guard_id ASC, expected_arrival DESC) — see firestore.indexes.json
+// — because Firestore needs one for an equality filter combined with an
+// orderBy on a different field (verified directly against this project's
+// Firestore: without it, this query throws FailedPrecondition). Deploy via
+// `firebase deploy --only firestore:indexes` before this is used in production.
+export function subscribeToPatrolLogsByGuard(
+  guardId: string,
+  limitN: number,
+  callback: (logs: PatrolLogRecord[]) => void,
+): Unsubscribe {
+  const q = query(
+    collection(fsdb, "patrol_logs"),
+    where("guard_id", "==", guardId),
     orderBy("expected_arrival", "desc"),
     limit(limitN),
   );
