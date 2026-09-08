@@ -289,7 +289,7 @@ export default function PatrolReportsPage() {
                 <tr className="text-left text-s-muted border-b border-s-border">
                   <th className="py-1.5 pr-3">#</th>
                   <th className="py-1.5 pr-3">Checkpoint</th>
-                  <th className="py-1.5 pr-3">Expected</th>
+                  <th className="py-1.5 pr-3">Timer from</th>
                   <th className="py-1.5 pr-3">Arrived</th>
                   <th className="py-1.5 pr-3">Dwell</th>
                   <th className="py-1.5 pr-3">Required</th>
@@ -307,7 +307,9 @@ export default function PatrolReportsPage() {
                     <tr key={ap.id} className="border-b border-s-border/50">
                       <td className="py-1.5 pr-3 text-s-muted">{idx + 1}</td>
                       <td className="py-1.5 pr-3 text-s-text">{ap.name}</td>
-                      <td className="py-1.5 pr-3 text-s-muted">{log ? fmtTime(log.expected_arrival) : "—"}</td>
+                      <td className="py-1.5 pr-3 text-s-muted">
+                        {log && log.actual_arrival !== null ? fmtTime(log.expected_arrival) : "—"}
+                      </td>
                       <td className="py-1.5 pr-3 text-s-muted">
                         {log ? (log.actual_arrival ? fmtTime(log.actual_arrival) : "Not reached") : "—"}
                       </td>
