@@ -463,10 +463,6 @@ class OmadaIngestService:
             }
             buf.readings = fresh
 
-            # TEMP-MEASURE-112: every flush, unconditionally — remove via grep once the capture is done
-            ts_measure_112 = utcnow_iso()  # TEMP-MEASURE-112
-            print(f"[MEASURE-112] ts={ts_measure_112} id={beacon_key} ap_count={len(fresh)} aps={sorted(fresh.keys())}")  # TEMP-MEASURE-112
-
             if not fresh:
                 continue
 
@@ -570,7 +566,6 @@ class OmadaIngestService:
                     payload, floor_id=beacon_floor_id, building_id=beacon_building_id
                 )
                 if position:
-                    print(f"[MEASURE-112-SOLVE] ts={ts_measure_112} id={beacon_key} x={position.x} y={position.y} is_approximate={position.is_approximate}")  # TEMP-MEASURE-112
                     safety_service.run_all_checks(position)
                 emitted += 1
             except Exception as e:

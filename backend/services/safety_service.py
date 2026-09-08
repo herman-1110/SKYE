@@ -94,13 +94,34 @@ class SafetyService:
 
         anchor_x, anchor_y, since_iso, anchor_is_approximate = prev
 
-        # An approximate position's x/y is the anchor AP's own coordinate, not
-        # a comparable fix to an exact solve's x/y (or vice versa). Comparing
-        # across a type transition would read as a multi-metre teleport and
-        # falsely reset the stillness clock. Leave the anchor and clock
-        # untouched — this reading is neither confirmed movement nor confirmed
-        # stillness, so it contributes nothing either way (Prompt 111 §2).
+        # Asymmetric on purpose (Prompt 113 — fixes a real regression from
+        # Prompt 111's symmetric version). An approximate position's x/y is
+        # the anchor AP's own coordinate, not a comparable fix to an exact
+        # solve's x/y — comparing them reads as a multi-metre teleport. But
+        # the anchor must be allowed to UPGRADE from approximate to exact:
+        # the only two write sites are cold-start (unreachable once an anchor
+        # exists) and the movement-reset below (unreachable while types keep
+        # mismatching), so a symmetric guard permanently locks the anchor to
+        # whichever type happened to seed it first. On real hardware the
+        # first-ever flush after process start almost always seeds
+        # approximate (only one AP has posted yet) — that anchor would then
+        # reject every future exact solve forever, and man-down could never
+        # fire. Downgrading (exact anchor + approximate current) stays
+        # rejected: an approximate reading is never better information than
+        # an exact anchor already holds.
+        if anchor_is_approximate and not current.is_approximate:
+            # Upgrade. Re-seed from here, not from since_iso — the clock
+            # deliberately restarts. Before this exact solve there was no
+            # real position to measure stillness against; preserving the old
+            # since_iso would let a moving person accumulate stillness they
+            # never earned. A person already motionless at startup simply
+            # waits man_down_minutes from their first exact solve rather than
+            # from first sighting — an accepted, correct cost.
+            _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
+            return None
         if current.is_approximate != anchor_is_approximate:
+            # Exact anchor + approximate current: never downgrade. Leave
+            # anchor and clock untouched (Prompt 111 §2, unchanged).
             return None
 
         moved = math.hypot(current.x - anchor_x, current.y - anchor_y)
