@@ -18,3 +18,9 @@ class PatrolLogRecord:
     shift_id: str
     cycle_id: str = ""  # groups checkpoint visits into one real-time patrol lap;
                         # "" for pre-existing/simulated logs that predate this field
+    # True only for a checkpoint the time-boxed window closed before reaching
+    # (Prompt 122) — distinct from a genuine skip (actual_arrival is None with
+    # this False, unchanged meaning). Absent/False on every log written before
+    # Prompt 122 — those keep rendering under the old wrap-model semantics,
+    # by construction, since this field didn't exist yet.
+    not_in_window: bool = False

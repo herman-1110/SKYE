@@ -32,6 +32,7 @@ class FloorRepository:
             image_height_px=int(data["image_height_px"]) if data.get("image_height_px") else None,
             patrol_enabled=bool(data.get("patrol_enabled", False)),
             patrol_route=list(data.get("patrol_route", [])),
+            patrol_interval_minutes=int(data.get("patrol_interval_minutes", 10)),
             # Not Firestore data — always the live global setting, not whatever
             # was stored on the document (Prompt 117 single-source-of-truth).
             patrol_proximity_radius_m=settings.PATROL_PROXIMITY_RADIUS_M,
@@ -102,10 +103,12 @@ class FloorRepository:
         floor_id: str,
         patrol_enabled: bool,
         patrol_route: List[str],
+        patrol_interval_minutes: int,
     ) -> None:
         self._col(building_id).document(floor_id).update({
             "patrol_enabled": patrol_enabled,
             "patrol_route": patrol_route,
+            "patrol_interval_minutes": patrol_interval_minutes,
         })
 
 

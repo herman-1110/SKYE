@@ -256,21 +256,79 @@ class SafetyService:
     # ------------------------------------------------------------------
     # FR5 / UC3 — Patrol compliance
     # ------------------------------------------------------------------
-    def check_patrol_compliance(self, patrol_log: PatrolLogRecord) -> Optional[AlertRecord]:
-        """Alert if guard missed a checkpoint or dwell time is below the required minimum."""
-        violation = (
+    def is_patrol_violation(self, patrol_log: PatrolLogRecord) -> bool:
+        """Pure per-visit violation check, no alert side-effect (Prompt 123).
+        Shared by check_patrol_compliance() (the older one-shot alerting path)
+        and the real-time tracker, which uses it to set each individual log
+        record's `compliant` flag — the raw per-visit record — without
+        itself deciding whether to alert; see check_patrol_window_compliance().
+
+        A not_in_window record (Prompt 122) means the checkpoint's time-boxed
+        window closed before it was reached — never a violation regardless of
+        actual_arrival/dwell (both are always their zero/None defaults on
+        this kind of record anyway).
+        """
+        if patrol_log.not_in_window:
+            return False
+        return (
             patrol_log.actual_arrival is None
             or patrol_log.dwell_time_seconds < patrol_log.min_dwell_required
         )
-        if not violation:
-            return None
 
+    def check_patrol_compliance(self, patrol_log: PatrolLogRecord) -> Optional[AlertRecord]:
+        """Alert immediately if guard missed a checkpoint or dwell time is
+        below the required minimum. Used by the older one-shot simulation
+        path (simulation_events.py) — one visit is the whole state there, no
+        window/multi-lap concept exists. The real-time tracker (Prompt 123)
+        no longer calls this per-visit; see check_patrol_window_compliance().
+        """
+        if not self.is_patrol_violation(patrol_log):
+            return None
+        cause = "missed_checkpoint" if patrol_log.actual_arrival is None else "short_dwell"
         record = AlertRecord(
             alert_id=str(uuid.uuid4()),
             alert_type="patrol_violation",
             person_id=patrol_log.guard_id,
             zone=patrol_log.checkpoint_name,
             timestamp=utcnow_iso(),
+            cause=cause,
+        )
+        alert_repository.save(record)
+        return record
+
+    def check_patrol_window_compliance(
+        self, guard_id: str, checkpoint_name: str, visits: List[PatrolLogRecord],
+    ) -> Optional[AlertRecord]:
+        """Fire at most one patrol_violation for one checkpoint across an
+        entire time-boxed window (Prompt 123) — the replacement for the old
+        once-per-visit discipline (v20 §10), which stopped bounding anything
+        once 122 made looping within a window normal (hardware confirmed one
+        window with 9 real visits across 3 checkpoints).
+
+        REPLACEMENT INVARIANT for v20 §10's "check_patrol_compliance() runs
+        exactly once per completed checkpoint visit": a patrol_violation
+        alert fires at most once per checkpoint per window, decided at
+        window close against that checkpoint's BEST visit — a compliant
+        visit beats a non-compliant one; among non-compliant, the longest
+        dwell wins; tie-broken by expected_arrival for determinism (mirrors
+        the frontend's identical selection in patrolLogOrder.ts). Per-visit
+        `compliant` on each individual PatrolLogRecord is unchanged — only
+        the alert decision moved to window scope. `visits` must be every log
+        closed for this checkpoint this window, including any not_in_window
+        backfill — is_patrol_violation() already excludes those from ever
+        winning "best" unless they're the only entry.
+        """
+        best = min(visits, key=lambda v: (0 if v.compliant else 1, -v.dwell_time_seconds, v.expected_arrival))
+        if best.compliant:
+            return None
+        cause = "missed_checkpoint" if best.actual_arrival is None else "short_dwell"
+        record = AlertRecord(
+            alert_id=str(uuid.uuid4()),
+            alert_type="patrol_violation",
+            person_id=guard_id,
+            zone=checkpoint_name,
+            timestamp=utcnow_iso(),
+            cause=cause,
         )
         alert_repository.save(record)
         return record

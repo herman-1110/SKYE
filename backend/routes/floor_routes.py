@@ -130,6 +130,7 @@ def deactivate_floor(
 class PatrolConfigRequest(BaseModel):
     patrol_enabled: bool
     patrol_route: List[str]
+    patrol_interval_minutes: int = 10
 
 
 @router.patch("/{floor_id}/patrol")
@@ -139,9 +140,11 @@ def update_patrol_config(
     body: PatrolConfigRequest,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    """Save patrol enabled flag and ordered AP route for this floor. Admin only."""
+    """Save patrol enabled flag, ordered AP route, and the time-boxed cycle
+    interval (Prompt 122) for this floor. Admin only."""
     floor_repository.update_patrol_config(
-        building_id, floor_id, body.patrol_enabled, body.patrol_route
+        building_id, floor_id, body.patrol_enabled, body.patrol_route,
+        body.patrol_interval_minutes,
     )
     return {"status": "ok"}
 

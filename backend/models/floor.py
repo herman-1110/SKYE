@@ -17,6 +17,12 @@ class FloorRecord:
     image_height_px: Optional[int] = None
     patrol_enabled: bool = False
     patrol_route: List[str] = field(default_factory=list)
+    # Per-floor, not a settings.py global (Prompt 122) — "suit the size of the
+    # space" is per-floor by definition. Real Firestore data, unlike
+    # patrol_proximity_radius_m below. Default 10: observed lap time ~2 min,
+    # straddle probability is roughly lap/window, so 10 min keeps splitting
+    # rare (~25%) without delaying reports the way a much longer window would.
+    patrol_interval_minutes: int = 10
     # Global backend setting (config/settings.py), not per-floor Firestore data —
     # riding along on this existing floor->frontend crossing (Prompt 117) instead
     # of a second hardcoded frontend copy or a dedicated settings endpoint.

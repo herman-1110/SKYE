@@ -58,12 +58,19 @@ from utils.timestamp_utils import seconds_between, utcnow_iso
 # never hit Firestore directly for route/AP resolution.
 _FLOOR_CACHE_TTL_S = 30.0
 
+# Soft-close cap (Prompt 122): once the window has expired AND this many extra
+# seconds have passed, close the cycle even if the guard is still standing
+# inside a checkpoint zone. Without this, a guard stopped at the last
+# checkpoint for a long break could hold one window open indefinitely.
+_SOFT_CLOSE_CAP_S = 120.0
+
 
 @dataclass
 class _FloorPatrolContext:
     loaded_at: float
     patrol_enabled: bool
     route_aps: List[AccessPoint]  # resolved, in patrol_route order; unresolvable ids dropped
+    interval_minutes: int         # per-floor cycle window (Prompt 122), FloorRecord.patrol_interval_minutes
 
 
 @dataclass
@@ -75,6 +82,13 @@ class _GuardCycleState:
     current_entered_at: Optional[str] = None
     last_departed_at: Optional[str] = None       # feeds the next checkpoint's expected_arrival
     logged_indices: Set[int] = field(default_factory=set)
+    # route index -> every closed PatrolLogRecord for that checkpoint this
+    # window (Prompt 123) — 122 made revisiting a checkpoint within a window
+    # normal, so a checkpoint can accumulate several real visits before the
+    # window closes. Evaluated once, at window close, to decide whether that
+    # checkpoint's BEST visit still counts as a violation — see
+    # safety_service.check_patrol_window_compliance().
+    visits: Dict[int, List[PatrolLogRecord]] = field(default_factory=dict)
 
 
 class PatrolTrackerService:
@@ -109,6 +123,7 @@ class PatrolTrackerService:
             loaded_at=time.monotonic(),
             patrol_enabled=floor.patrol_enabled,
             route_aps=route_aps,
+            interval_minutes=floor.patrol_interval_minutes,
         )
         self._floor_cache[key] = ctx
         return ctx
@@ -201,10 +216,70 @@ class PatrolTrackerService:
             + (" DIVERGED" if diverged_119 else "")
         )  # TEMP-MEASURE-119
 
+        now = utcnow_iso()
+
+        # Time-boxed cycle close (Prompt 122) — replaces the old index-based
+        # wrap trigger entirely. Revisiting a checkpoint within one window is
+        # now normal and must never itself start a new cycle; only the clock
+        # does. Soft close: don't cut a live visit short just because the
+        # window expired — wait until the guard is between checkpoints,
+        # unless the hard cap has also elapsed (a stationary guard must not
+        # hold a window open forever). is_fresh guard is a cheap skip, not a
+        # correctness requirement: a just-created state's elapsed time is
+        # ~0s and could never be expired anyway.
+        if not is_fresh:
+            elapsed_s = seconds_between(state.cycle_started_at, now)
+            window_s = ctx.interval_minutes * 60
+            window_expired = elapsed_s >= window_s
+            hard_capped = elapsed_s >= window_s + _SOFT_CLOSE_CAP_S
+            if window_expired and (candidate is None or hard_capped):
+                if state.current_index is not None:
+                    self._close_visit(
+                        state, ctx.route_aps, state.current_index,
+                        actual_arrival=state.current_entered_at, departed_at=now,
+                    )
+                # Every route index never reached this window is not_in_window
+                # (Prompt 122 §3) — the window ran out, not a demonstrated
+                # skip. logged_indices only ever grows via _close_visit, so
+                # every index below the highest one reached is already in it;
+                # this loop only ever backfills genuinely never-reached ones.
+                for idx in range(len(ctx.route_aps)):
+                    if idx not in state.logged_indices:
+                        self._close_visit(
+                            state, ctx.route_aps, idx,
+                            actual_arrival=None, departed_at=now, not_in_window=True,
+                        )
+
+                # Window-scope alerting (Prompt 123) — replaces the old
+                # once-per-visit discipline. Every route index has at least
+                # one entry in state.visits by this point (either a real/skip
+                # close above or in an earlier iteration of this same window,
+                # or the not_in_window backfill just above), so this covers
+                # every checkpoint exactly once per window. Local import:
+                # same decoupling reason as _close_visit()'s.
+                from services.safety_service import safety_service
+                for idx, visits in state.visits.items():
+                    ap = ctx.route_aps[idx]
+                    safety_service.check_patrol_window_compliance(
+                        state.person_id, ap.name, visits,
+                    )
+
+                state = _GuardCycleState(
+                    person_id=position.person_id,
+                    cycle_id=str(uuid.uuid4()),
+                    cycle_started_at=now,
+                )
+                self._states[key] = state
+                is_fresh = True
+                # candidate itself doesn't depend on cycle timing, only on
+                # current_index for hysteresis — the fresh state's
+                # current_index is None, which is exactly what was already
+                # passed into _nearest_checkpoint_index's hysteresis branch
+                # further up whenever state.current_index was already None,
+                # so re-resolving would return the same value. Safe to reuse.
+
         if candidate == state.current_index:
             return  # still inside the same checkpoint zone — dwell keeps accruing
-
-        now = utcnow_iso()
 
         if state.current_index is not None:
             # Close out the checkpoint the guard is leaving, using the OLD
@@ -221,30 +296,19 @@ class PatrolTrackerService:
         if candidate is None:
             return  # departed a checkpoint, not yet arrived at another
 
-        highest_logged = max(state.logged_indices) if state.logged_indices else -1
-        wrapped = candidate <= highest_logged
-
-        if wrapped:
-            # Full-loop completion (or an out-of-order return): start a fresh
-            # cycle rather than treating this as a skip of everything after
-            # the highest index.
-            state = _GuardCycleState(
-                person_id=position.person_id,
-                cycle_id=str(uuid.uuid4()),
-                cycle_started_at=now,
-            )
-            self._states[key] = state
-        elif not is_fresh:
+        if not is_fresh:
             # Cold start (is_fresh) never fabricates skips for checkpoints that
             # may have been visited before this process started observing this
             # guard on this floor — mirrors check_man_down()'s cold-start
             # seed-and-start behaviour, no retroactive penalty for unknown
-            # prior state.
+            # prior state. Also true immediately after a time-box close just
+            # above: a brand new window must not fabricate skips for whatever
+            # the previous window left unreached (Prompt 122).
             for idx in range(0, candidate):
                 if idx not in state.logged_indices:
                     self._close_visit(
                         state, ctx.route_aps, idx,
-                        actual_arrival=None, departed_at=now,
+                        actual_arrival=None, departed_at=now, not_in_window=False,
                     )
 
         state.current_index = candidate
@@ -262,6 +326,7 @@ class PatrolTrackerService:
         index: int,
         actual_arrival: Optional[str],
         departed_at: str,
+        not_in_window: bool = False,
     ) -> None:
         # local import: keeps safety_service<->patrol_tracker_service decoupled
         # at module-load time, same pattern zone_service uses for
@@ -294,12 +359,18 @@ class PatrolTrackerService:
             compliant=False,  # placeholder, corrected below
             shift_id="",       # no Shift model exists — see module docstring
             cycle_id=state.cycle_id,
+            not_in_window=not_in_window,
         )
 
-        alert = safety_service.check_patrol_compliance(record)
-        record.compliant = alert is None
+        # Per-visit compliant is still computed here, once per completed
+        # visit, unchanged (Prompt 123) — this is the raw record. Whether an
+        # alert fires is decided separately, once per checkpoint at window
+        # close: see check_patrol_progress()'s window-close block and
+        # safety_service.check_patrol_window_compliance().
+        record.compliant = not safety_service.is_patrol_violation(record)
         patrol_log_repository.save(record)
         state.logged_indices.add(index)
+        state.visits.setdefault(index, []).append(record)
 
 
 patrol_tracker_service = PatrolTrackerService()
