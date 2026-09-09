@@ -16,6 +16,7 @@ class Settings:
     PATH_LOSS_EXPONENT: float
     TX_POWER_DEFAULT: float
     PATROL_PROXIMITY_RADIUS_M: float
+    PATROL_PROXIMITY_EXIT_MARGIN_M: float
     MAN_DOWN_MINUTES: int
     MAN_DOWN_MOVEMENT_EPSILON_M: float
     MAN_DOWN_STALE_SECONDS: float
@@ -46,6 +47,14 @@ def _load() -> Settings:
         # TX_POWER_DEFAULT and PATH_LOSS_EXPONENT, belongs in the RF measurement
         # session once APs are ceiling-mounted, not in a code review.
         PATROL_PROXIMITY_RADIUS_M=float(os.environ.get("PATROL_PROXIMITY_RADIUS_M", "1.0")),
+        # Extra distance (m) beyond PATROL_PROXIMITY_RADIUS_M a guard must exceed
+        # before an already-entered checkpoint counts as "departed" (Prompt 117).
+        # Enter-at-radius / exit-at-radius+margin hysteresis, targeting solve
+        # noise flapping in and out of a checkpoint's own zone right at its
+        # boundary — confirmed as the cause of 59/69 single-log phantom cycles
+        # in the 117a capture. Uncalibrated — same family as
+        # PATROL_PROXIMITY_RADIUS_M, to be tuned once APs are ceiling-mounted.
+        PATROL_PROXIMITY_EXIT_MARGIN_M=float(os.environ.get("PATROL_PROXIMITY_EXIT_MARGIN_M", "0.5")),
         MAN_DOWN_MINUTES=int(os.environ.get("MAN_DOWN_MINUTES", "5")),
         # Radius (m) within which a person counts as "not moving" for man-down.
         # With RSSI_NOISE_STD=3.0 and PATH_LOSS_EXPONENT=2.5 a stationary beacon's

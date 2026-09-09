@@ -114,7 +114,24 @@ class PatrolTrackerService:
         return ctx
 
     @staticmethod
-    def _nearest_checkpoint_index(x: float, y: float, route_aps: List[AccessPoint]) -> Optional[int]:
+    def _nearest_checkpoint_index(
+        x: float, y: float, route_aps: List[AccessPoint], current_index: Optional[int] = None,
+    ) -> Optional[int]:
+        """Enter a checkpoint's zone at PATROL_PROXIMITY_RADIUS_M; once inside,
+        require exceeding radius + PATROL_PROXIMITY_EXIT_MARGIN_M before
+        registering a departure (Prompt 117) — even if some other checkpoint is
+        nominally nearer by raw distance. Without this, solve noise landing a
+        hair outside the zone (a None candidate, since nothing else is within
+        radius either) immediately closes the visit; re-entry a moment later
+        mints a brand-new cycle instead of resuming — confirmed as the cause of
+        59/69 single-log phantom cycles in the 117a capture.
+        """
+        if current_index is not None and 0 <= current_index < len(route_aps):
+            cur_ap = route_aps[current_index]
+            cur_dist = math.hypot(x - cur_ap.x_m, y - cur_ap.y_m)
+            if cur_dist <= settings.PATROL_PROXIMITY_RADIUS_M + settings.PATROL_PROXIMITY_EXIT_MARGIN_M:
+                return current_index
+
         best_idx: Optional[int] = None
         best_dist = float("inf")
         for idx, ap in enumerate(route_aps):
@@ -141,8 +158,6 @@ class PatrolTrackerService:
         if ctx is None or not ctx.patrol_enabled or not ctx.route_aps:
             return
 
-        candidate = self._nearest_checkpoint_index(position.x, position.y, ctx.route_aps)
-
         key = (position.person_id, position.floor_id)
         state = self._states.get(key)
         is_fresh = state is None
@@ -153,6 +168,8 @@ class PatrolTrackerService:
                 cycle_started_at=utcnow_iso(),
             )
             self._states[key] = state
+
+        candidate = self._nearest_checkpoint_index(position.x, position.y, ctx.route_aps, state.current_index)
 
         if candidate == state.current_index:
             return  # still inside the same checkpoint zone — dwell keeps accruing

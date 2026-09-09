@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
+from config.settings import settings
 from models.floor import FloorRecord
 
 
@@ -31,6 +32,9 @@ class FloorRepository:
             image_height_px=int(data["image_height_px"]) if data.get("image_height_px") else None,
             patrol_enabled=bool(data.get("patrol_enabled", False)),
             patrol_route=list(data.get("patrol_route", [])),
+            # Not Firestore data — always the live global setting, not whatever
+            # was stored on the document (Prompt 117 single-source-of-truth).
+            patrol_proximity_radius_m=settings.PATROL_PROXIMITY_RADIUS_M,
         )
 
     def save(self, floor: FloorRecord) -> FloorRecord:

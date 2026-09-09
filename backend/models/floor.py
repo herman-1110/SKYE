@@ -17,3 +17,7 @@ class FloorRecord:
     image_height_px: Optional[int] = None
     patrol_enabled: bool = False
     patrol_route: List[str] = field(default_factory=list)
+    # Global backend setting (config/settings.py), not per-floor Firestore data —
+    # riding along on this existing floor->frontend crossing (Prompt 117) instead
+    # of a second hardcoded frontend copy or a dedicated settings endpoint.
+    patrol_proximity_radius_m: float = 0.0
