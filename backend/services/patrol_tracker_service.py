@@ -171,6 +171,36 @@ class PatrolTrackerService:
 
         candidate = self._nearest_checkpoint_index(position.x, position.y, ctx.route_aps, state.current_index)
 
+        # TEMP-MEASURE-119: emitted unconditionally, before the suppress-return
+        # below, so suppressed evaluations stay visible same as MEASURE-112.
+        # old_candidate is the bare pre-117 check (radius only, no hysteresis,
+        # no current_index awareness) computed here for comparison only -
+        # never acted on. ASCII only, no box-drawing/em-dash/arrow characters.
+        prev_index_119 = state.current_index
+        dists_119 = [math.hypot(position.x - ap.x_m, position.y - ap.y_m) for ap in ctx.route_aps]
+        old_best_idx_119 = None
+        old_best_dist_119 = float("inf")
+        for idx_119, d_119 in enumerate(dists_119):
+            if d_119 < old_best_dist_119:
+                old_best_dist_119 = d_119
+                old_best_idx_119 = idx_119
+        old_candidate_119 = (
+            old_best_idx_119
+            if old_best_idx_119 is not None and old_best_dist_119 <= settings.PATROL_PROXIMITY_RADIUS_M
+            else None
+        )
+        suppressed_119 = (candidate == prev_index_119) and (old_candidate_119 != prev_index_119)
+        diverged_119 = candidate != old_candidate_119
+        dist_str_119 = " ".join(f"cp{i}={d:.3f}" for i, d in enumerate(dists_119))
+        print(
+            f"[MEASURE-119] ts={utcnow_iso()} person_id={position.person_id} "
+            f"floor_id={position.floor_id} x={position.x:.4f} y={position.y:.4f} "
+            f"is_approximate={position.is_approximate} dists=[{dist_str_119}] "
+            f"current_index={prev_index_119} new_candidate={candidate} "
+            f"old_candidate={old_candidate_119} suppressed_transition={suppressed_119}"
+            + (" DIVERGED" if diverged_119 else "")
+        )  # TEMP-MEASURE-119
+
         if candidate == state.current_index:
             return  # still inside the same checkpoint zone — dwell keeps accruing
 
