@@ -5,6 +5,7 @@ from firebase_admin import db as rtdb
 from config.beacon_registry import make_ibeacon_key
 from models.beacon import Beacon
 from repositories.beacon_repository import beacon_repository
+from repositories.position_repository import position_repository
 from utils.timestamp_utils import utcnow_iso
 
 
@@ -64,9 +65,18 @@ class BeaconService:
         return updated
 
     def delete(self, beacon_id: str) -> bool:
+        beacon = beacon_repository.get_by_id(beacon_id)
         ok = beacon_repository.delete(beacon_id)
         if ok:
             self._invalidate_cache()
+            # Drop the live position too, or a deleted beacon's person keeps
+            # showing up in the dashboard's Personnel list / map markers until
+            # something else happens to overwrite that RTDB node.
+            if beacon and beacon.person_id:
+                try:
+                    position_repository.delete(beacon.person_id)
+                except Exception as e:
+                    print(f"[BEACON] WARNING: RTDB position delete failed for {beacon.person_id}: {e}")
         return ok
 
     def _invalidate_cache(self) -> None:
