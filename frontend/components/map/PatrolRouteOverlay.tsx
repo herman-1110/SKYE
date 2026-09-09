@@ -190,27 +190,23 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
   const points = routeAps.map(toPixel);
   const polylinePoints = points.map((p) => `${p.px},${p.py}`).join(" ");
 
-  // Vague connective guide between checkpoints, not a rendered path taken
-  // (Prompt 118 §1) — muted border colour, thin stroke, low opacity.
-  const routeLine = (
-    <polyline
-      points={polylinePoints}
-      fill="none"
-      stroke="var(--border)"
-      strokeWidth={1}
-      strokeDasharray="6 5"
-      opacity={0.35}
-    />
-  );
-
   if (lineOnly) {
+    // Dashboard mode only (Prompt 118 §1) — vague connective guide, not a
+    // rendered path taken: muted border colour, thin stroke, low opacity.
     return (
       <svg
         viewBox={`0 0 ${naturalSize.w} ${naturalSize.h}`}
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
         aria-label="Patrol route"
       >
-        {routeLine}
+        <polyline
+          points={polylinePoints}
+          fill="none"
+          stroke="var(--border)"
+          strokeWidth={1}
+          strokeDasharray="6 5"
+          opacity={0.35}
+        />
       </svg>
     );
   }
@@ -221,7 +217,16 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
       style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
       aria-label="Patrol route overlay"
     >
-        {routeLine}
+        {/* Report/review mode — original bolder dashed guide, unchanged by
+            Prompt 118's dashboard-only subtle-line request. */}
+        <polyline
+          points={polylinePoints}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={2}
+          strokeDasharray="6 5"
+          opacity={0.6}
+        />
 
         {/* Direction arrows — one per segment, at its midpoint. Deterministic
             geometry from known checkpoint coordinates, not a rendered "path
