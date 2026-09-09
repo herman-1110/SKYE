@@ -54,3 +54,7 @@ backend/serviceAccountKey.json
 Thumbs.db
 .claude/
 
+
+skye-measure*.log
+tsconfig.tsbuildinfo
+payload.json

@@ -11,6 +11,7 @@ import {
 import type { PatrolLogRecord } from "@/types/patrolLog";
 import SelectDropdown from "@/components/shared/SelectDropdown";
 import PatrolRouteOverlay from "@/components/map/PatrolRouteOverlay";
+import { sortPatrolLogsDeterministically } from "@/utils/patrolLogOrder";
 
 // Bounded reads throughout (Prompt 115) — no unbounded getDocs() anywhere.
 // DISCOVERY_LOG_LIMIT: enough of the most-recent global activity to derive
@@ -152,15 +153,24 @@ export default function PatrolReportsPage() {
     [activeFloor?.patrol_route, apById],
   );
 
+  // Deterministic ordering (Prompt 121) before the mac-keyed map below —
+  // relying on Firestore/JS's arbitrary tie-break on expected_arrival would
+  // let this map's construction order (and thus which log wins on a
+  // duplicate-mac collision) vary between loads.
+  const sortedCycleLogs = useMemo(
+    () => sortPatrolLogsDeterministically(selectedCycle?.logs ?? [], routeAps),
+    [selectedCycle, routeAps],
+  );
+
   const logByMac = useMemo(() => {
     const m = new Map<string, PatrolLogRecord>();
-    for (const log of selectedCycle?.logs ?? []) m.set(log.checkpoint_id.toUpperCase(), log);
+    for (const log of sortedCycleLogs) m.set(log.checkpoint_id.toUpperCase(), log);
     return m;
-  }, [selectedCycle]);
+  }, [sortedCycleLogs]);
 
   const loggedCount = routeAps.filter((ap) => logByMac.has(ap.mac.toUpperCase())).length;
 
-  const arrivalTimes = (selectedCycle?.logs ?? [])
+  const arrivalTimes = sortedCycleLogs
     .map((l) => l.actual_arrival)
     .filter((t): t is string => t !== null)
     .sort();

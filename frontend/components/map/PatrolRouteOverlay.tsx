@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { APRecord } from "@/services/floorService";
 import type { PatrolLogRecord } from "@/types/patrolLog";
 import type { PositionRecord } from "@/types/position";
+import { sortPatrolLogsDeterministically } from "@/utils/patrolLogOrder";
 
 interface Props {
   aps: APRecord[];
@@ -166,13 +167,22 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
     return best;
   }, [cycleGroups, activeGuardId]);
 
+  // Deterministic ordering (Prompt 121) before the mac-keyed map below —
+  // relying on Firestore/JS's arbitrary tie-break on expected_arrival would
+  // let this map's construction order (and thus which log wins on a
+  // duplicate-mac collision) vary between loads.
+  const sortedCycleLogs = useMemo(
+    () => sortPatrolLogsDeterministically(currentCycle?.logs ?? [], routeAps),
+    [currentCycle, routeAps],
+  );
+
   const logByMac = useMemo(() => {
     const m = new Map<string, PatrolLogRecord>();
-    for (const log of currentCycle?.logs ?? []) {
+    for (const log of sortedCycleLogs) {
       m.set(log.checkpoint_id.toUpperCase(), log);
     }
     return m;
-  }, [currentCycle]);
+  }, [sortedCycleLogs]);
 
   const livePosition = useMemo(
     () => positions.find((p) => p.person_type === "guard" && p.person_id === activeGuardId) ?? null,
