@@ -16,6 +16,11 @@ interface Props {
   // marker radius. Off by default so the live dashboard overlay (Prompt 114,
   // already validated) renders byte-for-byte as it did before this prop existed.
   showDetails?: boolean;
+  // Dashboard mode (post-118): just the faint connecting line between
+  // checkpoints, no checkpoint state markers, no live-position marker, no
+  // guard/cycle grouping. The full tracking overlay stays on the patrol
+  // report page only. Takes priority over showDetails.
+  lineOnly?: boolean;
 }
 
 // Dwell -> marker radius, only meaningful where a real dwell was measured
@@ -79,7 +84,7 @@ function checkpointState(
   return "pending";
 }
 
-export default function PatrolRouteOverlay({ aps, route, logs, positions, naturalSize, scale, showDetails = false }: Props) {
+export default function PatrolRouteOverlay({ aps, route, logs, positions, naturalSize, scale, showDetails = false, lineOnly = false }: Props) {
   const [selectedGuardId, setSelectedGuardId] = useState<string | null>(null);
   const warnedMissingIds = useRef<Set<string>>(new Set());
 
@@ -185,23 +190,38 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
   const points = routeAps.map(toPixel);
   const polylinePoints = points.map((p) => `${p.px},${p.py}`).join(" ");
 
-  const loggedCount = routeAps.filter((ap) => logByMac.has(ap.mac.toUpperCase())).length;
+  // Vague connective guide between checkpoints, not a rendered path taken
+  // (Prompt 118 §1) — muted border colour, thin stroke, low opacity.
+  const routeLine = (
+    <polyline
+      points={polylinePoints}
+      fill="none"
+      stroke="var(--border)"
+      strokeWidth={1}
+      strokeDasharray="6 5"
+      opacity={0.35}
+    />
+  );
 
-  return (
-    <>
+  if (lineOnly) {
+    return (
       <svg
         viewBox={`0 0 ${naturalSize.w} ${naturalSize.h}`}
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-        aria-label="Patrol route overlay"
+        aria-label="Patrol route"
       >
-        <polyline
-          points={polylinePoints}
-          fill="none"
-          stroke="var(--accent)"
-          strokeWidth={2}
-          strokeDasharray="6 5"
-          opacity={0.6}
-        />
+        {routeLine}
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      viewBox={`0 0 ${naturalSize.w} ${naturalSize.h}`}
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+      aria-label="Patrol route overlay"
+    >
+        {routeLine}
 
         {/* Direction arrows — one per segment, at its midpoint. Deterministic
             geometry from known checkpoint coordinates, not a rendered "path
@@ -256,37 +276,19 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
             </g>
           );
         })}
-      </svg>
 
-      {/* Cycle info + guard selector — HTML, not SVG, matching FloorMap's own
-          badge/tooltip convention (positioned divs over the image, not canvas text). */}
-      <div
-        className="absolute top-2 left-2 z-20 flex items-center gap-2 px-2.5 py-1.5 rounded-lg font-mono text-[10px] tracking-wide"
-        style={{ backgroundColor: "rgba(0,0,0,0.45)", color: "rgba(255,255,255,0.85)", pointerEvents: "auto" }}
-      >
-        {distinctGuardIds.length > 1 && (
-          <select
-            value={activeGuardId ?? ""}
-            onChange={(e) => setSelectedGuardId(e.target.value)}
-            className="bg-transparent border border-white/20 rounded px-1 py-0.5 text-[10px]"
-            style={{ colorScheme: "dark" }}
-          >
-            {distinctGuardIds.map((gid) => (
-              <option key={gid} value={gid} style={{ color: "#000" }}>{gid}</option>
-            ))}
-          </select>
-        )}
-        {currentCycle ? (
-          <span>
-            {activeGuardId} · started {new Date(currentCycle.start).toLocaleTimeString()} ·{" "}
-            {loggedCount}/{routeAps.length} checkpoints
-          </span>
-        ) : activeGuardId ? (
-          <span>{activeGuardId} · patrol not yet started</span>
-        ) : (
-          <span>No patrol activity yet</span>
-        )}
-      </div>
-    </>
+        {/* Guard's real live position riding on the route (Prompt 118 §3) —
+            the actual solved x_m/y_m, not snapped to the nearest checkpoint
+            node. Shows correctly between checkpoints when that's genuinely
+            where they are. positions=[] on the historical report page means
+            livePosition is always null there, so this never renders in
+            review mode. */}
+        {livePosition && (
+          <g style={{ pointerEvents: "none" }}>
+            <circle cx={livePosition.x * scale} cy={livePosition.y * scale} r={9} fill="var(--accent)" fillOpacity={0.18} />
+            <circle cx={livePosition.x * scale} cy={livePosition.y * scale} r={5} fill="var(--accent)" stroke="var(--bg-base)" strokeWidth={2} />
+          </g>
+      )}
+    </svg>
   );
 }

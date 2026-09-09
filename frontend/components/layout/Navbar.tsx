@@ -3,9 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/services/authService";
 import { useAuth } from "@/hooks/useAuth";
-import { useDashboardStore } from "@/store/dashboardStore";
 import { useThemeStore } from "@/store/themeStore";
-import StatusBadge from "@/components/shared/StatusBadge";
 import { isAdminRole } from "@/types/user";
 import type { User } from "firebase/auth";
 
@@ -49,7 +47,6 @@ function GearIcon() {
 export default function Navbar({ user }: { user: User }) {
   const pathname = usePathname();
   const router = useRouter();
-  const activeShiftId = useDashboardStore((s) => s.activeShiftId);
   const { theme, toggleTheme } = useThemeStore();
   const { userRecord } = useAuth();
   const isAdmin = isAdminRole(userRecord?.role);
@@ -79,8 +76,6 @@ export default function Navbar({ user }: { user: User }) {
 
       {/* Right actions */}
       <div className="flex items-center gap-2 w-[300px] justify-end">
-        <StatusBadge status={activeShiftId ? "shift-active" : "no-shift"} />
-
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}

@@ -60,6 +60,12 @@ export default function PatrolReportsPage() {
   const [guardId, setGuardId] = useState<string | null>(null);
   const [guardLogs, setGuardLogs] = useState<PatrolLogRecord[]>([]);
   const [cycleKey, setCycleKey] = useState<string | null>(null);
+  // Bumped by the refresh button (Prompt 118 §4) to force a clean
+  // unsubscribe/resubscribe of the guard-scoped query below. The query is
+  // already a live onSnapshot subscription, so a new cycle should already
+  // appear on its own — this is a manual "definitely current" affordance,
+  // not the only path to freshness.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const activeFloor = floors.find((f) => f.id === floorId) ?? null;
 
@@ -114,7 +120,7 @@ export default function PatrolReportsPage() {
   useEffect(() => {
     if (!guardId) { setGuardLogs([]); return; }
     return subscribeToPatrolLogsByGuard(guardId, GUARD_LOG_LIMIT, setGuardLogs);
-  }, [guardId]);
+  }, [guardId, refreshKey]);
 
   const guardFloorLogs = useMemo(
     () => (aps.length === 0 ? [] : guardLogs.filter((l) => floorMacs.has(l.checkpoint_id.toUpperCase()))),
@@ -208,7 +214,22 @@ export default function PatrolReportsPage() {
             label="Cycle" items={cycles} selectedId={cycleKey}
             getId={(c) => c.key} getLabel={(c) => fmtDate(c.start)}
             onSelect={setCycleKey}
+            scrollable
           />
+        )}
+        {guardId && (
+          <button
+            onClick={() => setRefreshKey((k) => k + 1)}
+            title="Refresh cycle list"
+            aria-label="Refresh cycle list"
+            className="h-7 w-7 flex items-center justify-center rounded-lg bg-s-elevated border border-s-border text-s-muted hover:border-s-accent hover:text-s-text transition-colors"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </button>
         )}
         <button
           onClick={() => window.print()}

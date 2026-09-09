@@ -27,8 +27,6 @@ interface DashboardState {
   // user UI preferences — survive remount when navigating between dashboard tabs
   showZones: boolean;
   toggleShowZones: () => void;
-  showPatrolRoute: boolean;
-  toggleShowPatrolRoute: () => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
@@ -50,6 +48,4 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 
   showZones: true,
   toggleShowZones: () => set((s) => ({ showZones: !s.showZones })),
-  showPatrolRoute: true,
-  toggleShowPatrolRoute: () => set((s) => ({ showPatrolRoute: !s.showPatrolRoute })),
 }));

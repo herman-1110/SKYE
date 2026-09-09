@@ -9,13 +9,7 @@ import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import { useDashboardStore } from "@/store/dashboardStore";
 import WorkerMarker from "./WorkerMarker";
 import PatrolRouteOverlay from "./PatrolRouteOverlay";
-import { subscribeToAPs, subscribeToCCTVs, subscribeToPatrolLogs, type APRecord, type CCTVRecord } from "@/services/floorService";
-import type { PatrolLogRecord } from "@/types/patrolLog";
-
-// Bounded read (Prompt 114) — most-recent-200 across all floors/guards, since
-// there's no backend endpoint or floor_id field to filter this server-side.
-// Filtered down to this floor's checkpoints client-side below.
-const PATROL_LOG_FETCH_LIMIT = 200;
+import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
 interface Props {
   positions: PositionRecord[];
@@ -113,8 +107,6 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   // key={pathname} on <main> forces this component to remount on every route change).
   const showZones = useDashboardStore((s) => s.showZones);
   const toggleShowZones = useDashboardStore((s) => s.toggleShowZones);
-  const showPatrolRoute = useDashboardStore((s) => s.showPatrolRoute);
-  const toggleShowPatrolRoute = useDashboardStore((s) => s.toggleShowPatrolRoute);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [outerSize, setOuterSize] = useState({ w: 0, h: 0 });
 
@@ -123,7 +115,6 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
 
   const [aps, setAps] = useState<APRecord[]>([]);
   const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
-  const [patrolLogs, setPatrolLogs] = useState<PatrolLogRecord[]>([]);
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
   // Every beacon whose marker/circle currently contains the cursor — not just
   // one. Computed in JS (handleMapMouseMove) rather than via per-marker DOM
@@ -155,21 +146,6 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
     const unsubCCTVs = subscribeToCCTVs(buildingId, activeFloor.id, setCctvs);
     return () => { unsubAPs(); unsubCCTVs(); };
   }, [buildingId, activeFloor?.id]);
-
-  // One bounded, global subscription — patrol_logs has no floor_id field to
-  // scope this server-side (114a recon), so this pulls the N most recent
-  // across every floor/guard and gets filtered down to this floor just below.
-  useEffect(() => {
-    const unsub = subscribeToPatrolLogs(PATROL_LOG_FETCH_LIMIT, setPatrolLogs);
-    return unsub;
-  }, []);
-
-  // checkpoint_id is an AP mac, patrol_route is AP ids — join on mac, not index.
-  const floorPatrolLogs = useMemo(() => {
-    if (aps.length === 0) return [];
-    const floorMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
-    return patrolLogs.filter((l) => floorMacs.has(l.checkpoint_id.toUpperCase()));
-  }, [patrolLogs, aps]);
 
   // With w-full h-auto on the image the container height equals the image height,
   // so imageRect will always be {x:0, y:0, w, h}. The calculation stays for
@@ -280,20 +256,8 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
         }}
       />
 
-      {/* Zone / patrol-route toggles — pinned to the outer card corner, always visible */}
+      {/* Zone toggle — pinned to the outer card corner, always visible */}
       <div className="absolute top-2 right-2 z-20 flex items-center gap-1.5">
-        {activeFloor.patrol_enabled && (activeFloor.patrol_route?.length ?? 0) > 0 && (
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleShowPatrolRoute(); }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-[10px] tracking-widest transition-colors"
-            style={{ backgroundColor: showPatrolRoute ? "rgba(245,158,11,0.15)" : "rgba(0,0,0,0.45)", color: showPatrolRoute ? "#f59e0b" : "rgba(255,255,255,0.7)" }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 7l8 10"/>
-            </svg>
-            ROUTE
-          </button>
-        )}
         {zones.length > 0 && (
           <button
             onClick={(e) => { e.stopPropagation(); toggleShowZones(); }}
@@ -384,16 +348,18 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
             );
           })}
 
-          {/* Patrol route overlay — rendered before the worker svg so the live
-              position dot stays visually on top of the static route/checkpoints. */}
-          {showPatrolRoute && activeFloor.patrol_enabled && (activeFloor.patrol_route?.length ?? 0) > 0 && (
+          {/* Patrol route line only — the full tracking overlay (checkpoint
+              state, live-position marker, guard/cycle selection) was removed
+              from the dashboard; it stays on the patrol report page. */}
+          {activeFloor.patrol_enabled && (activeFloor.patrol_route?.length ?? 0) > 0 && (
             <PatrolRouteOverlay
               aps={aps}
               route={activeFloor.patrol_route ?? []}
-              logs={floorPatrolLogs}
-              positions={livePositions}
+              logs={[]}
+              positions={[]}
               naturalSize={naturalSize}
               scale={scale}
+              lineOnly
             />
           )}
 

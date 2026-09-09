@@ -10,6 +10,7 @@ export default function SelectDropdown<T>({
   onSelect,
   disabled = false,
   placeholder = "Select…",
+  scrollable = false,
 }: {
   label?: string;
   items: T[];
@@ -19,6 +20,9 @@ export default function SelectDropdown<T>({
   onSelect: (id: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  // Caps the menu's height and scrolls instead of growing unbounded — opt-in
+  // so the common short lists (buildings, floors) render exactly as before.
+  scrollable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selected = items.find((item) => getId(item) === selectedId);
@@ -52,7 +56,7 @@ export default function SelectDropdown<T>({
         </button>
 
         {open && (
-          <ul className="dropdown-menu">
+          <ul className={`dropdown-menu${scrollable ? " dropdown-menu--scroll" : ""}`}>
             {items.map((item) => {
               const id = getId(item);
               return (

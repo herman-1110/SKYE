@@ -351,6 +351,11 @@ input[type='number']::-webkit-outer-spin-button {
   animation: dropdownFadeIn 120ms ease;
 }
 
+.dropdown-menu--scroll {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
 .dropdown-item {
   padding: 8px 12px;
   border-radius: 6px;
