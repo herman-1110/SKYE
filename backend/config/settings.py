@@ -18,6 +18,7 @@ class Settings:
     TX_POWER_DEFAULT: float
     PATROL_PROXIMITY_RADIUS_M: float
     PATROL_PROXIMITY_EXIT_MARGIN_M: float
+    PATROL_NO_PATROL_DWELL_RATIO: float
     MAN_DOWN_MINUTES: int
     MAN_DOWN_MOVEMENT_EPSILON_M: float
     MAN_DOWN_STALE_SECONDS: float
@@ -66,6 +67,16 @@ def _load() -> Settings:
         # in the 117a capture. Uncalibrated — same family as
         # PATROL_PROXIMITY_RADIUS_M, to be tuned once APs are ceiling-mounted.
         PATROL_PROXIMITY_EXIT_MARGIN_M=float(os.environ.get("PATROL_PROXIMITY_EXIT_MARGIN_M", "0.5")),
+        # Fraction of a patrol window a single checkpoint's dwell must reach
+        # before a guard who reached exactly one checkpoint this window
+        # (route length >= 2) is flagged no_patrol rather than treated as a
+        # legitimate late first arrival cut off by window close (Prompt 125).
+        # Never applied when >=2 checkpoints were reached, or on a
+        # single-checkpoint route (reaching the only checkpoint IS the
+        # patrol there). Uncalibrated — same family as
+        # PATROL_PROXIMITY_RADIUS_M, to be tuned once real multi-checkpoint
+        # window data exists.
+        PATROL_NO_PATROL_DWELL_RATIO=float(os.environ.get("PATROL_NO_PATROL_DWELL_RATIO", "0.5")),
         MAN_DOWN_MINUTES=int(os.environ.get("MAN_DOWN_MINUTES", "5")),
         # Radius (m) within which a person counts as "not moving" for man-down.
         # With RSSI_NOISE_STD=3.0 and PATH_LOSS_EXPONENT=2.5 a stationary beacon's

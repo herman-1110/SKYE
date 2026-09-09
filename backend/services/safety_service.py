@@ -149,6 +149,7 @@ class SafetyService:
             zone=current.zone,
             timestamp=now,
             approximate=current.is_approximate,
+            cause="stillness",
         )
         alert_repository.save(record)
         _last_man_down[pid] = record.timestamp
@@ -329,6 +330,73 @@ class SafetyService:
             zone=checkpoint_name,
             timestamp=utcnow_iso(),
             cause=cause,
+        )
+        alert_repository.save(record)
+        return record
+
+    def check_patrol_window_no_patrol(
+        self,
+        guard_id: str,
+        zone: str,
+        route_len: int,
+        window_s: float,
+        visits_by_checkpoint: Dict[int, List[PatrolLogRecord]],
+        last_seen_at: Optional[str],
+    ) -> Optional[AlertRecord]:
+        """Fire patrol_violation/no_patrol once per window when a guard was
+        demonstrably on the floor but never genuinely patrolled it (Prompt
+        125 — v21 §6/§9.6/§11: the parked-at-CP0 guard produces one real,
+        compliant, window-length visit and nothing else, which the
+        per-checkpoint evaluation above correctly does not treat as a
+        violation on its own).
+
+        Absence must never fire this: last_seen_at is None means no exact
+        position tick reached the tracker this window at all (genuinely
+        absent, or under 3-AP coverage — see patrol_tracker_service.py's
+        module docstring; this feature inherits that constraint, it doesn't
+        introduce it) — indistinguishable from "not here", never a
+        violation, same reasoning as a not_in_window checkpoint.
+
+        Firing condition, agreed before implementation:
+          - 0 checkpoints reached this window (despite presence): fires.
+          - exactly 1 checkpoint reached, on a route of >=2: fires only if
+            that checkpoint's best visit consumed >= PATROL_NO_PATROL_
+            DWELL_RATIO of the window — corroborates "parked" against a
+            legitimate late first arrival that a short window simply cut
+            off before a second checkpoint was reachable.
+          - a 1-checkpoint route reaching its sole checkpoint: never fires
+            — that checkpoint IS the whole patrol there.
+          - >=2 checkpoints reached: never fires, regardless of dwell. This
+            is what protects the benign straddle (122's core guarantee) —
+            categorically, not by tuning a threshold near it.
+        """
+        if last_seen_at is None:
+            return None
+
+        reached = {
+            idx for idx, visits in visits_by_checkpoint.items()
+            if any(not v.not_in_window for v in visits)
+        }
+
+        if len(reached) == 0:
+            pass  # definite no_patrol — presence with zero real visits
+        elif len(reached) == 1 and route_len >= 2:
+            idx = next(iter(reached))
+            best_dwell = max(
+                v.dwell_time_seconds for v in visits_by_checkpoint[idx] if not v.not_in_window
+            )
+            if best_dwell < window_s * settings.PATROL_NO_PATROL_DWELL_RATIO:
+                return None  # legitimate late first arrival, not parked
+        else:
+            return None  # >=2 reached, or the sole checkpoint on a 1-stop route
+
+        record = AlertRecord(
+            alert_id=str(uuid.uuid4()),
+            alert_type="patrol_violation",
+            person_id=guard_id,
+            zone=zone,
+            timestamp=utcnow_iso(),
+            cause="no_patrol",
         )
         alert_repository.save(record)
         return record

@@ -81,6 +81,15 @@ class _GuardCycleState:
     current_index: Optional[int] = None         # route index the guard is currently inside
     current_entered_at: Optional[str] = None
     last_departed_at: Optional[str] = None       # feeds the next checkpoint's expected_arrival
+    # Stamped on every exact-position tick this cycle, regardless of
+    # candidate — including ticks that never touch a checkpoint at all
+    # (Prompt 125). None means no exact tick has landed this cycle yet:
+    # the only signal that distinguishes a guard genuinely absent all
+    # window from one who was on the floor but never patrolled. Approximate
+    # positions never reach here (skipped at the top of
+    # check_patrol_progress), so this is "seen" in the same exact-only
+    # sense the rest of this service already requires.
+    last_seen_at: Optional[str] = None
     logged_indices: Set[int] = field(default_factory=set)
     # route index -> every closed PatrolLogRecord for that checkpoint this
     # window (Prompt 123) — 122 made revisiting a checkpoint within a window
@@ -264,6 +273,18 @@ class PatrolTrackerService:
                         state.person_id, ap.name, visits,
                     )
 
+                # Window-scope presence check (Prompt 125) — a question the
+                # per-checkpoint loop above structurally can't ask, since it
+                # only ever sees one checkpoint's visits at a time. Fires at
+                # most once per window, using the OLD (about-to-be-replaced)
+                # state's visits and presence stamp — see
+                # check_patrol_window_no_patrol()'s docstring for the
+                # firing condition.
+                safety_service.check_patrol_window_no_patrol(
+                    state.person_id, position.zone, len(ctx.route_aps),
+                    window_s, state.visits, state.last_seen_at,
+                )
+
                 state = _GuardCycleState(
                     person_id=position.person_id,
                     cycle_id=str(uuid.uuid4()),
@@ -277,6 +298,15 @@ class PatrolTrackerService:
                 # passed into _nearest_checkpoint_index's hysteresis branch
                 # further up whenever state.current_index was already None,
                 # so re-resolving would return the same value. Safe to reuse.
+
+        # Presence stamp (Prompt 125) — every exact tick that reaches this
+        # point, unconditionally, before the no-op early return just below.
+        # Deliberately after the window-close block above: a tick that
+        # closes one window and opens the next belongs to the NEW cycle
+        # going forward, not the one that just ended (mirrors this
+        # function's existing "window anchoring is cycle_started_at, not
+        # floor wall-clock" treatment of late/cold-started guards).
+        state.last_seen_at = now
 
         if candidate == state.current_index:
             return  # still inside the same checkpoint zone — dwell keeps accruing
