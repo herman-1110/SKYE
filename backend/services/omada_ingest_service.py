@@ -340,47 +340,58 @@ class OmadaIngestService:
         self._write_ap_heartbeat(ap_mac_colons, reporter.get("name", ""))
 
         # ── DEBUG: full raw Omada payload dump — every reporting AP ──────
+        # Off by default (Prompt 124, settings.OMADA_RAW_DUMP_ENABLED): the
+        # box-drawing characters below throw UnicodeEncodeError the moment
+        # stdout is piped under Windows' default cp1252 codepage, 400ing
+        # every AP's ingest until PYTHONIOENCODING=utf-8 is set — silently,
+        # with nothing pointing at "print statement" as the cause. Prompt 119's
+        # permanent null-RSSI counter/summary is the steady-state replacement;
+        # flip this on only for deep debugging (malformed payload shape,
+        # deviceClass/model on an unfamiliar beacon) with
+        # PYTHONIOENCODING=utf-8 set first.
+        #
         # Runs before the registration gate below: an AP that hasn't been
         # placed on a floor yet still returns "online_unregistered" and never
         # reaches the positioning pipeline, but you still want to see exactly
         # what it sent while wiring it up.
-        print("[OMADA] ═══════════════════════════════════════════════════════════")
-        print(f"[OMADA] AP REPORT from '{ap_name}' ({ap_mac_raw or 'NO MAC'})")
-        print(f"[OMADA] ── Reporter block ──")
-        for k, v in reporter.items():
-            print(f"[OMADA]     {k:12s}: {v}")
-        print(f"[OMADA] ── Reported beacons: {len(reported)} ──")
-        if not reported:
-            print("[OMADA]     (none — AP scanned no beacons this cycle)")
-        for i, b in enumerate(reported):
-            bmac     = b.get("mac", "?")
-            dclass   = b.get("deviceClass", [])
-            model    = b.get("model", "")
-            lastseen = b.get("lastseen", "?")
-            rssi_avg = (b.get("rssi") or {}).get("avg", "?")
-            ib       = b.get("ibeacon", {}) or {}
-            txpower  = b.get("txpower", "")
-            sensors  = b.get("sensors", {}) or {}
+        if settings.OMADA_RAW_DUMP_ENABLED:
+            print("[OMADA] ═══════════════════════════════════════════════════════════")
+            print(f"[OMADA] AP REPORT from '{ap_name}' ({ap_mac_raw or 'NO MAC'})")
+            print(f"[OMADA] ── Reporter block ──")
+            for k, v in reporter.items():
+                print(f"[OMADA]     {k:12s}: {v}")
+            print(f"[OMADA] ── Reported beacons: {len(reported)} ──")
+            if not reported:
+                print("[OMADA]     (none — AP scanned no beacons this cycle)")
+            for i, b in enumerate(reported):
+                bmac     = b.get("mac", "?")
+                dclass   = b.get("deviceClass", [])
+                model    = b.get("model", "")
+                lastseen = b.get("lastseen", "?")
+                rssi_avg = (b.get("rssi") or {}).get("avg", "?")
+                ib       = b.get("ibeacon", {}) or {}
+                txpower  = b.get("txpower", "")
+                sensors  = b.get("sensors", {}) or {}
 
-            print(f"[OMADA]   ┌─ Beacon #{i + 1}: {bmac}")
-            print(f"[OMADA]   │   deviceClass : {dclass}")
-            if model:
-                print(f"[OMADA]   │   model       : {model}")
-            print(f"[OMADA]   │   lastseen    : {lastseen}")
-            print(f"[OMADA]   │   rssi.avg    : {rssi_avg} dBm")
-            if ib:
-                print(f"[OMADA]   │   iBeacon     : uuid={ib.get('uuid','?')} "
-                      f"major={ib.get('major','?')} minor={ib.get('minor','?')} "
-                      f"power={ib.get('power','?')}")
-            if txpower != "":
-                print(f"[OMADA]   │   txpower     : {txpower}")
-            if sensors:
-                print(f"[OMADA]   │   sensors     : {sensors}")
-            print(f"[OMADA]   └─")
+                print(f"[OMADA]   ┌─ Beacon #{i + 1}: {bmac}")
+                print(f"[OMADA]   │   deviceClass : {dclass}")
+                if model:
+                    print(f"[OMADA]   │   model       : {model}")
+                print(f"[OMADA]   │   lastseen    : {lastseen}")
+                print(f"[OMADA]   │   rssi.avg    : {rssi_avg} dBm")
+                if ib:
+                    print(f"[OMADA]   │   iBeacon     : uuid={ib.get('uuid','?')} "
+                          f"major={ib.get('major','?')} minor={ib.get('minor','?')} "
+                          f"power={ib.get('power','?')}")
+                if txpower != "":
+                    print(f"[OMADA]   │   txpower     : {txpower}")
+                if sensors:
+                    print(f"[OMADA]   │   sensors     : {sensors}")
+                print(f"[OMADA]   └─")
 
-        print(f"[OMADA] ── Raw JSON ──")
-        print(f"[OMADA] {json.dumps(raw, separators=(',', ':'))}")
-        print("[OMADA] ═══════════════════════════════════════════════════════════")
+            print(f"[OMADA] ── Raw JSON ──")
+            print(f"[OMADA] {json.dumps(raw, separators=(',', ':'))}")
+            print("[OMADA] ═══════════════════════════════════════════════════════════")
         # ─────────────────────────────────────────────────────────────────
 
         ap_coords = self._get_ap_coords(ap_mac_colons)

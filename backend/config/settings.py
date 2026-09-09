@@ -13,6 +13,7 @@ class Settings:
     PORT: int
     DEBUG: bool
     OMADA_ACCESS_TOKEN: str
+    OMADA_RAW_DUMP_ENABLED: bool
     PATH_LOSS_EXPONENT: float
     TX_POWER_DEFAULT: float
     PATROL_PROXIMITY_RADIUS_M: float
@@ -40,6 +41,16 @@ def _load() -> Settings:
         PORT=int(os.environ.get("PORT", "8000")),
         DEBUG=os.environ.get("DEBUG", "false").lower() == "true",
         OMADA_ACCESS_TOKEN=os.environ["OMADA_ACCESS_TOKEN"],
+        # Off by default (Prompt 124): the full per-AP raw payload dump in
+        # omada_ingest_service.py contains box-drawing characters that throw
+        # UnicodeEncodeError under Windows' default cp1252 stdout codepage the
+        # moment stdout is piped/redirected (every capture session) — silently
+        # 400ing every AP's ingest until PYTHONIOENCODING=utf-8 is set. The
+        # permanent null-RSSI counter (Prompt 119) covers the dump's main
+        # steady-state use; flip this on only for deep debugging (malformed
+        # payload shape, deviceClass/model on an unfamiliar beacon) with
+        # PYTHONIOENCODING=utf-8 set first.
+        OMADA_RAW_DUMP_ENABLED=os.environ.get("OMADA_RAW_DUMP_ENABLED", "false").lower() == "true",
         PATH_LOSS_EXPONENT=float(os.environ.get("PATH_LOSS_EXPONENT", "2.5")),
         TX_POWER_DEFAULT=float(os.environ.get("TX_POWER_DEFAULT", "-59")),
         # Radius (m) within which a guard's smoothed position counts as "at" a
