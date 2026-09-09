@@ -359,6 +359,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
               positions={[]}
               naturalSize={naturalSize}
               scale={scale}
+              proximityRadiusM={activeFloor.patrol_proximity_radius_m ?? 1.0}
               lineOnly
             />
           )}

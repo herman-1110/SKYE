@@ -11,6 +11,9 @@ interface Props {
   positions: PositionRecord[];   // all live positions; guard matching happens here. Pass [] for historical review — no position can ever be "in progress".
   naturalSize: { w: number; h: number } | null;
   scale: number | null;
+  // Backend's PATROL_PROXIMITY_RADIUS_M, crossed via FloorRecord (Prompt 117)
+  // instead of a hardcoded frontend copy — single source of truth.
+  proximityRadiusM: number;
   // Review-mode detail (Prompt 115): direction arrows per segment, an arrival
   // time label at each visited/short-dwell checkpoint, and dwell encoded in
   // marker radius. Off by default so the live dashboard overlay (Prompt 114,
@@ -49,13 +52,6 @@ const STATE_FILL: Record<CheckpointState, string> = {
   pending: "var(--text-secondary)",
 };
 
-// Mirrors backend PATROL_PROXIMITY_RADIUS_M (config/settings.py). No settings
-// endpoint exposes this value live — only man_down_minutes/collision_distance_m
-// are DB-backed — so this is a frontend-side duplicate of the backend default,
-// same tradeoff MIN_DWELL_SECONDS-family constants already carry. If the
-// backend env var changes, this needs updating by hand.
-const PATROL_PROXIMITY_RADIUS_M = 1.0;
-
 function cycleKeyOf(log: PatrolLogRecord): string {
   // Historical simulation logs predate cycle_id (Prompt 110) and have none —
   // shift_id was the pre-existing "one lap" grouping for that era's data, so
@@ -67,6 +63,7 @@ function checkpointState(
   log: PatrolLogRecord | undefined,
   livePosition: PositionRecord | null,
   ap: APRecord,
+  proximityRadiusM: number,
 ): CheckpointState {
   if (log) {
     if (log.actual_arrival === null) return "missed";
@@ -79,12 +76,12 @@ function checkpointState(
   if (livePosition) {
     const dx = livePosition.x - ap.x_m;
     const dy = livePosition.y - ap.y_m;
-    if (Math.sqrt(dx * dx + dy * dy) <= PATROL_PROXIMITY_RADIUS_M) return "in_progress";
+    if (Math.sqrt(dx * dx + dy * dy) <= proximityRadiusM) return "in_progress";
   }
   return "pending";
 }
 
-export default function PatrolRouteOverlay({ aps, route, logs, positions, naturalSize, scale, showDetails = false, lineOnly = false }: Props) {
+export default function PatrolRouteOverlay({ aps, route, logs, positions, naturalSize, scale, proximityRadiusM, showDetails = false, lineOnly = false }: Props) {
   const [selectedGuardId, setSelectedGuardId] = useState<string | null>(null);
   const warnedMissingIds = useRef<Set<string>>(new Set());
 
@@ -250,7 +247,7 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
 
         {routeAps.map((ap, idx) => {
           const log = logByMac.get(ap.mac.toUpperCase());
-          const state = checkpointState(log, livePosition, ap);
+          const state = checkpointState(log, livePosition, ap, proximityRadiusM);
           const { px, py } = points[idx];
           const hasRealDwell = showDetails && log && log.actual_arrival !== null;
           const radius = hasRealDwell ? dwellRadius(log!.dwell_time_seconds) : BASE_RADIUS;

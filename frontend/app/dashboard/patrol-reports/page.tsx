@@ -288,6 +288,7 @@ export default function PatrolReportsPage() {
                   positions={[]}
                   naturalSize={naturalSize}
                   scale={activeFloor.scale_pixels_per_meter}
+                  proximityRadiusM={activeFloor.patrol_proximity_radius_m ?? 1.0}
                   showDetails
                 />
               </div>
