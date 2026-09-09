@@ -107,6 +107,15 @@ class OmadaIngestService:
         # observable.
         self._last_low_ap_warning: Dict[str, float] = {}
         self._LOW_AP_WARNING_RATE_LIMIT_S = 60.0
+        # Permanent null-RSSI observation surface (v20 9.4) - replaces the
+        # [OMADA] raw dump as the way to see the null rate, and is the only
+        # way to confirm a firmware upgrade actually reduced it. Keyed by
+        # reporting AP mac (colons). Counted at the same point the null
+        # reading is silently discarded (omada_ingest_service.py, ingest()).
+        self._rssi_report_total: Dict[str, int] = {}
+        self._rssi_null_count: Dict[str, int] = {}
+        self._last_null_rate_summary_run: float = 0.0
+        self._NULL_RATE_SUMMARY_INTERVAL_S = 60.0
 
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
@@ -269,6 +278,22 @@ class OmadaIngestService:
         except Exception as e:
             print(f"[OMADA] WARNING: beacon_scans janitor failed: {e}")
 
+    def _log_null_rate_summary(self) -> None:
+        """Permanent null-RSSI observation surface (v20 9.4). One line per AP
+        that has reported at least once: total reports, null count, null rate.
+        Called only via the throttle in ingest() so this runs at most once per
+        _NULL_RATE_SUMMARY_INTERVAL_S. ASCII only - no box-drawing/em-dash/
+        arrow characters, this line is piped during capture sessions."""
+        if not self._rssi_report_total:
+            return
+        for ap_mac_colons, total in sorted(self._rssi_report_total.items()):
+            null_count = self._rssi_null_count.get(ap_mac_colons, 0)
+            rate_pct = (null_count / total * 100.0) if total else 0.0
+            print(
+                f"[OMADA-NULL-RATE] ap={ap_mac_colons} total={total} "
+                f"null={null_count} rate={rate_pct:.1f}%"
+            )
+
     # ── Main entry point ────────────────────────────────────────────────────────
 
     def ingest(self, raw: dict) -> dict:
@@ -300,6 +325,10 @@ class OmadaIngestService:
         if janitor_now - self._last_janitor_run > self._JANITOR_INTERVAL_S:
             self._last_janitor_run = janitor_now
             self._prune_stale_unregistered_scans()
+
+        if janitor_now - self._last_null_rate_summary_run > self._NULL_RATE_SUMMARY_INTERVAL_S:
+            self._last_null_rate_summary_run = janitor_now
+            self._log_null_rate_summary()
 
         if not ap_mac_raw:
             return {"status": "ignored", "reason": "no reporter.mac"}
@@ -400,7 +429,9 @@ class OmadaIngestService:
 
             rssi_block = entry.get("rssi", {})
             rssi_avg = rssi_block.get("avg")
+            self._rssi_report_total[ap_mac_colons] = self._rssi_report_total.get(ap_mac_colons, 0) + 1
             if rssi_avg is None:
+                self._rssi_null_count[ap_mac_colons] = self._rssi_null_count.get(ap_mac_colons, 0) + 1
                 continue
 
             buf = self._buffers.setdefault(beacon_key, _BeaconBuffer())
