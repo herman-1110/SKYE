@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { APRecord } from "@/services/floorService";
 import type { PatrolLogRecord } from "@/types/patrolLog";
 import type { PositionRecord } from "@/types/position";
-import { sortPatrolLogsDeterministically } from "@/utils/patrolLogOrder";
+import { sortPatrolLogsDeterministically, summarizeCheckpointVisits } from "@/utils/patrolLogOrder";
 
 interface Props {
   aps: APRecord[];
@@ -35,7 +35,7 @@ function dwellRadius(dwellSeconds: number): number {
   return Math.min(MAX_RADIUS, BASE_RADIUS + dwellSeconds / 10);
 }
 
-type CheckpointState = "visited" | "short_dwell" | "missed" | "in_progress" | "pending";
+type CheckpointState = "visited" | "short_dwell" | "missed" | "in_progress" | "pending" | "not_in_window";
 
 const STATE_STROKE: Record<CheckpointState, string> = {
   visited: "var(--success)",
@@ -43,6 +43,9 @@ const STATE_STROKE: Record<CheckpointState, string> = {
   missed: "var(--danger)",
   in_progress: "var(--accent)",
   pending: "var(--text-secondary)",
+  // Neutral, same as pending (Prompt 122) — the window closed before this
+  // checkpoint was reached, never rendered as a violation.
+  not_in_window: "var(--text-secondary)",
 };
 
 const STATE_FILL: Record<CheckpointState, string> = {
@@ -51,6 +54,7 @@ const STATE_FILL: Record<CheckpointState, string> = {
   missed: "var(--danger)",
   in_progress: "var(--text-secondary)",   // pending fill + accent ring, per spec
   pending: "var(--text-secondary)",
+  not_in_window: "var(--text-secondary)",
 };
 
 function cycleKeyOf(log: PatrolLogRecord): string {
@@ -67,6 +71,10 @@ function checkpointState(
   proximityRadiusM: number,
 ): CheckpointState {
   if (log) {
+    // Prompt 122: a checkpoint the time-boxed window closed before reaching
+    // is not a fault the data can support — undefined on every pre-122 log,
+    // which correctly falls through to the old missed semantics below.
+    if (log.not_in_window) return "not_in_window";
     if (log.actual_arrival === null) return "missed";
     return log.compliant ? "visited" : "short_dwell";
   }
@@ -176,13 +184,14 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
     [currentCycle, routeAps],
   );
 
-  const logByMac = useMemo(() => {
-    const m = new Map<string, PatrolLogRecord>();
-    for (const log of sortedCycleLogs) {
-      m.set(log.checkpoint_id.toUpperCase(), log);
-    }
-    return m;
-  }, [sortedCycleLogs]);
+  // Prompt 123: a checkpoint can have multiple closed visits within one
+  // window now that 122 made revisiting normal — select each checkpoint's
+  // best visit (compliant beats non-compliant, longest dwell breaks ties)
+  // instead of whichever visit happens to sort last.
+  const visitSummaryByMac = useMemo(
+    () => summarizeCheckpointVisits(sortedCycleLogs),
+    [sortedCycleLogs],
+  );
 
   const livePosition = useMemo(
     () => positions.find((p) => p.person_type === "guard" && p.person_id === activeGuardId) ?? null,
@@ -256,7 +265,8 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
         })}
 
         {routeAps.map((ap, idx) => {
-          const log = logByMac.get(ap.mac.toUpperCase());
+          const summary = visitSummaryByMac.get(ap.mac.toUpperCase());
+          const log = summary?.best;
           const state = checkpointState(log, livePosition, ap, proximityRadiusM);
           const { px, py } = points[idx];
           const hasRealDwell = showDetails && log && log.actual_arrival !== null;
@@ -283,6 +293,7 @@ export default function PatrolRouteOverlay({ aps, route, logs, positions, natura
                   fill="var(--text-primary)"
                 >
                   {new Date(log.actual_arrival).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {summary && summary.visitCount > 1 ? ` (${summary.visitCount}x)` : ""}
                 </text>
               )}
             </g>

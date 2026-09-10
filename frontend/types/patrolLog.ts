@@ -12,4 +12,9 @@ export interface PatrolLogRecord {
   compliant: boolean;
   shift_id: string;
   cycle_id?: string;  // absent on logs predating the real-time tracker (Prompt 110)
+  // True only for a checkpoint the time-boxed window closed before reaching
+  // (Prompt 122) — never a violation. Absent (falsy) on every log written
+  // before Prompt 122, which is exactly right: those render under the old
+  // wrap-model semantics unchanged, since the field didn't exist yet.
+  not_in_window?: boolean;
 }

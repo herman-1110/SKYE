@@ -58,3 +58,6 @@ Thumbs.db
 skye-measure*.log
 tsconfig.tsbuildinfo
 payload.json
+
+backend/skye-measure.log
+backend/skye-capture-*.log

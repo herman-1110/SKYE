@@ -152,10 +152,12 @@ export const savePatrolConfig = (
   floorId: string,
   patrolEnabled: boolean,
   patrolRoute: string[],
+  patrolIntervalMinutes: number,
 ): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/patrol`, {
     patrol_enabled: patrolEnabled,
     patrol_route: patrolRoute,
+    patrol_interval_minutes: patrolIntervalMinutes,
   });
 
 export const renameFloor = (buildingId: string, floorId: string, name: string): Promise<void> =>

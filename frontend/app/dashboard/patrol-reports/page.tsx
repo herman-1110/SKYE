@@ -11,7 +11,7 @@ import {
 import type { PatrolLogRecord } from "@/types/patrolLog";
 import SelectDropdown from "@/components/shared/SelectDropdown";
 import PatrolRouteOverlay from "@/components/map/PatrolRouteOverlay";
-import { sortPatrolLogsDeterministically } from "@/utils/patrolLogOrder";
+import { sortPatrolLogsDeterministically, summarizeCheckpointVisits } from "@/utils/patrolLogOrder";
 
 // Bounded reads throughout (Prompt 115) — no unbounded getDocs() anywhere.
 // DISCOVERY_LOG_LIMIT: enough of the most-recent global activity to derive
@@ -46,7 +46,7 @@ function fmtDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
-type RowStatus = "Compliant" | "Short dwell" | "Missed" | "No record";
+type RowStatus = "Compliant" | "Short dwell" | "Missed" | "No record" | "Not in window";
 
 export default function PatrolReportsPage() {
   const { buildings } = useBuildings();
@@ -162,13 +162,17 @@ export default function PatrolReportsPage() {
     [selectedCycle, routeAps],
   );
 
-  const logByMac = useMemo(() => {
-    const m = new Map<string, PatrolLogRecord>();
-    for (const log of sortedCycleLogs) m.set(log.checkpoint_id.toUpperCase(), log);
-    return m;
-  }, [sortedCycleLogs]);
+  // Prompt 123: a checkpoint can have multiple closed visits within one
+  // window now that 122 made revisiting normal — select each checkpoint's
+  // best visit (compliant beats non-compliant, longest dwell breaks ties)
+  // instead of whichever visit happens to sort last, which silently
+  // reintroduced 122's exact failure on the dwell axis.
+  const visitSummaryByMac = useMemo(
+    () => summarizeCheckpointVisits(sortedCycleLogs),
+    [sortedCycleLogs],
+  );
 
-  const loggedCount = routeAps.filter((ap) => logByMac.has(ap.mac.toUpperCase())).length;
+  const loggedCount = routeAps.filter((ap) => visitSummaryByMac.has(ap.mac.toUpperCase())).length;
 
   const arrivalTimes = sortedCycleLogs
     .map((l) => l.actual_arrival)
@@ -179,6 +183,11 @@ export default function PatrolReportsPage() {
 
   function rowStatus(log: PatrolLogRecord | undefined): RowStatus {
     if (!log) return "No record";
+    // Prompt 122: a checkpoint the time-boxed window closed before reaching
+    // is not a fault the data can support — never render it as Missed.
+    // Undefined on every pre-122 log, which correctly falls through to the
+    // old Missed semantics for historical cycles.
+    if (log.not_in_window) return "Not in window";
     if (log.actual_arrival === null) return "Missed";
     return log.compliant ? "Compliant" : "Short dwell";
   }
@@ -188,6 +197,7 @@ export default function PatrolReportsPage() {
     "Short dwell": "text-s-accent",
     Missed: "text-s-danger",
     "No record": "text-s-muted",
+    "Not in window": "text-s-muted",
   };
 
   const noBuildings = buildings.length === 0;
@@ -330,7 +340,8 @@ export default function PatrolReportsPage() {
               </thead>
               <tbody>
                 {routeAps.map((ap, idx) => {
-                  const log = logByMac.get(ap.mac.toUpperCase());
+                  const summary = visitSummaryByMac.get(ap.mac.toUpperCase());
+                  const log = summary?.best;
                   const status = rowStatus(log);
                   const shortfall = log && !log.compliant && log.actual_arrival !== null
                     ? Math.max(0, log.min_dwell_required - log.dwell_time_seconds)
@@ -338,7 +349,12 @@ export default function PatrolReportsPage() {
                   return (
                     <tr key={ap.id} className="border-b border-s-border/50">
                       <td className="py-1.5 pr-3 text-s-muted">{idx + 1}</td>
-                      <td className="py-1.5 pr-3 text-s-text">{ap.name}</td>
+                      <td className="py-1.5 pr-3 text-s-text">
+                        {ap.name}
+                        {summary && summary.visitCount > 1 && (
+                          <span className="text-s-muted font-normal"> ({summary.visitCount} visits)</span>
+                        )}
+                      </td>
                       <td className="py-1.5 pr-3 text-s-muted">
                         {log && log.actual_arrival !== null ? fmtTime(log.expected_arrival) : "—"}
                       </td>

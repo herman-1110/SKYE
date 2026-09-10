@@ -743,9 +743,10 @@ function FloorCard({
             buildingId={building.id}
             floor={floor}
             onClose={() => onTogglePatrol(floor.id)}
-            onSaved={(enabled, route) => {
+            onSaved={(enabled, route, intervalMinutes) => {
               floor.patrol_enabled = enabled;
               floor.patrol_route = route;
+              floor.patrol_interval_minutes = intervalMinutes;
             }}
           />
         </div>

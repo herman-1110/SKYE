@@ -8,7 +8,7 @@ interface Props {
   buildingId: string;
   floor: FloorRecord;
   onClose: () => void;
-  onSaved: (patrolEnabled: boolean, patrolRoute: string[]) => void;
+  onSaved: (patrolEnabled: boolean, patrolRoute: string[], patrolIntervalMinutes: number) => void;
 }
 
 const SETTLE_MS = 260;
@@ -23,6 +23,7 @@ export default function PatrolConfigPanel({
   const [loading, setLoading] = useState(true);
   const [patrolEnabled, setPatrolEnabled] = useState(floor.patrol_enabled ?? false);
   const [routeIds, setRouteIds] = useState<string[]>(floor.patrol_route ?? []);
+  const [intervalMinutes, setIntervalMinutes] = useState(floor.patrol_interval_minutes ?? 10);
   const [saving, setSaving] = useState(false);
 
   // Drag state — the row being dragged lifts and moves via CSS transform;
@@ -197,8 +198,8 @@ export default function PatrolConfigPanel({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await savePatrolConfig(buildingId, floor.id, patrolEnabled, routeIds);
-      onSaved(patrolEnabled, routeIds);
+      await savePatrolConfig(buildingId, floor.id, patrolEnabled, routeIds, intervalMinutes);
+      onSaved(patrolEnabled, routeIds, intervalMinutes);
       toast.success("Patrol configuration saved");
     } catch {
       toast.error("Failed to save patrol config");
@@ -252,6 +253,31 @@ export default function PatrolConfigPanel({
           </div>
         </div>
       </div>
+
+      {/* Cycle window — per-floor, not a global (Prompt 122). Rolling from the
+          guard's first detection, not a wall-clock grid; "suit the size of
+          the space" means this has to be settable here, not just defaulted. */}
+      {patrolEnabled && (
+        <div className="flex items-center justify-between p-3 rounded-lg bg-s-elevated border border-s-border">
+          <div>
+            <p className="text-sm font-medium text-s-text">Cycle Window</p>
+            <p className="text-xs text-s-muted mt-0.5">
+              Minutes per patrol cycle. A checkpoint not reached before the window
+              closes shows as not-yet-reached, not missed.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <input
+              type="number"
+              min={1}
+              value={intervalMinutes}
+              onChange={(e) => setIntervalMinutes(Math.max(1, Number(e.target.value) || 1))}
+              className="w-14 px-2 py-1 rounded-lg bg-s-base border border-s-border text-xs text-s-text font-mono text-center"
+            />
+            <span className="text-xs text-s-muted font-mono">min</span>
+          </div>
+        </div>
+      )}
 
       {/* Route order — only shown when patrol enabled */}
       {patrolEnabled && (

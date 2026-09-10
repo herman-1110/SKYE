@@ -42,3 +42,56 @@ export function sortPatrolLogsDeterministically(
     return a.checkpoint_id < b.checkpoint_id ? -1 : a.checkpoint_id > b.checkpoint_id ? 1 : 0;
   });
 }
+
+export interface CheckpointVisitSummary {
+  best: PatrolLogRecord;
+  visitCount: number;
+}
+
+// Prompt 123: 122 made revisiting a checkpoint within one time-boxed window
+// normal, so a single checkpoint can have several closed visits in one
+// cycle (hardware confirmed a window with 9 real visits across 3
+// checkpoints). Judging a checkpoint by whichever visit happens to close
+// last reintroduces the exact failure 122 was built to fix, just on the
+// dwell axis — a compliant 31s visit can be overwritten by a later 2s pass.
+//
+// Picks the visit that best represents "was this checkpoint properly
+// checked at least once this window": a compliant visit beats a
+// non-compliant one; among non-compliant, the longest dwell wins (a real,
+// if short, visit is more informative than a flat missed one); tie-broken
+// by expected_arrival for determinism (121) — mirrors
+// safety_service.check_patrol_window_compliance()'s identical selection on
+// the backend, so the report's displayed status and the alert decision
+// agree by construction.
+//
+// Input should be the output of sortPatrolLogsDeterministically(), not the
+// raw unsorted array — that makes iteration order (and thus which entry
+// wins a true tie, if one somehow occurs) itself deterministic rather than
+// depending on Firestore/JS's incidental ordering.
+function isBetterVisit(a: PatrolLogRecord, b: PatrolLogRecord): boolean {
+  if (a.compliant !== b.compliant) return a.compliant;
+  if (a.dwell_time_seconds !== b.dwell_time_seconds) return a.dwell_time_seconds > b.dwell_time_seconds;
+  return a.expected_arrival < b.expected_arrival;
+}
+
+export function summarizeCheckpointVisits(
+  sortedLogs: PatrolLogRecord[],
+): Map<string, CheckpointVisitSummary> {
+  const groups = new Map<string, PatrolLogRecord[]>();
+  for (const log of sortedLogs) {
+    const key = log.checkpoint_id.toUpperCase();
+    const group = groups.get(key);
+    if (group) group.push(log);
+    else groups.set(key, [log]);
+  }
+
+  const result = new Map<string, CheckpointVisitSummary>();
+  for (const [key, group] of groups) {
+    let best = group[0];
+    for (const log of group.slice(1)) {
+      if (isBetterVisit(log, best)) best = log;
+    }
+    result.set(key, { best, visitCount: group.length });
+  }
+  return result;
+}

@@ -12,6 +12,9 @@ export interface FloorRecord {
   image_height_px?: number | null;
   patrol_enabled?: boolean;
   patrol_route?: string[];
+  // Per-floor time-boxed cycle window in minutes, default 10 (Prompt 122) —
+  // real Firestore data, unlike patrol_proximity_radius_m below.
+  patrol_interval_minutes?: number;
   // Global backend setting (PATROL_PROXIMITY_RADIUS_M), not per-floor data —
   // crosses on every floor response so the frontend has one source of truth
   // instead of a hardcoded copy (Prompt 117).
