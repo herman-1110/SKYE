@@ -7,10 +7,20 @@ Design constraints (Prompt 110 / 110a recon):
   Only guards, only exact (non-approximate) positions. An approximate position's
   x/y ARE the anchor AP's own coordinates (single/dual-AP proximity fallback) —
   measuring dwell against that would fabricate perfect, permanent compliance at
-  exactly one checkpoint and unreachability at every other. Today, with only one
-  real AP placed, every real-hardware position is approximate, so this service
-  is silent on real hardware until a second and third AP exist. That silence is
-  correct, not a bug — the alternative is a demo full of fake compliance.
+  exactly one checkpoint and unreachability at every other. When only one real
+  AP is placed, every real-hardware position is approximate and this service is
+  silent on real hardware — correct, not a bug, the alternative is a demo full
+  of fake compliance. CONFIRMED 2026-09-10, re-verified directly against RTDB
+  /ap_heartbeats + Firestore access_points + /positions: 3 real APs are now
+  placed and online on "Level 2" (EAP660 HD x2, EAP770), and live guard-001 /
+  worker-001 positions are is_approximate=False. This service is no longer
+  silent on real hardware — treat that assumption as gone, not just stale.
+  Confirm freshly again if this matters (AP counts/coverage can change).
+  Cross-checked against RTDB /alerts (the real store — see AlertRepository,
+  not Firestore): real guard-001 short_dwell/no_patrol patrol_violation
+  alerts already exist from 2026-09-09 real-hardware data, timestamps lining
+  up with the corresponding patrol_logs windows, so window-close alerting is
+  confirmed working end-to-end on real hardware at least once.
 
   No schedule exists (no Shift model, no route assignment, no timing primitive)
   and this service does not invent one. Missed checkpoints are detected by
