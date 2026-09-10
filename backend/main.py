@@ -1,3 +1,17 @@
+import sys
+
+# Prompt 126: reconfigure before any other import, so this is active before
+# anything in the app (including transitively-imported modules) gets a
+# chance to print. Removes the need for the $env:PYTHONIOENCODING=utf-8
+# manual step and covers every print site, including ones not yet found —
+# see [OMADA]'s raw dump / [SIM]'s box-drawing prints / floor_service.py's
+# calibration arrow for the sites known today. hasattr guard: under some
+# runners sys.stdout is replaced by an object without reconfigure(), and
+# this must never be what stops the backend starting.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -20,6 +34,7 @@ from routes.auth_routes import router as auth_router
 from routes.beacon_routes import router as beacon_router
 from routes.building_routes import router as building_router
 from routes.floor_routes import router as floor_router
+from routes.health_routes import router as health_router
 from routes.report_routes import router as report_router
 from routes.safety_settings_routes import router as safety_settings_router
 from routes.telemetry_routes import router as telemetry_router
@@ -141,6 +156,7 @@ def create_app() -> FastAPI:
     app.include_router(beacon_router)
     app.include_router(building_router)
     app.include_router(floor_router)
+    app.include_router(health_router)
     app.include_router(zone_router)
     app.include_router(report_router)
     app.include_router(safety_settings_router)

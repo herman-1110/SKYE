@@ -1,6 +1,7 @@
 import math
 import time
 import uuid
+from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional, Set
 
 from config.settings import settings
@@ -30,6 +31,32 @@ _man_down_tracker: Dict[str, tuple[float, float, str, bool]] = {}
 _stale_alerted: Set[str] = set()
 
 
+@dataclass
+class _TrackerHealth:
+    """Patrol-tracker invocation health (Prompt 126), observed here because
+    run_all_checks() is the only place a tracker exception is ever caught —
+    see its try/except below. consecutive_failures resets to 0 on any
+    successful invocation; total_failures never resets. last_invocation_at
+    is stamped at the very top of run_all_checks(), before check_man_down()
+    or the tracker call — it advances on every call regardless of outcome,
+    so it splits three states that would otherwise be indistinguishable:
+    tracker throwing (failures climbing), something upstream in
+    run_all_checks() dying before the tracker block runs (last_invocation_at
+    fresh, last_success_at stale), and no ingest reaching it at all (both
+    stale).
+
+    Per-process, in-memory: lost on restart, not shared across uvicorn
+    workers — same class of caveat as _stale_alerted above. Single-worker
+    dev/capture runs are unaffected.
+    """
+    consecutive_failures: int = 0
+    total_failures: int = 0
+    last_error: Optional[str] = None
+    last_error_at: Optional[str] = None
+    last_success_at: Optional[str] = None
+    last_invocation_at: Optional[str] = None
+
+
 class SafetyService:
 
     _SETTINGS_TTL_S = 30.0
@@ -37,6 +64,11 @@ class SafetyService:
     def __init__(self) -> None:
         self._settings_cache: Optional[SafetySettings] = None
         self._settings_cache_ts: float = 0.0
+        self._tracker_health = _TrackerHealth()
+
+    def get_tracker_health(self) -> dict:
+        """Read-only snapshot for the /health/tracker route."""
+        return asdict(self._tracker_health)
 
     def _get_settings(self) -> SafetySettings:
         now = time.monotonic()
@@ -429,6 +461,12 @@ class SafetyService:
     # ------------------------------------------------------------------
     def run_all_checks(self, current: PositionRecord) -> None:
         """Run man-down, patrol-tracking, and collision checks for a freshly computed position."""
+        # Stamped before anything else in this method runs, including
+        # check_man_down() below — see _TrackerHealth's docstring for why
+        # this specific ordering is what makes the three health states
+        # distinguishable (Prompt 126).
+        self._tracker_health.last_invocation_at = utcnow_iso()
+
         self.check_man_down(current)
 
         # local import: keeps safety_service<->patrol_tracker_service decoupled
@@ -439,8 +477,26 @@ class SafetyService:
         try:
             from services.patrol_tracker_service import patrol_tracker_service
             patrol_tracker_service.check_patrol_progress(current)
+            self._tracker_health.last_success_at = utcnow_iso()
+            self._tracker_health.consecutive_failures = 0
         except Exception as e:
-            print(f"[SAFETY] WARNING: patrol tracker failed for a position update: {e}")
+            h = self._tracker_health
+            h.consecutive_failures += 1
+            h.total_failures += 1
+            # Defensive against a custom __str__ that itself raises (Prompt
+            # 126 VALIDATION A6) — this recording code must be trivially
+            # incapable of throwing, since if it does, ingest breaks, which
+            # is the exact outcome the outer except exists to prevent.
+            try:
+                detail = str(e)
+            except Exception:
+                detail = "<exception str() raised>"
+            h.last_error = f"{type(e).__name__}: {detail}"[:500]
+            h.last_error_at = utcnow_iso()
+            print(
+                f"[SAFETY] WARNING: patrol tracker failed for a position update "
+                f"(consecutive_failures={h.consecutive_failures}): {h.last_error}"
+            )
 
         raw_all = position_repository.get_all()
         all_positions: List[PositionRecord] = []
