@@ -61,3 +61,6 @@ payload.json
 
 backend/skye-measure.log
 backend/skye-capture-*.log
+
+# Durable capture logs written by the backend itself (Prompt 128)
+backend/logs/

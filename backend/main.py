@@ -12,6 +12,18 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8")
 
+# Prompt 128: durable capture log. Everything that reaches stdout/stderr is
+# also written to backend/logs/skye-<UTC timestamp>.log (UTF-8, rotating), so
+# a field capture no longer depends on the operator piping through
+# Tee-Object — the failure that lost the 10 Sep calibration log. Installed
+# straight after the reconfigure above so prints made while the rest of the
+# app imports are captured too. Console output is unchanged.
+from pathlib import Path
+
+from utils.capture_log import install_capture_log
+
+install_capture_log(Path(__file__).resolve().parent / "logs")
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager

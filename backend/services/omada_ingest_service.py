@@ -19,6 +19,7 @@ from firebase_admin import db as rtdb
 
 from config.beacon_registry import make_ibeacon_key, BeaconIdentity
 from config.settings import settings
+from models.position import PositionRecord
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
 from repositories.ap_repository import ap_repository
 from repositories.beacon_repository import beacon_repository
@@ -35,13 +36,18 @@ BUFFER_WINDOW_S = 2.0
 # Minimum distinct APs that must hear a beacon before we attempt positioning.
 MIN_APS_FOR_POSITION = 3
 
-# Cap how often positioning runs per beacon. The 3 APs POST independently
-# (~every 2 s, staggered), so without this guard _flush_ready_beacons emits on
-# EVERY POST — 3 solves/cycle on 1-fresh-2-stale readings, which stutters the
-# Kalman velocity estimate and makes the dot hop while moving. Emitting at most
-# once per AP-report period collapses that to a single solve on the freshest
-# reading from each AP. Set to ~0.9x your per-AP report interval.
-EMIT_MIN_INTERVAL_S = 1.8
+# Cap how often positioning runs per beacon. The 3 APs POST independently,
+# staggered, at ~1 Hz each (measured: 0.99-1.00 s median per AP in the 7 Sep
+# and 22 Sep captures, not the ~2 s this comment used to state), so without
+# this guard _flush_ready_beacons emits on EVERY POST — ~3 solves/s on partly
+# stale readings, which stutters the Kalman velocity estimate and makes the
+# dot hop while moving. At ~1 Hz, BUFFER_WINDOW_S = 2.0 gives roughly one
+# report of slack: a single null or missed report from an AP is usually
+# bridged, two or more in a row drop it from the buffer. The 1.8 s default was
+# sized as ~0.9x an assumed 2 s report interval; at the measured ~1 Hz it
+# means one solve per ~2 AP cycles. Default unchanged — a capture can override
+# it via POSITION_EMIT_MIN_INTERVAL_S without a code edit (Prompt 128).
+EMIT_MIN_INTERVAL_S = settings.POSITION_EMIT_MIN_INTERVAL_S
 
 
 def _normalise_mac(mac: str) -> str:
@@ -421,7 +427,9 @@ class OmadaIngestService:
 
             # Write scan record for ALL heard beacons (registered or not) BEFORE the
             # solve gate. Powers online/offline status + unknown beacon discovery.
-            rssi_block_scan = entry.get("rssi", {})
+            # `or {}`: "rssi": null is a null reading like "rssi": {}, not a
+            # crash that 500s the whole AP report (Prompt 128).
+            rssi_block_scan = entry.get("rssi") or {}
             rssi_avg_scan = rssi_block_scan.get("avg")
             if rssi_avg_scan is not None:
                 self._write_beacon_scan(
@@ -438,7 +446,7 @@ class OmadaIngestService:
             if identity is None:
                 continue
 
-            rssi_block = entry.get("rssi", {})
+            rssi_block = entry.get("rssi") or {}
             rssi_avg = rssi_block.get("avg")
             self._rssi_report_total[ap_mac_colons] = self._rssi_report_total.get(ap_mac_colons, 0) + 1
             if rssi_avg is None:
@@ -484,6 +492,71 @@ class OmadaIngestService:
             f"[OMADA] WARNING: beacon {beacon_key} heard by only {len(fresh)}/"
             f"{MIN_APS_FOR_POSITION} fresh AP(s) — {sorted(fresh.keys())}"
         )
+
+    # ── AP membership per position decision (Prompt 128) ─────────────────────────
+
+    def _log_membership(
+        self,
+        now_mono: float,
+        beacon_key: str,
+        person_id: str,
+        floor_id: str,
+        fresh: "Dict[str, _BeaconReading]",
+        path: str,
+        position: Optional[PositionRecord] = None,
+        error: bool = False,
+    ) -> None:
+        """[MEMBERSHIP-128]: one line per position decision — every flush that
+        gets past the EMIT_MIN_INTERVAL_S rate limit — saying which APs were in
+        the buffer and what was actually produced:
+          outcome=solve        genuine >=3-AP multilateration, written
+          outcome=hold         Prompt 111 hold, nothing written
+          outcome=fallback     strongest-AP proximity estimate (the AP's own
+                               coordinates, not a measurement), written
+          outcome=not_written  reason=no_solution (degenerate AP geometry or
+                               least-squares failure) | below_rssi_floor | error
+        A hold writes nothing, so without this line it is indistinguishable in
+        a capture from ingest having stopped. Lists every AP placed on the
+        beacon's floor (plus any fresh AP from another floor) as present, with
+        its buffered RSSI and age, or absent. mono is the time.monotonic()
+        value this flush's freshness test used, not a new clock read.
+        Permanent: replaces the TEMP [MEASURE-112] line removed in a703717,
+        whose absence left the next capture with nothing to replay. ASCII
+        only — this line is piped during capture sessions. Never raises: it
+        runs inside the flush and must not be able to change its behaviour."""
+        try:
+            if path == "hold":
+                outcome, reason = "hold", ""
+            elif position is not None:
+                outcome, reason = path, ""
+            elif error:
+                outcome, reason = "not_written", "error"
+            elif path == "fallback":
+                outcome, reason = "not_written", "below_rssi_floor"
+            else:
+                outcome, reason = "not_written", "no_solution"
+
+            placed = self._ap_coords.get(floor_id, {})
+            aps = []
+            for ap_mac in sorted(set(placed) | set(fresh)):
+                r = fresh.get(ap_mac)
+                if r is None:
+                    aps.append(f"{ap_mac}/absent")
+                else:
+                    aps.append(f"{ap_mac}/{r.rssi:g}dBm/{now_mono - r.received_at:.2f}s")
+
+            line = (
+                f"[MEMBERSHIP-128] mono={now_mono:.3f} id={beacon_key} person={person_id} "
+                f"floor={floor_id} fresh={len(fresh)}/{len(placed)} outcome={outcome}"
+            )
+            if reason:
+                line += f" reason={reason}"
+            if position is not None:
+                line += f" x={position.x:.2f} y={position.y:.2f}"
+            # No spaces inside aps=[...], so every field is one whitespace-free key=value token.
+            print(f"{line} aps=[{','.join(aps)}]")
+        except Exception as e:
+            print(f"[MEMBERSHIP-128] WARNING: could not log decision for {beacon_key}: {e}")
 
     # ── Buffer flush ────────────────────────────────────────────────────────────
 
@@ -569,11 +642,15 @@ class OmadaIngestService:
                 if positioning_service.had_recent_exact_solve(
                     identity["person_id"], settings.POSITION_EXACT_HOLD_SECONDS
                 ):
+                    self._log_membership(
+                        now_mono, beacon_key, identity["person_id"], beacon_floor_id, fresh, "hold"
+                    )
                     continue
 
                 # Too few APs for a multilateration solve — anchor to the closest
                 # AP instead of dropping the reading. Hops to a new AP on its own
                 # the next time a different one reports the strongest RSSI.
+                position, error = None, False
                 try:
                     position = proximity_service.compute_position(
                         person_id=identity["person_id"],
@@ -588,7 +665,12 @@ class OmadaIngestService:
                         safety_service.run_all_checks(position)
                     emitted += 1
                 except Exception as e:
+                    error = True
                     print(f"[OMADA] proximity fallback failed for beacon {beacon_key}: {e}")
+                self._log_membership(
+                    now_mono, beacon_key, identity["person_id"], beacon_floor_id, fresh,
+                    "fallback", position, error,
+                )
                 continue
 
             # Use person_id as reporter_mac so the RTDB position key is stable
@@ -603,6 +685,7 @@ class OmadaIngestService:
                 tx_power=tx_power,
             )
 
+            position, error = None, False
             try:
                 position = positioning_service.compute_position(
                     payload, floor_id=beacon_floor_id, building_id=beacon_building_id
@@ -611,7 +694,12 @@ class OmadaIngestService:
                     safety_service.run_all_checks(position)
                 emitted += 1
             except Exception as e:
+                error = True
                 print(f"[OMADA] positioning failed for beacon {beacon_key}: {e}")
+            self._log_membership(
+                now_mono, beacon_key, identity["person_id"], beacon_floor_id, fresh,
+                "solve", position, error,
+            )
 
         return emitted
 

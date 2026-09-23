@@ -29,6 +29,7 @@ class Settings:
     RSSI_NOISE_STD: float
     PROXIMITY_RSSI_FLOOR: float
     POSITION_EXACT_HOLD_SECONDS: float
+    POSITION_EMIT_MIN_INTERVAL_S: float
     LLM_PROVIDER: str             # accepts: gemini | openai | ollama | claude
     LLM_MODEL_NAME: str           # passed directly to the active provider
     RAG_SIMILARITY_FLOOR: float
@@ -87,8 +88,8 @@ def _load() -> Settings:
         # How long a person's last position may go un-updated before a
         # signal-loss man-down fires (independent of the movement-epsilon
         # check above, which needs a fresh position to evaluate at all).
-        # Positions refresh roughly every EMIT_MIN_INTERVAL_S (1.8s, in
-        # omada_ingest_service.py), so 120s is ~65 missed cycles — long enough
+        # Positions refresh roughly every POSITION_EMIT_MIN_INTERVAL_S (1.8s
+        # default, below), so 120s is ~65 missed cycles — long enough
         # to ride out a brief coverage gap, short enough to be actionable.
         # Uncalibrated — same family as MAN_DOWN_MOVEMENT_EPSILON_M and
         # PROXIMITY_RSSI_FLOOR, to be tuned once APs are ceiling-mounted.
@@ -118,6 +119,12 @@ def _load() -> Settings:
         # PROXIMITY_RSSI_FLOOR, to be tuned once the AP-count/flap measurement
         # session runs.
         POSITION_EXACT_HOLD_SECONDS=float(os.environ.get("POSITION_EXACT_HOLD_SECONDS", "10.0")),
+        # Minimum seconds between position computations per beacon — the rate
+        # limit in omada_ingest_service._flush_ready_beacons (EMIT_MIN_INTERVAL_S
+        # there). Was a hard-coded module constant; moved here with the same
+        # 1.8 default (Prompt 128) so a calibration capture can lower it for
+        # more solves per second of data without a code edit, then set it back.
+        POSITION_EMIT_MIN_INTERVAL_S=float(os.environ.get("POSITION_EMIT_MIN_INTERVAL_S", "1.8")),
         LLM_PROVIDER=os.environ.get("LLM_PROVIDER", "gemini"),
         LLM_MODEL_NAME=os.environ["LLM_MODEL_NAME"],
         # Minimum cosine similarity (0-1) for a retrieved feedback example to be
