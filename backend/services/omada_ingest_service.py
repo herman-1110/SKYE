@@ -556,7 +556,13 @@ class OmadaIngestService:
             # No spaces inside aps=[...], so every field is one whitespace-free key=value token.
             print(f"{line} aps=[{','.join(aps)}]")
         except Exception as e:
-            print(f"[MEMBERSHIP-128] WARNING: could not log decision for {beacon_key}: {e}")
+            # Guarded too: if the failure was stdout itself (e.g. an unbuffered
+            # `python -u ... | Tee-Object` pipe that broke), this print fails
+            # the same way and would otherwise escape into the flush.
+            try:
+                print(f"[MEMBERSHIP-128] WARNING: could not log decision for {beacon_key}: {e}")
+            except Exception:
+                pass
 
     # ── Buffer flush ────────────────────────────────────────────────────────────
 
