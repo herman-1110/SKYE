@@ -4,7 +4,9 @@ Durable capture log (Prompt 128).
 Tees everything the backend worker writes to stdout/stderr — print() output
 such as the [OMADA] dump and [MEMBERSHIP-128], the root logger, and uvicorn's
 own access/error loggers — into a UTF-8 file under backend/logs/, while the
-console keeps receiving exactly what it did before. (Under --reload the
+console keeps receiving exactly what it did before. The file is written
+first and doesn't depend on the console: if the console fails (a closed
+Tee-Object pipe), the file carries on alone — see _Tee. (Under --reload the
 supervisor process's few lines, e.g. "WatchFiles detected changes", stay
 console-only: it never imports main.py.)
 
@@ -72,9 +74,10 @@ class _PartFileHandler(RotatingFileHandler):
     def handleError(self, record: logging.LogRecord) -> None:
         # The stock handleError prints a full traceback to sys.stderr — the
         # tee — once per failed line. Say it once a minute, on the real
-        # console, and carry on: the console itself is unaffected.
+        # console, and carry on: the console itself is unaffected. (No
+        # console at all once the stderr tee has found it dead.)
         now = time.monotonic()
-        if now - self._last_warning < _WARNING_INTERVAL_S:
+        if self._console is None or now - self._last_warning < _WARNING_INTERVAL_S:
             return
         self._last_warning = now
         try:
@@ -88,27 +91,56 @@ class _PartFileHandler(RotatingFileHandler):
 
 
 class _Tee:
-    """Wraps a text stream. Every write goes to the wrapped stream unchanged;
-    each complete line is also handed to the capture handler. Partial lines
-    are buffered per thread, so lines printed concurrently from the ingest
-    threadpool don't interleave mid-line in the file."""
+    """Wraps a text stream. Every write goes to the capture file first, then
+    to the wrapped console stream, each in its own try: the capture must not
+    depend on the console accepting the write. A console that fails once —
+    e.g. the pipe of a `python -u ... 2>&1 | Tee-Object` launch closing — is
+    treated as gone: one warning goes to the file and this stream stops
+    writing to the console for the rest of the process, while the file keeps
+    receiving everything. Partial lines are buffered per thread, so lines
+    printed concurrently from the ingest threadpool don't interleave
+    mid-line in the file."""
 
-    def __init__(self, stream, handler: logging.Handler) -> None:
+    def __init__(self, stream, handler: logging.Handler, name: str) -> None:
         self._stream = stream
         self._handler = handler
+        self._name = name
         self._pending = threading.local()
+        self._console_ok = True
+        self._console_lock = threading.Lock()
 
     def write(self, s: str) -> int:
-        n = self._stream.write(s)
         if not getattr(_capturing, "active", False):
             _capturing.active = True
             try:
                 self._capture(s)
             except Exception:
-                pass  # capture must never break console output
+                pass  # the capture must never break the caller
             finally:
                 _capturing.active = False
-        return n
+        if self._console_ok:
+            try:
+                self._stream.write(s)
+            except Exception as e:
+                self._console_failed(e)
+        return len(s)
+
+    def _console_failed(self, error: BaseException) -> None:
+        """First console failure on this stream: stop using the console and
+        say so once, in the file only."""
+        with self._console_lock:
+            if not self._console_ok:
+                return
+            self._console_ok = False
+        if getattr(self._handler, "_console", None) is self._stream:
+            self._handler._console = None  # its warnings would hit the dead console too
+        try:
+            self._emit(
+                f"[CAPTURE-128] WARNING: console {self._name} failed ({error!r}); "
+                f"{self._name} continues in this file only"
+            )
+        except Exception:
+            pass
 
     def writelines(self, lines) -> None:
         for line in lines:
@@ -136,7 +168,11 @@ class _Tee:
             self._emit(pending)
 
     def flush(self) -> None:
-        self._stream.flush()
+        if self._console_ok:
+            try:
+                self._stream.flush()
+            except Exception as e:
+                self._console_failed(e)
 
     def __getattr__(self, name):
         # encoding, isatty, fileno, reconfigure, buffer, ... of the real stream
@@ -173,7 +209,7 @@ def install_capture_log(log_dir: Path) -> Optional[Path]:
     formatter.converter = time.gmtime
     handler.setFormatter(formatter)
 
-    tee_out, tee_err = _Tee(old_out, handler), _Tee(old_err, handler)
+    tee_out, tee_err = _Tee(old_out, handler, "stdout"), _Tee(old_err, handler, "stderr")
     sys.stdout, sys.stderr = tee_out, tee_err
 
     # uvicorn configures its loggers before importing main:app, so their
