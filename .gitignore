@@ -37,6 +37,8 @@ MANIFEST
 # Environment Variables & Secrets
 serviceAccountKey.json
 backend/serviceAccountKey.json
+# Local camera-auth script with a plaintext password; never commit it
+backend/encode.py
 .env
 .env.*
 !.env.example
