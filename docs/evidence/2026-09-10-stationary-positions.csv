@@ -1,13 +1,17 @@
 # SKYE Sentinel-AI - 10 Sep 2026 stationary capture, beacon ~1 m straight-line from the EAP770 (fw 1.3.13 at the time).
 # Pipeline at capture: TX_POWER_DEFAULT -59, PATH_LOSS_EXPONENT 2.5. Positions in metres, in that date's floor frame.
 # Run 1 13:16-13:17, run 2 13:22-13:23 (+08:00). Handoff v23 attributes run 2 to skye-calib-eap770-20260910-132241.log.
-# person_id: run 1 is guard-001, from its source log below; run 2 was not recorded.
+# person_id: both runs are guard-001, from their source logs below.
 # Run 1's source: backend/skye-capture-20260910-131300.log, committed as docs/evidence/skye-capture-20260910-131300.log
 # (Tee-Object, UTF-16LE, raw dump off, so no per-AP RSSI). Its 23 [MEASURE-119] lines give run 1's x/y below exactly,
 # in order, all person_id=guard-001, floor_id abf7e4a2 ("Level 2").
-# Provenance: these positions were pasted into the claude.ai "v22" chat on 10 Sep and survive there. The raw [OMADA]
-# payloads behind run 2 were deleted from backend/ between 22 and 23 Sep and are not recoverable from this file:
-# per-AP RSSI (including the ~-51 dBm 1 m reading) cannot be re-derived from it.
+# Run 2's source: backend/skye-calib-eap770-20260910-132241.log. Deleted to the Recycle Bin on 22 Sep 15:19:41 +08:00,
+# recovered on 30 Sep to C:\Users\Intern\Downloads\Omada\Project\skye-log-archive\skye-calib-eap770-20260910-132241.log,
+# SHA-256 9f22722f82f101d6cba8dc24b7c1a6ff87ae0cc6244d6009758d6950660d7fb1 (960,766 bytes, UTF-16LE). Raw dump on,
+# 62 reports per AP, so per-AP RSSI, including the ~-51 dBm 1 m reading, can be re-derived from it. Its 23
+# [MEASURE-119] lines give run 2's x/y below exactly, in order, all person_id=guard-001, floor_id abf7e4a2.
+# It stays out of git because the dump holds the ingest token.
+# Provenance: these positions were also pasted into the claude.ai "v22" chat on 10 Sep. This CSV holds positions only.
 # Recomputed 24 Sep, matches the v22/v23 precision table exactly:
 #   run1     N=23 centroid (21.463,23.371) x sd 0.348 y sd 0.505 radial mean 0.557 p95 0.878 max 0.982
 #   run2     N=23 centroid (21.548,22.931) x sd 0.257 y sd 0.440 radial mean 0.425 p95 0.672 max 1.337
