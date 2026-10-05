@@ -5,10 +5,12 @@ Tees everything the backend worker writes to stdout/stderr — print() output
 such as the [OMADA] dump and [MEMBERSHIP-128], the root logger, and uvicorn's
 own access/error loggers — into a UTF-8 file under backend/logs/, while the
 console keeps receiving exactly what it did before. The file is written
-first and doesn't depend on the console: if the console fails (a closed
-Tee-Object pipe), the file carries on alone — see _Tee. (Under --reload the
-supervisor process's few lines, e.g. "WatchFiles detected changes", stay
-console-only: it never imports main.py.)
+first and doesn't depend on the console: if the console fails with an
+OSError (a closed Tee-Object pipe), the file carries on alone; if it
+rejects a write for any other reason (a lone surrogate), only that write is
+missing from the console, which stays in use — see _Tee. (Under --reload
+the supervisor process's few lines, e.g. "WatchFiles detected changes",
+stay console-only: it never imports main.py.)
 
 Why: until now a field capture only reached disk if the operator remembered
 to pipe stdout through PowerShell's Tee-Object, which also wrote UTF-16LE.
@@ -93,11 +95,15 @@ class _PartFileHandler(RotatingFileHandler):
 class _Tee:
     """Wraps a text stream. Every write goes to the capture file first, then
     to the wrapped console stream, each in its own try: the capture must not
-    depend on the console accepting the write. A console that fails once —
-    e.g. the pipe of a `python -u ... 2>&1 | Tee-Object` launch closing — is
-    treated as gone: one warning goes to the file and this stream stops
-    writing to the console for the rest of the process, while the file keeps
-    receiving everything. Partial lines are buffered per thread, so lines
+    depend on the console accepting the write. A console that raises an
+    OSError — e.g. the pipe of a `python -u ... 2>&1 | Tee-Object` launch
+    closing — is treated as gone: one warning goes to the file and this
+    stream stops writing to the console for the rest of the process, while
+    the file keeps receiving everything. Any other exception (a
+    UnicodeEncodeError from a lone surrogate in a dumped payload, a
+    ValueError from a closed stream) costs only that write on the console:
+    the console stays in use, and the first such skip on this stream is
+    noted once, in the file. Partial lines are buffered per thread, so lines
     printed concurrently from the ingest threadpool don't interleave
     mid-line in the file."""
 
@@ -107,6 +113,7 @@ class _Tee:
         self._name = name
         self._pending = threading.local()
         self._console_ok = True
+        self._skip_noted = False
         self._console_lock = threading.Lock()
 
     def write(self, s: str) -> int:
@@ -121,13 +128,15 @@ class _Tee:
         if self._console_ok:
             try:
                 self._stream.write(s)
-            except Exception as e:
+            except OSError as e:
                 self._console_failed(e)
+            except Exception as e:
+                self._console_skipped(e)
         return len(s)
 
     def _console_failed(self, error: BaseException) -> None:
-        """First console failure on this stream: stop using the console and
-        say so once, in the file only."""
+        """First OSError from the console on this stream: stop using the
+        console and say so once, in the file only."""
         with self._console_lock:
             if not self._console_ok:
                 return
@@ -138,6 +147,23 @@ class _Tee:
             self._emit(
                 f"[CAPTURE-128] WARNING: console {self._name} failed ({error!r}); "
                 f"{self._name} continues in this file only"
+            )
+        except Exception:
+            pass
+
+    def _console_skipped(self, error: BaseException) -> None:
+        """A console failure that isn't an OSError: only that write is lost,
+        and only on the console. Said once per stream, in the file only. The
+        wording must not contain "WARNING: console", which marks the
+        console-dead warning above (tools/harness counts it)."""
+        with self._console_lock:
+            if self._skip_noted:
+                return
+            self._skip_noted = True
+        try:
+            self._emit(
+                f"[CAPTURE-128] WARNING: {self._name} skipped a write on the console ({error!r}); "
+                f"it is in this file, the console stays in use, and later skips aren't reported"
             )
         except Exception:
             pass
@@ -171,8 +197,10 @@ class _Tee:
         if self._console_ok:
             try:
                 self._stream.flush()
-            except Exception as e:
+            except OSError as e:
                 self._console_failed(e)
+            except Exception as e:
+                self._console_skipped(e)
 
     def __getattr__(self, name):
         # encoding, isatty, fileno, reconfigure, buffer, ... of the real stream
