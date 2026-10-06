@@ -85,6 +85,10 @@ def main(argv) -> int:
     # must never see real secrets (camera password, alarm path secret) doesn't
     # load the real file at all.
     from dotenv import load_dotenv
+    # Prompt 131b: camera discovery multicasts on the real LAN. A harness
+    # server never does unless the caller opts in by setting this itself (the
+    # env file can't turn it back on: it's loaded with override=False).
+    os.environ.setdefault("VIGI_DISCOVERY_INTERVAL_S", "0")
     env_path = os.environ.get("HARNESS_ENV_PATH") or C.REAL_ENV_PATH
     if not load_dotenv(dotenv_path=env_path, override=False):
         print(f"[HARNESS] could not load {env_path}", file=sys.stderr)

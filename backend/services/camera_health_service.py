@@ -13,9 +13,12 @@ cctv_repository.update_heartbeat (partial updates, shared with alarm ingest):
   alarm_config   "mismatch" | "unknown" - see _alarm_config()
 
 Liveness: every VIGI_LIVENESS_INTERVAL_S (5 s, Herman's decision 5) an async
-TCP connect with a 2 s timeout to each registered camera's ip:554. A success
-writes last_seen; a failure writes nothing, so the hook's 10 s threshold turns
-the camera offline. No credentials are involved.
+TCP connect with a 2 s timeout to each registered camera's ip:554, and to
+each unregistered camera that discovery or an alarm push found in the last
+10 minutes (Prompt 131b). A success writes last_seen; a failure writes
+nothing, so the hook's 10 s threshold turns the camera offline. No
+credentials are involved; the OpenAPI check below only ever runs for
+registered cameras.
 
 OpenAPI: first run VIGI_OPENAPI_START_DELAY_S after startup, then every
 VIGI_OPENAPI_INTERVAL_S, one camera at a time, through the shared,
@@ -32,6 +35,7 @@ from typing import Dict
 from config.settings import settings
 from models.cctv import CCTV
 from repositories.cctv_repository import cctv_repository
+from services.camera_discovery_service import camera_discovery_service
 from services.cctv_service import cctv_service
 from services.vigi_openapi_client import (
     OpenApiAuthBlocked, OpenApiAuthFailed, OpenApiError, OpenApiNoCredentials, OpenApiUnreachable,
@@ -81,16 +85,26 @@ class CameraHealthService:
             pass
         return True
 
+    @staticmethod
+    def _liveness_targets() -> Dict[str, str]:
+        """{mac: ip}: registered cameras, plus unregistered ones found by
+        discovery or an alarm push in the last 10 minutes (Prompt 131b T2).
+        A plain TCP connect - no credentials for anyone."""
+        targets = {mac: cam.ip for mac, cam in CameraHealthService._devices().items()}
+        for mac, ip in camera_discovery_service.unregistered_targets().items():
+            targets.setdefault(mac, ip)
+        return targets
+
     async def liveness_once(self) -> Dict[str, bool]:
-        devices = await asyncio.to_thread(self._devices)
-        if not devices:
+        targets = await asyncio.to_thread(self._liveness_targets)
+        if not targets:
             return {}
-        results = await asyncio.gather(*(self._tcp_ok(cam.ip) for cam in devices.values()))
+        results = await asyncio.gather(*(self._tcp_ok(ip) for ip in targets.values()))
         now_s = int(time.time())
-        for mac, ok in zip(devices, results):
+        for mac, ok in zip(targets, results):
             if ok:
                 await asyncio.to_thread(cctv_repository.update_heartbeat, mac, {"last_seen": now_s})
-        return dict(zip(devices, results))
+        return dict(zip(targets, results))
 
     async def liveness_loop(self) -> None:
         while True:

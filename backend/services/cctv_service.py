@@ -215,6 +215,13 @@ class CCTVService:
             openapi_clients.drop(old.camera_key)
         if old.device_mac and old.device_mac != new.device_mac:
             self._drop_heartbeat_if_unused(old.device_mac, exclude_id=old.id)
+        if new.ip != old.ip and new.device_mac:
+            # The registered IP was just edited: drop discovery's ip_mismatch
+            # warning now rather than at the next round (Prompt 131b).
+            try:
+                cctv_repository.update_heartbeat(new.device_mac, {}, remove=["ip_mismatch"])
+            except Exception:
+                log.warning("[VIGI] couldn't clear ip_mismatch for %s", new.device_mac)
         if new.ip != old.ip:
             new.timezone = self._read_timezone(new) if new.ip else (old.timezone or DEFAULT_CAMERA_TIMEZONE)
             if new.timezone != old.timezone:

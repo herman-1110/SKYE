@@ -118,7 +118,18 @@ and never read the real `backend/.env`. `vigi_131_test.py` needs `openssl` on PA
 "$py" -B tools/harness/vigi_131_inprocess.py --backend-dir "$exp/backend"
 ```
 Expect `34 passed, 0 failed` and `5 passed, 0 failed`. Results in
-`runs/vigi131/result.json` and `runs/vigi131_inprocess/result.json`. Fixtures (real
+`runs/vigi131/result.json` and `runs/vigi131_inprocess/result.json`.
+
+**Camera discovery (Prompt 131b).** `vigi_131b_inprocess.py` drives the discovery service
+against a loopback WS-Discovery responder (no LAN traffic): MAC/IP/name recorded and
+replies merged by MAC, the ARP fallback, pruning, `ip_mismatch`, `POST /cctvs/discover`
+(admin only), and that an unregistered camera never sees a doAuth or a login. Expect
+`9 passed, 0 failed`.
+```bash
+"$py" -B tools/harness/vigi_131b_inprocess.py --backend-dir "$exp/backend"
+```
+The launcher sets `VIGI_DISCOVERY_INTERVAL_S=0` unless the caller sets it, so no harness
+server multicasts on the real LAN. Fixtures (real
 payloads from the InSight S445, request paths stripped) are in `fixtures/vigi/`.
 
 Two opt-in switches the VIGI tests use (both off by default, so other runs are unchanged):
@@ -154,4 +165,5 @@ use a logs dir that holds only that run's files:
 | `vigi_131_test.py` | Prompt 131 VIGI camera checks through the launcher (fake cameras, two runs). |
 | `vigi_131_inprocess.py` | Prompt 131 in-process checks: `pipeline_lock`, buffer cutoff, parser on fixtures. |
 | `vigi_fake_camera.py` | Fake VIGI camera: RTSP-port listener + HTTPS OpenAPI with real digest checks. |
+| `vigi_131b_inprocess.py` | Prompt 131b camera discovery checks against a loopback WS-Discovery responder. |
 | `fixtures/vigi/` | Real InSight S445 alarm payloads (legacy and enhanced), request paths stripped. |

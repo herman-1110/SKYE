@@ -57,11 +57,20 @@ class CCTVRepository:
     # OpenAPI check all go through update_heartbeat(). It's a partial update,
     # so no writer wipes the fields another one set.
 
-    def update_heartbeat(self, mac: str, values: dict) -> None:
+    def update_heartbeat(self, mac: str, values: dict, remove=()) -> None:
+        """Set the given fields (None values skipped) and delete the fields in
+        `remove` (RTDB deletes a key updated to None); nothing else changes."""
         mac_norm = normalize_mac(mac)
         payload = {k: v for k, v in values.items() if v is not None}
+        for key in remove:
+            payload[key] = None
         payload["mac"] = mac_norm
         rtdb.reference(f"/cctv_heartbeats/{mac_heartbeat_key(mac_norm)}").update(payload)
+
+    def get_all_heartbeats(self) -> dict:
+        """Every /cctv_heartbeats node, keyed by node key (for discovery's pruning)."""
+        nodes = rtdb.reference("/cctv_heartbeats").get()
+        return nodes if isinstance(nodes, dict) else {}
 
     def delete_cctv_heartbeat(self, mac: str) -> None:
         try:

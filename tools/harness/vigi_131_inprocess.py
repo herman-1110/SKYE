@@ -36,6 +36,7 @@ FAKE_ENV = {
     "LLM_MODEL_NAME": "harness-fake-model",
     "VIGI_ALARM_PATH_SECRET": TEST_SECRET,
     "VIGI_CAMERA_PASSWORD": "",
+    "VIGI_DISCOVERY_INTERVAL_S": "0",
 }
 results = []
 

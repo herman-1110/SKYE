@@ -29,6 +29,7 @@ from typing import Optional
 from config.settings import VIGI_ALARM_PATH_SECRET_MIN_LEN, settings
 from repositories.cctv_repository import cctv_repository
 from services.camera_detection_buffer import detection_buffer
+from services.camera_discovery_service import camera_discovery_service
 from services.cctv_service import cctv_service
 from services.vigi_alarm_parser import parse_ipc_alarm
 from utils.mac_utils import InvalidMacError, normalize_mac
@@ -145,7 +146,9 @@ class VigiService:
 
             cameras = cctv_service.cameras_for_device(device_mac)
             if not cameras:
-                cctv_repository.update_heartbeat(device_mac, {"last_seen": now_s, "device_name": device_name})
+                # Listed in the editor and probed like a discovered camera
+                # (Prompt 131b): heartbeat with ip and discovered_via "alarm".
+                camera_discovery_service.record_alarm_device(device_mac, source_ip, device_name)
                 self._log_limited(("unregistered", device_mac), logging.INFO,
                                   "[VIGI] alarm from unregistered camera %s at %s: online but not placed on any floor - heartbeat written",
                                   device_mac, source_ip)

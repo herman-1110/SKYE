@@ -56,6 +56,7 @@ from routes.user_routes import router as user_router
 from routes.vigi_routes import router as vigi_router
 from routes.zone_routes import router as zone_router
 from services.camera_detection_buffer import detection_buffer
+from services.camera_discovery_service import camera_discovery_service
 from services.camera_health_service import camera_health_service
 from services.safety_service import safety_service
 from services.vigi_service import vigi_service
@@ -113,6 +114,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_man_down_stale_loop()),
         asyncio.create_task(camera_health_service.liveness_loop()),
         asyncio.create_task(camera_health_service.openapi_loop()),
+        # Prompt 131b: one discovery round now, then every VIGI_DISCOVERY_INTERVAL_S (0 = off).
+        asyncio.create_task(camera_discovery_service.discovery_loop()),
     ]
     yield
     for task in tasks:

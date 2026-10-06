@@ -118,6 +118,7 @@ def write_test_env(backend_dir, dump: bool):
         "VIGI_LIVENESS_INTERVAL_S=1",
         "VIGI_OPENAPI_INTERVAL_S=2",
         "VIGI_OPENAPI_START_DELAY_S=1",
+        "VIGI_DISCOVERY_INTERVAL_S=0",   # 131b: never multicast on the real LAN from a test
     ]
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")

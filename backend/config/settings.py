@@ -41,6 +41,7 @@ class Settings:
     VIGI_LIVENESS_INTERVAL_S: float
     VIGI_OPENAPI_INTERVAL_S: float
     VIGI_OPENAPI_START_DELAY_S: float
+    VIGI_DISCOVERY_INTERVAL_S: float
 
 
 def _load() -> Settings:
@@ -172,6 +173,13 @@ def _load() -> Settings:
         # Delay before the first OpenAPI check after startup, so the restarts
         # that --reload causes on every saved .py don't hammer the camera.
         VIGI_OPENAPI_START_DELAY_S=float(os.environ.get("VIGI_OPENAPI_START_DELAY_S", "60")),
+        # Seconds between camera discovery rounds (Prompt 131b): one ONVIF
+        # WS-Discovery probe per LAN interface (multicast, TTL 1, so it never
+        # leaves the local segment), no credentials. One round also runs at
+        # startup. 0 turns off both - the harness sets 0 so test servers never
+        # probe the real LAN - while the dashboard's "Scan now" (POST
+        # /cctvs/discover) still works.
+        VIGI_DISCOVERY_INTERVAL_S=float(os.environ.get("VIGI_DISCOVERY_INTERVAL_S", "60")),
     )
 
 
