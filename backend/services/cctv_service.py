@@ -9,7 +9,9 @@ service adds the rules around it:
   through the shared OpenAPI client (same lockout rules as the health loop),
   falling back to UTC+08:00 (Herman's decision 11);
 - deleting a camera removes its /cctv_heartbeats node unless another camera
-  still reports through the same device.
+  still reports through the same device;
+- every create, edit and delete rewrites go2rtc's live-view config if it
+  changed (Prompt 132, services/live_view_service.py).
 
 Errors are CameraError(status, plain-English message) so the dashboard can
 show them as they are. A short-lived cache of all cameras serves the alarm
@@ -27,6 +29,7 @@ from typing import List, Optional
 from models.cctv import CCTV, DEFAULT_CAMERA_TIMEZONE
 from repositories.ap_repository import ap_repository
 from repositories.cctv_repository import cctv_repository
+from services import live_view_service
 from services.camera_detection_buffer import detection_buffer
 from services.vigi_openapi_client import (
     OpenApiAuthBlocked, OpenApiAuthFailed, OpenApiError, openapi_clients,
@@ -181,6 +184,7 @@ class CCTVService:
         cam.timezone = self._read_timezone(cam)
         cctv_repository.update_fields(building_id, floor_id, cam.id, {"timezone": cam.timezone})
         self.invalidate()
+        live_view_service.refresh_config()
         return cam
 
     def update(self, building_id: str, floor_id: str, cctv_id: str, changes: dict) -> CCTV:
@@ -227,6 +231,7 @@ class CCTVService:
             if new.timezone != old.timezone:
                 cctv_repository.update_fields(building_id, floor_id, cctv_id, {"timezone": new.timezone})
                 self.invalidate()
+        live_view_service.refresh_config()   # a no-op unless the MAC, channel or IP changed
         return new
 
     def delete(self, building_id: str, floor_id: str, cctv_id: str) -> None:
@@ -235,6 +240,7 @@ class CCTVService:
         self.invalidate()
         if cam is None:
             return
+        live_view_service.refresh_config()
         detection_buffer.drop(cam.camera_key)
         openapi_clients.drop(cam.camera_key)
         if cam.device_mac:

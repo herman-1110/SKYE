@@ -55,6 +55,7 @@ from routes.simulation_routes import router as simulation_router
 from routes.user_routes import router as user_router
 from routes.vigi_routes import router as vigi_router
 from routes.zone_routes import router as zone_router
+from services import live_view_service
 from services.camera_detection_buffer import detection_buffer
 from services.camera_discovery_service import camera_discovery_service
 from services.camera_health_service import camera_health_service
@@ -110,6 +111,10 @@ async def lifespan(app: FastAPI):
     if not vigi_service.secret_configured():
         logging.warning("[VIGI] VIGI_ALARM_PATH_SECRET is unset or shorter than 24 characters: "
                         "/vigi/alarm/ answers 404 to everything")
+    # Prompt 132: bring go2rtc's live-view config in line with the camera
+    # registry. Written only if it changed, so --reload restarts don't make
+    # start.ps1 relaunch go2rtc.
+    await asyncio.to_thread(live_view_service.refresh_config)
     tasks = [
         asyncio.create_task(_man_down_stale_loop()),
         asyncio.create_task(camera_health_service.liveness_loop()),

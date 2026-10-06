@@ -64,6 +64,15 @@ async def require_admin(user: UserRecord = Depends(require_auth)) -> UserRecord:
     return user
 
 
+async def require_admin_strict(user: UserRecord = Depends(require_auth_strict)) -> UserRecord:
+    """require_admin, but a missing Authorization header is a 401 rather than a
+    422 (Prompt 132: the live-view signaling route must answer 401 without
+    auth). Existing routes keep require_admin unchanged."""
+    if user.role not in ("admin", "owner"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
 async def require_owner(user: UserRecord = Depends(require_auth)) -> UserRecord:
     """Calls require_auth then asserts role == owner. Raises 403 if not. Reserved for
     owner-only actions like switching another user's role between admin and user."""

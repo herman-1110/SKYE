@@ -1,8 +1,12 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,20 @@ class Settings:
     VIGI_OPENAPI_INTERVAL_S: float
     VIGI_OPENAPI_START_DELAY_S: float
     VIGI_DISCOVERY_INTERVAL_S: float
+    # go2rtc, the live-view relay (Prompt 132)
+    GO2RTC_API_URL: str
+    GO2RTC_CONFIG_PATH: str
+
+
+def _go2rtc_config_path(value: str) -> str:
+    """Absolute path of the go2rtc config the backend writes. Empty means
+    tools/go2rtc/go2rtc.yaml (gitignored), where tools/go2rtc/start.ps1 looks
+    by default; a relative path is taken from backend/, as start.ps1 does."""
+    value = value.strip()
+    if not value:
+        return str(_BACKEND_DIR.parent / "tools" / "go2rtc" / "go2rtc.yaml")
+    path = Path(value)
+    return str(path if path.is_absolute() else (_BACKEND_DIR / path).resolve())
 
 
 def _load() -> Settings:
@@ -180,6 +198,16 @@ def _load() -> Settings:
         # probe the real LAN - while the dashboard's "Scan now" (POST
         # /cctvs/discover) still works.
         VIGI_DISCOVERY_INTERVAL_S=float(os.environ.get("VIGI_DISCOVERY_INTERVAL_S", "60")),
+        # go2rtc's API, which WebRTC offers for live view are forwarded to
+        # (Prompt 132). Loopback: go2rtc's API has no auth of its own, and
+        # tools/go2rtc/start.ps1 runs go2rtc on this machine. The backend
+        # never starts, stops or restarts go2rtc.
+        GO2RTC_API_URL=os.environ.get("GO2RTC_API_URL", "http://127.0.0.1:1984").strip().rstrip("/"),
+        # The go2rtc config the backend generates from the camera registry
+        # (services/live_view_service.py), rewritten only when it changes;
+        # start.ps1 relaunches go2rtc when it does. It holds
+        # ${VIGI_CAMERA_PASSWORD}, never the value.
+        GO2RTC_CONFIG_PATH=_go2rtc_config_path(os.environ.get("GO2RTC_CONFIG_PATH", "")),
     )
 
 

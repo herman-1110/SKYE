@@ -1,21 +1,24 @@
 import re
 import uuid
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from middleware.auth_middleware import require_admin, require_auth, require_auth_strict
+from middleware.auth_middleware import require_admin, require_admin_strict, require_auth, require_auth_strict
 from models.ap import AccessPoint
 from models.user import UserRecord
 from repositories.ap_repository import ap_repository
 from repositories.cctv_repository import cctv_repository
 from repositories.floor_repository import floor_repository
 from schemas.floor_schema import FloorCreateRequest, FloorScaleRequest, FloorUpdateRequest
+from services import live_view_service
 from services.camera_detection_buffer import WINDOW_S as DETECTION_WINDOW_S, detection_buffer
 from services.camera_health_service import camera_health_service
 from services.cctv_service import CameraError, cctv_service
 from services.floor_service import floor_service
+from services.live_view_service import LiveViewError
+from utils.limiter import limiter
 from utils.timestamp_utils import utcnow_iso
 
 
@@ -328,6 +331,35 @@ def list_cctv_detections(
         "window_s": DETECTION_WINDOW_S,
         "detections": detection_buffer.recent(cctv.camera_key),
     }
+
+
+class WebRTCOfferRequest(BaseModel):
+    sdp: str                                # the browser's offer: video only, receive only
+    quality: Literal["sub", "main"] = "sub"  # sub = stream2 848x480; main = stream1, the HD option
+
+
+@router.post("/{floor_id}/cctvs/{cctv_id}/webrtc")
+@limiter.limit("30/minute")
+def open_cctv_live_view(
+    request: Request,
+    building_id: str,
+    floor_id: str,
+    cctv_id: str,
+    body: WebRTCOfferRequest,
+    admin: UserRecord = Depends(require_admin_strict),
+) -> dict:
+    """Live view (Prompt 132, Herman's decision 6): WebRTC signaling through
+    the backend. The offer goes to go2rtc on this machine, which answers and
+    then sends the camera's video straight to the browser. Admins only; the
+    reply is the SDP answer and nothing else - never a stream address.
+    404 unknown camera, 409 camera offline (or no MAC/IP, or an NVR camera),
+    422 not a video-only offer, 503 go2rtc not running or not yet reloaded,
+    502/504 the camera's stream couldn't be started."""
+    try:
+        return live_view_service.open_stream(building_id, floor_id, cctv_id, body.sdp, body.quality,
+                                             user_id=admin.uid)
+    except LiveViewError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
 
 
 @router.patch("/{floor_id}/cctvs/{cctv_id}/position")

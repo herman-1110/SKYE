@@ -72,6 +72,12 @@ class CCTVRepository:
         nodes = rtdb.reference("/cctv_heartbeats").get()
         return nodes if isinstance(nodes, dict) else {}
 
+    def get_heartbeat(self, mac: str) -> Optional[dict]:
+        """One /cctv_heartbeats node, or None (Prompt 132: live view only opens
+        for a camera that's online)."""
+        node = rtdb.reference(f"/cctv_heartbeats/{mac_heartbeat_key(mac)}").get()
+        return node if isinstance(node, dict) else None
+
     def delete_cctv_heartbeat(self, mac: str) -> None:
         try:
             key = mac_heartbeat_key(mac)
