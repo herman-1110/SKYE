@@ -89,6 +89,12 @@ def main(argv) -> int:
     # server never does unless the caller opts in by setting this itself (the
     # env file can't turn it back on: it's loaded with override=False).
     os.environ.setdefault("VIGI_DISCOVERY_INTERVAL_S", "0")
+    # Prompt 132: the backend writes go2rtc's config at startup, and the live
+    # go2rtc (start.ps1) relaunches when that file changes. A harness server
+    # writes into its own run dir and talks to no real go2rtc, whatever the
+    # env file says, unless the caller sets these itself.
+    os.environ.setdefault("GO2RTC_CONFIG_PATH", os.path.join(run_dir, "go2rtc.yaml"))
+    os.environ.setdefault("GO2RTC_API_URL", "http://127.0.0.1:9")
     env_path = os.environ.get("HARNESS_ENV_PATH") or C.REAL_ENV_PATH
     if not load_dotenv(dotenv_path=env_path, override=False):
         print(f"[HARNESS] could not load {env_path}", file=sys.stderr)

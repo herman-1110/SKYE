@@ -132,6 +132,21 @@ The launcher sets `VIGI_DISCOVERY_INTERVAL_S=0` unless the caller sets it, so no
 server multicasts on the real LAN. Fixtures (real
 payloads from the InSight S445, request paths stripped) are in `fixtures/vigi/`.
 
+**Live view (Prompt 132).** `vigi_132_inprocess.py` drives the WebRTC signaling route against
+a fake go2rtc (a small HTTP server on 127.0.0.1 with a canned SDP answer): 401/403/200, every
+error (go2rtc down 503, stream not loaded 503, go2rtc error 502, too slow 504, camera offline
+409, no IP / NVR 409, unknown camera 404, offers that would send video or audio 422), the
+generated go2rtc config (written at startup, `_sub`/`_main` paths, `${VIGI_CAMERA_PASSWORD}`
+and never the test password, loopback-only settings, rewritten after create / IP edit /
+delete and not after a name edit), and that the fixed test password is in no log line,
+response body or config file. Expect `24 passed, 0 failed`.
+```bash
+"$py" -B tools/harness/vigi_132_inprocess.py --backend-dir "$exp/backend"
+```
+The launcher points `GO2RTC_CONFIG_PATH` at `<run_dir>/go2rtc.yaml` and `GO2RTC_API_URL` at a
+dead port unless the caller sets them, so a harness server never rewrites the live go2rtc
+config (which would make `tools/go2rtc/start.ps1` relaunch the real go2rtc) or reaches it.
+
 Two opt-in switches the VIGI tests use (both off by default, so other runs are unchanged):
 - `HARNESS_FAKE_AUTH=1`: `firebase_admin.auth.verify_id_token` accepts
   `harness-token:<uid>`, so `require_auth`/`require_admin` routes can be driven as the
@@ -166,4 +181,5 @@ use a logs dir that holds only that run's files:
 | `vigi_131_inprocess.py` | Prompt 131 in-process checks: `pipeline_lock`, buffer cutoff, parser on fixtures. |
 | `vigi_fake_camera.py` | Fake VIGI camera: RTSP-port listener + HTTPS OpenAPI with real digest checks. |
 | `vigi_131b_inprocess.py` | Prompt 131b camera discovery checks against a loopback WS-Discovery responder. |
+| `vigi_132_inprocess.py` | Prompt 132 live-view checks: signaling route, go2rtc config, secrets, against a fake go2rtc. |
 | `fixtures/vigi/` | Real InSight S445 alarm payloads (legacy and enhanced), request paths stripped. |
