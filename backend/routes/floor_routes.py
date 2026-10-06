@@ -2,17 +2,19 @@ import re
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
-from middleware.auth_middleware import require_admin, require_auth
+from middleware.auth_middleware import require_admin, require_auth, require_auth_strict
 from models.ap import AccessPoint
-from models.cctv import CCTV
 from models.user import UserRecord
 from repositories.ap_repository import ap_repository
 from repositories.cctv_repository import cctv_repository
 from repositories.floor_repository import floor_repository
 from schemas.floor_schema import FloorCreateRequest, FloorScaleRequest, FloorUpdateRequest
+from services.camera_detection_buffer import WINDOW_S as DETECTION_WINDOW_S, detection_buffer
+from services.camera_health_service import camera_health_service
+from services.cctv_service import CameraError, cctv_service
 from services.floor_service import floor_service
 from utils.timestamp_utils import utcnow_iso
 
@@ -43,16 +45,23 @@ class CCTVCreateRequest(BaseModel):
     name: str
     x_pct: float
     y_pct: float
+    # Prompt 131: MAC (dashes, colons or none), IP and checkpoint are checked
+    # in cctv_service so a bad value comes back as a 422 with a plain sentence
+    # (a pydantic validator's 422 is a list the dashboard can't show as-is).
     mac: Optional[str] = None
+    ip: Optional[str] = None
+    checkpoint_ap_id: Optional[str] = None
+    channel: Optional[int] = None        # hidden in the UI; 1 for a direct camera
+    source_type: Optional[str] = None    # hidden in the UI; "ipc"
 
-    @field_validator("mac")
-    @classmethod
-    def validate_mac(cls, v: Optional[str]) -> Optional[str]:
-        if v is None or v.strip() == "":
-            return None
-        if not _MAC_RE.match(v.strip()):
-            raise ValueError("MAC must be in format XX:XX:XX:XX:XX:XX")
-        return v.strip().upper()
+
+class CCTVUpdateRequest(BaseModel):
+    """Only the fields sent are changed; send null to clear ip or checkpoint_ap_id."""
+    name: Optional[str] = None
+    mac: Optional[str] = None
+    ip: Optional[str] = None
+    checkpoint_ap_id: Optional[str] = None
+    channel: Optional[int] = None
 
 
 class PositionUpdateRequest(BaseModel):
@@ -255,7 +264,7 @@ def list_cctvs(
     caller: UserRecord = Depends(require_auth),
 ) -> list:
     cctvs = cctv_repository.get_all(building_id, floor_id)
-    return [c.__dict__ for c in cctvs]
+    return [c.to_dict() for c in cctvs]
 
 
 @router.post("/{floor_id}/cctvs")
@@ -263,20 +272,62 @@ def create_cctv(
     building_id: str,
     floor_id: str,
     body: CCTVCreateRequest,
+    background_tasks: BackgroundTasks,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    cctv = CCTV(
-        id=str(uuid.uuid4()),
-        floor_id=floor_id,
-        building_id=building_id,
-        name=body.name,
-        x_pct=body.x_pct,
-        y_pct=body.y_pct,
-        created_at=utcnow_iso(),
-        mac=body.mac,
-    )
-    cctv_repository.save(building_id, floor_id, cctv)
-    return cctv.__dict__
+    try:
+        cctv = cctv_service.create(
+            building_id, floor_id,
+            name=body.name, x_pct=body.x_pct, y_pct=body.y_pct, mac=body.mac, ip=body.ip,
+            checkpoint_ap_id=body.checkpoint_ap_id, channel=body.channel, source_type=body.source_type,
+        )
+    except CameraError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    # First health check right away rather than at the next OpenAPI sweep.
+    background_tasks.add_task(camera_health_service.check_now, cctv)
+    return cctv.to_dict()
+
+
+@router.patch("/{floor_id}/cctvs/{cctv_id}")
+def update_cctv(
+    building_id: str,
+    floor_id: str,
+    cctv_id: str,
+    body: CCTVUpdateRequest,
+    background_tasks: BackgroundTasks,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    """Edit name, mac, ip, checkpoint_ap_id or channel (Prompt 131 T2). Changing
+    ip re-reads the camera's time zone once."""
+    changes = body.model_dump(exclude_unset=True)
+    try:
+        cctv = cctv_service.update(building_id, floor_id, cctv_id, changes)
+    except CameraError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    if "ip" in changes or "mac" in changes or "channel" in changes:
+        background_tasks.add_task(camera_health_service.check_now, cctv)
+    return cctv.to_dict()
+
+
+@router.get("/{floor_id}/cctvs/{cctv_id}/detections")
+def list_cctv_detections(
+    building_id: str,
+    floor_id: str,
+    cctv_id: str,
+    caller: UserRecord = Depends(require_auth_strict),
+) -> dict:
+    """The camera's alarm events from the last 15 minutes, newest first
+    (Prompt 131 T7). In memory only: process_started_at tells the reader
+    whether a restart may have emptied the window."""
+    cctv = cctv_repository.get_by_id(building_id, floor_id, cctv_id)
+    if cctv is None:
+        raise HTTPException(status_code=404, detail="Camera not found.")
+    return {
+        "camera_key": cctv.camera_key,
+        "process_started_at": detection_buffer.process_started_at,
+        "window_s": DETECTION_WINDOW_S,
+        "detections": detection_buffer.recent(cctv.camera_key),
+    }
 
 
 @router.patch("/{floor_id}/cctvs/{cctv_id}/position")
@@ -298,5 +349,6 @@ def delete_cctv(
     cctv_id: str,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    cctv_repository.delete(building_id, floor_id, cctv_id)
+    # Also removes the camera's /cctv_heartbeats node (Prompt 131 T2).
+    cctv_service.delete(building_id, floor_id, cctv_id)
     return {"status": "ok"}

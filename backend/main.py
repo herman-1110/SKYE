@@ -55,10 +55,20 @@ from routes.simulation_routes import router as simulation_router
 from routes.user_routes import router as user_router
 from routes.vigi_routes import router as vigi_router
 from routes.zone_routes import router as zone_router
+from services.camera_detection_buffer import detection_buffer
+from services.camera_health_service import camera_health_service
 from services.safety_service import safety_service
+from services.vigi_service import vigi_service
 from utils.limiter import limiter
+from utils.log_redaction import install_log_redaction
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# Prompt 131 A1: the camera's alarm path holds a secret, so no log line may
+# show it - uvicorn's access log, request_logger and slowapi all log paths.
+# After basicConfig so root's handler exists; uvicorn configured its own
+# loggers before importing this module.
+install_log_redaction()
 
 _MAX_BODY_BYTES = 1_048_576  # 1 MB
 _MAN_DOWN_STALE_TICK_S = 60.0
@@ -93,13 +103,25 @@ async def _man_down_stale_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(_man_down_stale_loop())
+    # Prompt 131: camera detections live in memory, so readers need to know
+    # when this process started.
+    detection_buffer.mark_process_start()
+    if not vigi_service.secret_configured():
+        logging.warning("[VIGI] VIGI_ALARM_PATH_SECRET is unset or shorter than 24 characters: "
+                        "/vigi/alarm/ answers 404 to everything")
+    tasks = [
+        asyncio.create_task(_man_down_stale_loop()),
+        asyncio.create_task(camera_health_service.liveness_loop()),
+        asyncio.create_task(camera_health_service.openapi_loop()),
+    ]
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 class MaxBodySizeMiddleware(BaseHTTPMiddleware):
@@ -162,6 +184,10 @@ def create_app() -> FastAPI:
     app.include_router(telemetry_router)
     app.include_router(omada_telemetry_router)
 
+    # VIGI camera Alarm Server push: unprefixed like /telemetry/omada; the
+    # secret path segment is the credential (Prompt 131 T4)
+    app.include_router(vigi_router)
+
     # Routers below enforce auth per-route via Depends(require_auth/require_admin).
     # No router-level dependencies= is applied here — check the route, not this comment.
     app.include_router(alert_router)
@@ -174,7 +200,6 @@ def create_app() -> FastAPI:
     app.include_router(safety_settings_router)
     app.include_router(user_router)
     app.include_router(simulation_router)
-    app.include_router(vigi_router)
 
     return app
 

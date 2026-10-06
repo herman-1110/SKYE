@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import Depends, Header, HTTPException, Request
 
 import firebase_admin.auth
@@ -40,6 +42,18 @@ async def require_auth(authorization: str = Header(..., alias="Authorization")) 
     if user.status == "suspended":
         raise HTTPException(status_code=403, detail="Account suspended")
     return user
+
+
+async def require_auth_strict(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> UserRecord:
+    """require_auth, but a missing Authorization header is a 401 rather than
+    FastAPI's 422 for a missing required header (Prompt 131: the camera
+    detections route must answer 401 without auth). Existing routes keep
+    require_auth unchanged."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return await require_auth(authorization)
 
 
 async def require_admin(user: UserRecord = Depends(require_auth)) -> UserRecord:
