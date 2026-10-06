@@ -104,6 +104,30 @@ file. Expect `real_alive_after_kill: false`, `bom: false`, `ends_with_newline: t
 "$py" -B tools/harness/kill_test.py --backend-dir "$exp/backend" --port 8002
 ```
 
+**VIGI camera events (Prompt 131).** Two scripts. `vigi_131_test.py` drives the launcher
+through Prompt 131's VALIDATION 1-11 against fake cameras on `127.0.0.2`-`.4`
+(`vigi_fake_camera.py`: an RTSP-port listener plus an HTTPS OpenAPI that checks the
+real SHA-256 digest and counts logins), with two server runs so the lockout guard is
+tested across a restart. `vigi_131_inprocess.py` covers VALIDATION 12 (an alarm push
+completes while `pipeline_lock` is held by another thread), the 15-minute buffer cutoff
+and the parser on every fixture. Both write `<backend-dir>/.env` with **fake values only**
+and never read the real `backend/.env`. `vigi_131_test.py` needs `openssl` on PATH
+(Git Bash has it).
+```bash
+"$py" -B tools/harness/vigi_131_test.py --backend-dir "$exp/backend" --port 8003
+"$py" -B tools/harness/vigi_131_inprocess.py --backend-dir "$exp/backend"
+```
+Expect `34 passed, 0 failed` and `5 passed, 0 failed`. Results in
+`runs/vigi131/result.json` and `runs/vigi131_inprocess/result.json`. Fixtures (real
+payloads from the InSight S445, request paths stripped) are in `fixtures/vigi/`.
+
+Two opt-in switches the VIGI tests use (both off by default, so other runs are unchanged):
+- `HARNESS_FAKE_AUTH=1`: `firebase_admin.auth.verify_id_token` accepts
+  `harness-token:<uid>`, so `require_auth`/`require_admin` routes can be driven as the
+  seeded `harness-owner`.
+- `HARNESS_ENV_PATH=<file>`: the launcher loads that file instead of the real
+  `backend/.env`.
+
 **Console vs capture coverage** for one run. It reads every `skye-*` in the dir given, so
 use a logs dir that holds only that run's files:
 ```bash
@@ -127,3 +151,7 @@ use a logs dir that holds only that run's files:
 | `kill_test.py` | Hard-kill the server, check the capture file. |
 | `check_capture.py` | Console-vs-capture coverage for one run. |
 | `repo_snapshot.py` | Size/mtime snapshot of the repo; diff two to prove a run changed nothing. |
+| `vigi_131_test.py` | Prompt 131 VIGI camera checks through the launcher (fake cameras, two runs). |
+| `vigi_131_inprocess.py` | Prompt 131 in-process checks: `pipeline_lock`, buffer cutoff, parser on fixtures. |
+| `vigi_fake_camera.py` | Fake VIGI camera: RTSP-port listener + HTTPS OpenAPI with real digest checks. |
+| `fixtures/vigi/` | Real InSight S445 alarm payloads (legacy and enhanced), request paths stripped. |

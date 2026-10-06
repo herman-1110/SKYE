@@ -1,0 +1,26 @@
+{
+  "description": "legacy format, two events in one POST",
+  "source": "skye-log-archive/vigi-2026-10-05/20261005.log record #141, received 2026-10-05T06:39:08.073Z from the real InSight S445",
+  "content_type": "application/json; charset=utf-8",
+  "body": {
+    "ip": "192.168.0.101",
+    "mac": "98-ba-5f-8b-10-03",
+    "protocol": "HTTP",
+    "device_name": "InSight S445 1.0_1003",
+    "event_list": [
+      {
+        "dateTime": "20261005143905",
+        "event_type": [
+          "PEOPLE"
+        ]
+      },
+      {
+        "dateTime": "20261005143906",
+        "event_type": [
+          "MOTION",
+          "PEOPLE"
+        ]
+      }
+    ]
+  }
+}

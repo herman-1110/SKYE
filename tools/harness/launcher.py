@@ -80,10 +80,14 @@ def main(argv) -> int:
     with open(os.path.join(run_dir, "pid.txt"), "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
 
-    # (2) real .env, explicitly, before anything can import config.settings
+    # (2) real .env, explicitly, before anything can import config.settings.
+    # HARNESS_ENV_PATH (Prompt 131) swaps in a test .env instead, so a test that
+    # must never see real secrets (camera password, alarm path secret) doesn't
+    # load the real file at all.
     from dotenv import load_dotenv
-    if not load_dotenv(dotenv_path=C.REAL_ENV_PATH, override=False):
-        print(f"[HARNESS] could not load {C.REAL_ENV_PATH}", file=sys.stderr)
+    env_path = os.environ.get("HARNESS_ENV_PATH") or C.REAL_ENV_PATH
+    if not load_dotenv(dotenv_path=env_path, override=False):
+        print(f"[HARNESS] could not load {env_path}", file=sys.stderr)
         return 2
 
     # (3)

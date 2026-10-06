@@ -1282,6 +1282,18 @@ def install_fakes(run_dir: Optional[str]) -> _Store:
                    "get_user_by_email", "create_custom_token", "verify_session_cookie"):
             if hasattr(fa_auth, nm):
                 setattr(fa_auth, nm, _auth_unsupported(nm))
+
+        # Opt-in (Prompt 131): HARNESS_FAKE_AUTH=1 accepts "harness-token:<uid>"
+        # as an ID token for that uid, so require_auth/require_admin routes can
+        # be driven against the seeded users (harness-owner is an approved
+        # owner). Anything else is rejected the way a bad token is. Off by
+        # default: the fakes stay loud for every other caller.
+        if os.environ.get("HARNESS_FAKE_AUTH") == "1":
+            def verify_id_token(id_token, *a, **kw):
+                if isinstance(id_token, str) and id_token.startswith("harness-token:") and len(id_token) > 14:
+                    return {"uid": id_token[len("harness-token:"):]}
+                raise ValueError("harness fake auth: not a harness-token")
+            fa_auth.verify_id_token = verify_id_token
     except ImportError:
         pass
     try:
