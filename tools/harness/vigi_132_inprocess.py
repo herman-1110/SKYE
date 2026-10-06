@@ -11,9 +11,10 @@
      that would send video or audio -> 422
   3  the generated config: written at startup; _sub/_main streams with the
      right paths for each registered camera; ${VIGI_CAMERA_PASSWORD} and
-     never the test password; loopback-only settings; rewritten after a
-     create, an IP edit and a delete, and NOT rewritten when nothing in it
-     changes (a name edit); no temp file left behind
+     never the test password; API on loopback, WebRTC on the address towards
+     the camera or GO2RTC_WEBRTC_HOST; rewritten after a create, an IP edit, a
+     delete and (at the next viewing) an address change, and NOT rewritten
+     when nothing in it changes (a name edit); no temp file left behind
   4  the test password appears in no log line, response body or config
      file (every captured output is searched for it)
 
@@ -25,6 +26,7 @@ server on 127.0.0.1, and the cameras are 127.0.0.2x addresses nothing
 listens on. The real backend/.env is never read; settings are fake values.
 """
 import argparse
+import dataclasses
 import glob
 import json
 import logging
@@ -212,8 +214,23 @@ def main() -> int:
         settings_ok = all(s in text for s in (
             "modules: [api, rtsp, webrtc]", 'listen: "127.0.0.1:1984"', 'allow_paths: ["/api", "/api/webrtc"]',
             'rtsp:\n  listen: ""', 'listen: "127.0.0.1:8555"', 'candidates: ["127.0.0.1:8555"]', "ice_servers: []"))
-        check(3, "config: only api/rtsp/webrtc, API and WebRTC on 127.0.0.1, no RTSP re-server, no ICE servers",
-              settings_ok, "")
+        check(3, "config: only api/rtsp/webrtc, API on 127.0.0.1, WebRTC on the address towards the camera "
+                 "(127.0.0.1 for these loopback test cameras), no RTSP re-server, no ICE servers", settings_ok, "")
+        cam_lan = CCTV(id="x", floor_id=C.FLOOR_ID, building_id=C.BUILDING_ID, name="x", x_pct=0, y_pct=0,
+                       created_at="", mac=CAM_A["mac"], device_mac=CAM_A["mac"], ip="192.168.0.101")
+        lan = L.render_config([cam_lan], "192.168.0.5")
+        check(3, "a LAN address: WebRTC listens and is offered there only; the API stays on 127.0.0.1:1984",
+              all(s in lan for s in ('listen: "192.168.0.5:8555"', 'candidates: ["192.168.0.5:8555"]',
+                                     'candidates: ["192.168.0.5"]', 'listen: "127.0.0.1:1984"'))
+              and "loopback: true" not in lan and "127.0.0.1:8555" not in lan, "")
+        real_settings = L.settings
+        L.settings = dataclasses.replace(real_settings, GO2RTC_WEBRTC_HOST="192.168.0.77")
+        set_host = L.webrtc_host([cam_lan])
+        L.settings = dataclasses.replace(real_settings, GO2RTC_WEBRTC_HOST="not-an-address")
+        bad_host = L.webrtc_host([CCTV(**{**cam_lan.__dict__, "ip": CAM_A["ip"]})])
+        L.settings = real_settings
+        check(3, "GO2RTC_WEBRTC_HOST wins when it's an IPv4 address; otherwise the route to the camera decides",
+              set_host == "192.168.0.77" and bad_host == "127.0.0.1", f"set={set_host} bad={bad_host}")
         check(3, "config: an NVR camera and a camera without an IP get no stream, only a comment",
               "nvr_AABBCC132A02_3" in text and '"nvr_' not in text and "ipc_AABBCC132A03_1: no IP set" in text
               and '"ipc_AABBCC132A03' not in text, "")
@@ -243,6 +260,21 @@ def main() -> int:
         check(1, "quality main (HD) -> stream <camera>_main; an unknown quality -> 422",
               r_hd.status_code == 200 and [q["query"] for q in fake.requests] == [{"src": [f"{CAM_A['stream']}_main"]}]
               and r_q.status_code == 422, f"hd={r_hd.status_code} bad={r_q.status_code}")
+        # The laptop's address changes (DHCP): the next viewing rewrites the config
+        # for start.ps1 to pick up, and only then.
+        m_before = mtime()
+        L.settings = dataclasses.replace(L.settings, GO2RTC_WEBRTC_HOST="127.0.0.9")
+        online(CAM_A)
+        r_moved = offer(CAM_A["id"])
+        moved = config_text() or ""
+        L.settings = real_settings
+        r_back = offer(CAM_A["id"])
+        m_back = mtime()
+        r_same = offer(CAM_A["id"])
+        check(3, "a viewing re-checks the address: config rewritten when it changed, untouched when it didn't",
+              r_moved.status_code == 200 and 'listen: "127.0.0.9:8555"' in moved and m_before != m_back
+              and 'listen: "127.0.0.1:8555"' in (config_text() or "") and r_back.status_code == 200
+              and r_same.status_code == 200 and mtime() == m_back, f"moved={r_moved.status_code} back={r_back.status_code}")
 
         # 2. errors
         online(CAM_A)

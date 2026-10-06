@@ -137,9 +137,10 @@ a fake go2rtc (a small HTTP server on 127.0.0.1 with a canned SDP answer): 401/4
 error (go2rtc down 503, stream not loaded 503, go2rtc error 502, too slow 504, camera offline
 409, no IP / NVR 409, unknown camera 404, offers that would send video or audio 422), the
 generated go2rtc config (written at startup, `_sub`/`_main` paths, `${VIGI_CAMERA_PASSWORD}`
-and never the test password, loopback-only settings, rewritten after create / IP edit /
-delete and not after a name edit), and that the fixed test password is in no log line,
-response body or config file. Expect `24 passed, 0 failed`.
+and never the test password, API on loopback and WebRTC on the address towards the camera or
+`GO2RTC_WEBRTC_HOST`, rewritten after create / IP edit / delete and when that address changes,
+not after a name edit), and that the fixed test password is in no log line, response body or
+config file. Expect `27 passed, 0 failed`.
 ```bash
 "$py" -B tools/harness/vigi_132_inprocess.py --backend-dir "$exp/backend"
 ```

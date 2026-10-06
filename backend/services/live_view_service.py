@@ -18,14 +18,27 @@ Each registered camera gets two streams, <camera_key>_sub (stream2,
 replaced by '_' so the name is a plain YAML key. #media=video keeps audio
 out (Herman's decision 7).
 
+Where WebRTC listens. go2rtc's API stays on 127.0.0.1:1984, but its WebRTC
+media port (8555) listens on this laptop's LAN address (Herman's option A,
+6 Oct): Windows refuses packets from a socket bound to the LAN address to
+127.0.0.1 (WSAEADDRNOTAVAIL), and a browser's WebRTC sockets are bound to the
+LAN address, so a loopback-only go2rtc can never be reached (measured in the
+132 live check). The address comes from GO2RTC_WEBRTC_HOST, else from the
+route to the registered camera, and is re-checked before every viewing, so a
+DHCP change rewrites the config and start.ps1 relaunches go2rtc. The
+laptop's own browser reaches that address without leaving the machine; other
+devices are kept out by Windows Firewall's inbound rules for go2rtc.
+
 Signaling (T3). open_stream() forwards the browser's SDP offer to go2rtc's
 POST /api/webrtc?src=<stream name> and returns the answer. go2rtc's error
 bodies are never passed on or logged: they aren't masked like its logs and
 can carry RTSP error text. Every failure becomes one fixed sentence.
 """
+import ipaddress
 import logging
 import os
 import re
+import socket
 import tempfile
 import threading
 import time
@@ -41,6 +54,7 @@ log = logging.getLogger(__name__)
 
 QUALITIES = {"sub": "stream2", "main": "stream1"}   # sub is the default; main is the HD option
 RTSP_PORT = 554
+WEBRTC_PORT = 8555
 ONLINE_THRESHOLD_S = 10.0      # same rule as the dashboard (useCCTVHeartbeats.ts ONLINE_THRESHOLD_MS)
 MAX_OFFER_BYTES = 64 * 1024    # a browser's video-only offer is a few KB
 _CONNECT_TIMEOUT_S = 2.0
@@ -107,28 +121,69 @@ api:
 rtsp:
   listen: ""                     # the RTSP client stays (it reads the camera); no RTSP re-server
 
-webrtc:
-  listen: "127.0.0.1:8555"
-  candidates: ["127.0.0.1:8555"]
-  ice_servers: []                # no STUN or TURN
-  filters:
-    loopback: true
-    candidates: ["127.0.0.1"]
-    networks: [udp4, tcp4]
-  # Viewing from other devices (later; not built): listen on ":8555", put this
-  # laptop's LAN address in candidates (e.g. "192.168.0.5:8555"), drop the
-  # filters, and add a Windows Firewall rule for TCP and UDP 8555.
-
 log:
   output: "file:go2rtc.log"      # next to this file: start.ps1 runs go2rtc in this folder
   format: text
   level: info
 """
 
+_WEBRTC_BLOCK = """\
+webrtc:
+  listen: "{host}:{port}"   # media only; the API above stays on loopback
+  candidates: ["{host}:{port}"]
+  ice_servers: []                # no STUN or TURN
+  filters:
+{loopback}    candidates: ["{host}"]
+    networks: [udp4, tcp4]
+  # This laptop's own browser reaches that address without leaving the
+  # machine. Other devices are kept out by Windows Firewall's inbound Block
+  # rules for go2rtc (made when its network prompt was refused). Viewing from
+  # other devices (later; not built) is an inbound Allow rule for TCP and
+  # UDP 8555 instead, which Herman adds himself.
+"""
 
-def render_config(cameras: Iterable[CCTV]) -> str:
-    """The whole config file for these cameras. Deterministic (sorted by
-    camera_key), so an unchanged registry renders byte-identical text."""
+
+def _ipv4(value) -> Optional[str]:
+    try:
+        return str(ipaddress.IPv4Address(str(value).strip()))
+    except ValueError:
+        return None
+
+
+def _route_source(ip: str) -> Optional[str]:
+    """The local address this machine uses to reach ip. A UDP connect only
+    looks up the route; nothing is sent."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect((ip, RTSP_PORT))
+            return _ipv4(s.getsockname()[0])
+    except OSError:
+        return None
+
+
+def webrtc_host(cameras: Iterable[CCTV]) -> str:
+    """Where go2rtc's WebRTC media listens: GO2RTC_WEBRTC_HOST if set, else
+    this laptop's address towards the registered camera (its LAN address),
+    else 127.0.0.1 (no camera, nothing to stream)."""
+    configured = settings.GO2RTC_WEBRTC_HOST
+    if configured:
+        host = _ipv4(configured)
+        if host:
+            return host
+        log.warning("[LIVE] GO2RTC_WEBRTC_HOST=%r isn't an IPv4 address; using the LAN address instead", configured)
+    for cam in sorted((c for c in cameras if c.ip), key=lambda c: c.camera_key or ""):
+        host = _route_source(cam.ip)
+        if host and host != "0.0.0.0":
+            return host
+    return "127.0.0.1"
+
+
+def render_config(cameras: Iterable[CCTV], host: Optional[str] = None) -> str:
+    """The whole config file for these cameras, with WebRTC on host (default
+    webrtc_host()). Deterministic (sorted by camera_key), so an unchanged
+    registry and address render byte-identical text."""
+    cameras = list(cameras)
+    host = host or webrtc_host(cameras)
     lines = []
     for cam in sorted((c for c in cameras if c.camera_key), key=lambda c: c.camera_key):
         if not cam.ip:
@@ -142,7 +197,9 @@ def render_config(cameras: Iterable[CCTV]) -> str:
         for quality, url in sources.items():
             lines.append(f'  "{stream_name(cam, quality)}": "{url}"')
     streams = "streams:\n" + "\n".join(lines) + "\n" if lines else "streams: {}\n"
-    return _HEADER + "\n" + streams
+    webrtc = _WEBRTC_BLOCK.format(host=host, port=WEBRTC_PORT,
+                                  loopback="    loopback: true\n" if host.startswith("127.") else "")
+    return _HEADER + "\n" + webrtc + "\n" + streams
 
 
 _write_lock = threading.Lock()
@@ -165,7 +222,8 @@ def write_config() -> bool:
     """Render the config from a fresh registry read; write it, atomically,
     only if it differs from what's on disk. True when the file was written."""
     cameras = cctv_repository.get_all_global()   # fresh read, not cctv_service's 30 s cache
-    data = render_config(cameras).encode("utf-8")
+    host = webrtc_host(cameras)
+    data = render_config(cameras, host).encode("utf-8")
     path = settings.GO2RTC_CONFIG_PATH
     with _write_lock:
         try:
@@ -190,7 +248,7 @@ def write_config() -> bool:
                 pass
             raise
     streams = data.count(b'": "rtsp://')
-    log.info("[LIVE] go2rtc config written: %d stream(s), %s", streams, path)
+    log.info("[LIVE] go2rtc config written: %d stream(s), WebRTC on %s:%d, %s", streams, host, WEBRTC_PORT, path)
     return True
 
 
@@ -304,6 +362,9 @@ def open_stream(building_id: str, floor_id: str, cctv_id: str, sdp, quality: str
         raise LiveViewError(409, NO_IP)
     if not camera_online(cam):
         raise LiveViewError(409, OFFLINE)
+    # A no-op unless this laptop's LAN address changed since the last write
+    # (DHCP); then start.ps1 relaunches go2rtc on the new one.
+    refresh_config()
     answer = _exchange(cam, quality, sdp)
     log.info("[LIVE] %s opened %s (%s); answer candidates: %s",
              user_id or "an admin", cam.camera_key, quality, answer_candidates(answer))

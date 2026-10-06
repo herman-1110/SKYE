@@ -16,10 +16,12 @@ with the config the SKYE backend generates from the camera registry
     when the password in backend\.env changes, re-reading it every time.
   - relaunches go2rtc if it stops by itself.
 
-go2rtc listens on 127.0.0.1 only (API 1984, WebRTC 8555), so viewing works
-on this laptop and nowhere else; if Windows asks whether go2rtc may use the
-network, you can refuse. go2rtc's own log goes to go2rtc.log next to the
-config file. Ctrl+C stops go2rtc and this script.
+go2rtc's API listens on 127.0.0.1:1984 only. Its WebRTC media port (8555)
+listens on this laptop's LAN address, because Windows won't let a browser's
+WebRTC traffic reach 127.0.0.1. If Windows asks whether go2rtc may use the
+network, refuse: the Block rules that creates keep other devices out, and
+viewing on this laptop still works. go2rtc's own log goes to go2rtc.log next
+to the config file. Ctrl+C stops go2rtc and this script.
 
 The backend never starts, stops or supervises go2rtc; this script does.
 #>
@@ -150,7 +152,7 @@ try {
             }
             Start-Sleep -Seconds 1
             if ((Get-ConfigPath) -ne $config -or (Get-Stamp $config) -ne $configStamp) {
-                Write-Host "Camera list changed: restarting go2rtc."
+                Write-Host "Config changed (cameras or this laptop's address): restarting go2rtc."
                 Stop-Go2rtc $proc
                 break
             }

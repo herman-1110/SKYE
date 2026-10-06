@@ -49,6 +49,7 @@ class Settings:
     # go2rtc, the live-view relay (Prompt 132)
     GO2RTC_API_URL: str
     GO2RTC_CONFIG_PATH: str
+    GO2RTC_WEBRTC_HOST: str
 
 
 def _go2rtc_config_path(value: str) -> str:
@@ -208,6 +209,12 @@ def _load() -> Settings:
         # start.ps1 relaunches go2rtc when it does. It holds
         # ${VIGI_CAMERA_PASSWORD}, never the value.
         GO2RTC_CONFIG_PATH=_go2rtc_config_path(os.environ.get("GO2RTC_CONFIG_PATH", "")),
+        # The address go2rtc's WebRTC media listens on (port 8555). Empty means
+        # this laptop's LAN address, found from the route to the registered
+        # camera. Not 127.0.0.1: Windows won't let a browser's WebRTC sockets
+        # (bound to the LAN address) reach loopback - measured in the 132 live
+        # check. Windows Firewall's inbound rules decide who else can reach it.
+        GO2RTC_WEBRTC_HOST=os.environ.get("GO2RTC_WEBRTC_HOST", "").strip(),
     )
 
 
