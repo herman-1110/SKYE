@@ -112,8 +112,11 @@ class FloorService:
         cctvs = cctv_repository.get_all(building_id, floor_id)
         for cctv in cctvs:
             cctv_repository.delete(building_id, floor_id, cctv.id)
-            if cctv.mac:
-                cctv_repository.delete_cctv_heartbeat(cctv.mac)
+            if cctv.device_mac or cctv.mac:
+                cctv_repository.delete_cctv_heartbeat(cctv.device_mac or cctv.mac)
+        if cctvs:
+            from services.cctv_service import cctv_service
+            cctv_service.invalidate()
 
         # 4. Delete floorplan image from Firebase Storage
         if floor.storage_path:
@@ -136,6 +139,10 @@ class FloorService:
             from services.simulation_events import remove_ap as events_remove_ap
             patrol_remove_ap(mac)
             events_remove_ap(mac)
+
+        # Cameras that covered this checkpoint now cover nothing (Prompt 131 T2).
+        from services.cctv_service import cctv_service
+        cctv_service.unlink_ap(building_id, floor_id, ap_id)
 
         floor = floor_repository.get_by_id(building_id, floor_id)
         if floor and floor.patrol_route:

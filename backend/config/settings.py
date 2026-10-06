@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,6 +33,14 @@ class Settings:
     LLM_PROVIDER: str             # accepts: gemini | openai | ollama | claude
     LLM_MODEL_NAME: str           # passed directly to the active provider
     RAG_SIMILARITY_FLOOR: float
+    # VIGI camera (Prompt 131). The two secrets are kept out of repr() so a
+    # stray print(settings) can never show them.
+    VIGI_ALARM_PATH_SECRET: str = field(repr=False)
+    VIGI_CAMERA_PASSWORD: str = field(repr=False)
+    VIGI_RAW_DUMP_ENABLED: bool
+    VIGI_LIVENESS_INTERVAL_S: float
+    VIGI_OPENAPI_INTERVAL_S: float
+    VIGI_OPENAPI_START_DELAY_S: float
 
 
 def _load() -> Settings:
@@ -135,6 +143,35 @@ def _load() -> Settings:
         # injects irrelevant precedent into a safety report with the same
         # authority as a relevant one, which is worse than surfacing nothing.
         RAG_SIMILARITY_FLOOR=float(os.environ.get("RAG_SIMILARITY_FLOOR", "0.5")),
+        # Secret path segment the camera's Alarm Server posts to:
+        # POST /vigi/alarm/<secret> (Prompt 131). The camera sends no auth
+        # header (measured on the real InSight S445, 5 Oct), so the path is
+        # the only credential. Unset or shorter than
+        # VIGI_ALARM_PATH_SECRET_MIN_LEN: the endpoint answers 404 to
+        # everything and startup logs one warning. Never logged; every
+        # logged path under /vigi/alarm/ is redacted (utils/log_redaction.py).
+        VIGI_ALARM_PATH_SECRET=os.environ.get("VIGI_ALARM_PATH_SECRET", "").strip(),
+        # Camera admin password for the read-only OpenAPI health probe
+        # (services/vigi_openapi_client.py). Unset: OpenAPI probing is off and
+        # the heartbeat's probe reads "no_credentials"; TCP liveness still
+        # runs. The camera locks its admin account after repeated failed
+        # logins, so the client never retries a rejected password until
+        # backend/.env changes. Never logged.
+        VIGI_CAMERA_PASSWORD=os.environ.get("VIGI_CAMERA_PASSWORD", ""),
+        # Log each raw alarm body with a [VIGI] prefix (never the path).
+        # Debugging only, like OMADA_RAW_DUMP_ENABLED.
+        VIGI_RAW_DUMP_ENABLED=os.environ.get("VIGI_RAW_DUMP_ENABLED", "false").lower() == "true",
+        # Seconds between TCP liveness probes of each camera's RTSP port.
+        # Herman's decision 5 (6 Oct): 5 s, so the dashboard's 10 s online
+        # threshold (useCCTVHeartbeats.ts) holds without changing the hook.
+        VIGI_LIVENESS_INTERVAL_S=float(os.environ.get("VIGI_LIVENESS_INTERVAL_S", "5")),
+        # Seconds between OpenAPI health checks per camera (device status,
+        # clock, human-detection switch). Slow on purpose: each stok lasts
+        # 30 min, so this logs in at most twice an hour per camera.
+        VIGI_OPENAPI_INTERVAL_S=float(os.environ.get("VIGI_OPENAPI_INTERVAL_S", "300")),
+        # Delay before the first OpenAPI check after startup, so the restarts
+        # that --reload causes on every saved .py don't hammer the camera.
+        VIGI_OPENAPI_START_DELAY_S=float(os.environ.get("VIGI_OPENAPI_START_DELAY_S", "60")),
     )
 
 
@@ -144,3 +181,6 @@ settings = _load()
 RATE_LIMIT_AUTH = "5/15minutes"
 RATE_LIMIT_GENERAL = "100/minute"
 RATE_LIMIT_TELEMETRY = "200/minute"
+
+# A shorter VIGI_ALARM_PATH_SECRET is treated as unset (Prompt 131 T1).
+VIGI_ALARM_PATH_SECRET_MIN_LEN = 24
