@@ -51,17 +51,18 @@ export default function DeviceStatusPanel({ buildingId, floorId }: Props) {
         <div className="device-status-section">
           <span className="device-status-label">CAMERAS</span>
           {cctvs.map((cctv) => {
-            const hasMac = !!cctv.mac;
-            const status = hasMac ? (cctvStatuses[cctv.mac!.toUpperCase()] ?? "offline") : null;
-            const badgeClass = hasMac ? (status === "online" ? "online" : "offline") : "unknown";
+            const mac = (cctv.device_mac ?? cctv.mac)?.toUpperCase();
+            // No heartbeat, or a health check that has never succeeded, reads as
+            // "unknown" (useCCTVHeartbeats, Prompt 131), never as "offline".
+            const status = mac ? (cctvStatuses[mac]?.status ?? "unknown") : null;
+            const badgeClass = status ?? "unknown";
+            const badgeText = !mac ? "No MAC" : status === "online" ? "Online" : status === "offline" ? "Offline" : "Unknown";
             return (
               <div key={cctv.id} className="device-status-row">
                 <span className={`device-status-dot ${badgeClass}`} />
                 <span className="device-status-name">{cctv.name}</span>
-                <span className="device-status-mac">{cctv.mac ?? "—"}</span>
-                <span className={`device-status-badge ${badgeClass}`}>
-                  {hasMac ? (status === "online" ? "Online" : "Offline") : "No MAC"}
-                </span>
+                <span className="device-status-mac">{mac ?? "—"}</span>
+                <span className={`device-status-badge ${badgeClass}`}>{badgeText}</span>
               </div>
             );
           })}

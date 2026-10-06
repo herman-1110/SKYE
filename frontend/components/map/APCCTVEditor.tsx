@@ -4,13 +4,16 @@ import { createPortal } from "react-dom";
 import type { FloorRecord } from "@/types/floor";
 import {
   subscribeToAPs, createAP, deleteAP, updateAPPosition,
-  subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTVPosition,
+  subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTV, updateCCTVPosition,
   type APRecord, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
 import { useAPHeartbeats, type APStatus } from "@/hooks/useAPHeartbeats";
+import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import MacAddressInput from "@/components/shared/MacAddressInput";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
+
+const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
 function StatusDot({ status }: { status: APStatus }) {
   const color =
@@ -44,7 +47,15 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [cctvName, setCctvName] = useState("");
   const [cctvMac, setCctvMac] = useState("");
   const [cctvMacError, setCctvMacError] = useState("");
+  // Prompt 131: camera IP (alarms are only accepted from it), the checkpoint
+  // (AP) it covers, and edit mode for an existing camera.
+  const [cctvIp, setCctvIp] = useState("");
+  const [cctvIpError, setCctvIpError] = useState("");
+  const [cctvCheckpoint, setCctvCheckpoint] = useState("");
+  const [cctvFormError, setCctvFormError] = useState("");
+  const [editingCctvId, setEditingCctvId] = useState<string | null>(null);
   const apHeartbeats = useAPHeartbeats();
+  const cctvHeartbeats = useCCTVHeartbeats();
 
   const placedMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
   const unregisteredOnlineAPs = Object.values(apHeartbeats)
@@ -185,23 +196,51 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     finally { setSaving(false); }
   };
 
+  const resetCctvForm = () => {
+    setCctvName(""); setCctvMac(""); setCctvMacError(""); setCctvIp(""); setCctvIpError("");
+    setCctvCheckpoint(""); setCctvFormError(""); setEditingCctvId(null);
+  };
+
+  const openEditCCTV = (cctv: CCTVRecord) => {
+    setPendingPct(null); setPlacementMode(null);
+    setCctvName(cctv.name);
+    setCctvMac((cctv.device_mac ?? cctv.mac ?? "").toUpperCase());
+    setCctvIp(cctv.ip ?? "");
+    setCctvCheckpoint(cctv.checkpoint_ap_id ?? "");
+    setCctvMacError(""); setCctvIpError(""); setCctvFormError("");
+    setEditingCctvId(cctv.id);
+  };
+
   const handleSaveCCTV = async () => {
-    if (!pendingPct) return;
-    const hasHex = cctvMac.replace(/[^0-9A-Fa-f]/g, "").length > 0;
-    if (hasHex && !isCompleteMac(cctvMac)) { setCctvMacError("Please complete all 6 MAC address segments"); return; }
-    if (hasHex && !isValidMac(cctvMac))    { setCctvMacError("Invalid MAC address format"); return; }
-    setCctvMacError("");
+    if (!pendingPct && !editingCctvId) return;
+    // MAC and IP are needed for alarms to be accepted; the checkpoint is optional.
+    if (!isCompleteMac(cctvMac)) { setCctvMacError("Please complete all 6 MAC address segments"); return; }
+    if (!isValidMac(cctvMac))    { setCctvMacError("Invalid MAC address format"); return; }
+    if (!IPV4_REGEX.test(cctvIp.trim())) { setCctvIpError("Enter the camera's IPv4 address, e.g. 192.168.0.101"); return; }
+    setCctvMacError(""); setCctvIpError(""); setCctvFormError("");
     setSaving(true);
+    const fields = {
+      name: cctvName.trim() || "CCTV",
+      mac: cctvMac,
+      ip: cctvIp.trim(),
+      checkpoint_ap_id: cctvCheckpoint || null,
+    };
     try {
-      const cctv = await createCCTV(buildingId, floor.id, {
-        name: cctvName.trim() || "CCTV",
-        x_pct: pendingPct.x,
-        y_pct: pendingPct.y,
-        mac: hasHex ? cctvMac : null,
-      });
-      toast.success(`CCTV "${cctv.name}" placed`);
-      setPendingPct(null); setCctvName(""); setCctvMac(""); setCctvMacError(""); setPlacementMode(null);
-    } catch { toast.error("Failed to place CCTV"); }
+      if (editingCctvId) {
+        const cctv = await updateCCTV(buildingId, floor.id, editingCctvId, fields);
+        toast.success(`Camera "${cctv.name}" updated`);
+      } else if (pendingPct) {
+        const cctv = await createCCTV(buildingId, floor.id, { ...fields, x_pct: pendingPct.x, y_pct: pendingPct.y });
+        toast.success(`Camera "${cctv.name}" placed`);
+        setPendingPct(null); setPlacementMode(null);
+      }
+      resetCctvForm();
+    } catch (err: unknown) {
+      // 409 (MAC already registered) and 422 (bad MAC / IP / checkpoint) come
+      // back from the backend as one plain sentence — show it as it is.
+      const msg = err instanceof Error && err.message ? err.message : "";
+      setCctvFormError(msg || (editingCctvId ? "Failed to update the camera" : "Failed to place the camera"));
+    }
     finally { setSaving(false); }
   };
 
@@ -222,7 +261,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   };
 
   const cancelPlacement = () => {
-    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setCctvName(""); setCctvMac(""); setCctvMacError("");
+    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); resetCctvForm();
   };
 
   const startPlacingDetectedAP = (mac: string, name = "") => {
@@ -453,24 +492,38 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 </tr>
                 );
               })}
-              {cctvs.map((cctv) => (
+              {cctvs.map((cctv) => {
+                const mac = (cctv.device_mac ?? cctv.mac)?.toUpperCase();
+                const status = mac ? (cctvHeartbeats[mac]?.status ?? "unknown") : "unknown";
+                const checkpoint = cctv.checkpoint_ap_id ? aps.find((a) => a.id === cctv.checkpoint_ap_id) : undefined;
+                return (
                 <tr key={cctv.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
+                      <StatusDot status={status} />
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
                       </svg>
                       <span className="text-s-text font-medium">{cctv.name}</span>
+                      <span className="font-mono text-[10px] text-s-muted">{mac ?? "no MAC"}</span>
+                      {cctv.ip && <span className="font-mono text-[10px] text-s-muted">{cctv.ip}</span>}
                     </div>
+                    {checkpoint && (
+                      <div className="font-mono text-[10px] text-s-muted mt-0.5 pl-4">covers {checkpoint.name}</div>
+                    )}
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted">CCTV Camera</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button onClick={() => handleDeleteCCTV(cctv.id)} disabled={deletingId === cctv.id} className="text-s-muted hover:text-s-danger transition-colors disabled:opacity-40">
+                  <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted capitalize">{status === "unknown" ? "CCTV Camera" : status}</td>
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <button onClick={() => openEditCCTV(cctv)} className="text-s-muted hover:text-s-text transition-colors mr-3" title="Edit camera" aria-label={`Edit ${cctv.name}`}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    </button>
+                    <button onClick={() => handleDeleteCCTV(cctv.id)} disabled={deletingId === cctv.id} className="text-s-muted hover:text-s-danger transition-colors disabled:opacity-40" title="Remove camera" aria-label={`Remove ${cctv.name}`}>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -517,12 +570,12 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         document.body
       )}
 
-      {/* CCTV placement modal */}
-      {pendingPct && placementMode === "cctv" && typeof document !== "undefined" && createPortal(
+      {/* CCTV add / edit modal */}
+      {((pendingPct && placementMode === "cctv") || editingCctvId) && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={cancelPlacement}>
-          <div className="w-full max-w-xs rounded-xl overflow-hidden" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }} onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-sm rounded-xl overflow-hidden" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }} onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-s-border">
-              <h3 className="font-mono text-xs text-s-muted tracking-widest uppercase">Place CCTV Camera</h3>
+              <h3 className="font-mono text-xs text-s-muted tracking-widest uppercase">{editingCctvId ? "Edit CCTV Camera" : "Place CCTV Camera"}</h3>
             </div>
             <div className="px-5 py-4 space-y-3">
               <div className="space-y-1">
@@ -531,20 +584,49 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
               </div>
               <div className="space-y-1">
                 <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
-                  MAC Address <span className="text-s-muted">(optional)</span>
+                  MAC Address <span className="text-s-danger">*</span>
                 </label>
                 <MacAddressInput
                   value={cctvMac}
-                  onChange={(mac) => { setCctvMac(mac); setCctvMacError(""); }}
+                  onChange={(mac) => { setCctvMac(mac); setCctvMacError(""); setCctvFormError(""); }}
                   error={cctvMacError}
                 />
+                <p className="font-mono text-[10px] text-s-muted">Paste it with dashes or colons, e.g. 98-BA-5F-8B-10-03</p>
               </div>
+              <div className="space-y-1">
+                <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+                  IP Address <span className="text-s-danger">*</span>
+                </label>
+                <input type="text" inputMode="decimal" placeholder="e.g. 192.168.0.101" value={cctvIp}
+                  onChange={(e) => { setCctvIp(e.target.value); setCctvIpError(""); setCctvFormError(""); }}
+                  className="w-full bg-s-elevated border rounded-lg px-3 py-2 text-sm font-mono text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors"
+                  style={{ borderColor: cctvIpError ? "var(--danger, #ef4444)" : "var(--border)" }} />
+                {cctvIpError && <p style={{ color: "var(--danger, #ef4444)", fontSize: 11 }}>{cctvIpError}</p>}
+                <p className="font-mono text-[10px] text-s-muted">Alarms are only accepted from this address. Reserve it in the router&apos;s DHCP.</p>
+              </div>
+              <div className="space-y-1">
+                <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+                  Covers Checkpoint <span className="text-s-muted">(optional)</span>
+                </label>
+                <select value={cctvCheckpoint} onChange={(e) => { setCctvCheckpoint(e.target.value); setCctvFormError(""); }}
+                  className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm text-s-text focus:outline-none focus:border-s-accent transition-colors">
+                  <option value="">None</option>
+                  {aps.map((ap) => (
+                    <option key={ap.id} value={ap.id}>{ap.name} ({ap.mac})</option>
+                  ))}
+                </select>
+              </div>
+              {cctvFormError && (
+                <p className="text-xs rounded-lg px-3 py-2" style={{ color: "var(--danger, #ef4444)", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)" }}>
+                  {cctvFormError}
+                </p>
+              )}
             </div>
             <div className="flex gap-2 px-5 py-4 border-t border-s-border">
               <button onClick={cancelPlacement} className="px-4 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors">Cancel</button>
               <button onClick={handleSaveCCTV} disabled={saving} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
                 {saving && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
-                {saving ? "Placing…" : "Place CCTV"}
+                {saving ? (editingCctvId ? "Saving…" : "Placing…") : (editingCctvId ? "Save Camera" : "Place CCTV")}
               </button>
             </div>
           </div>

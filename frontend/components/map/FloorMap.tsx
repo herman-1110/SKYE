@@ -9,6 +9,7 @@ import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import { useDashboardStore } from "@/store/dashboardStore";
 import WorkerMarker from "./WorkerMarker";
 import PatrolRouteOverlay from "./PatrolRouteOverlay";
+import CameraPanel from "./CameraPanel";
 import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
 interface Props {
@@ -116,6 +117,8 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   const [aps, setAps] = useState<APRecord[]>([]);
   const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
   const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
+  // Camera whose panel is open (Prompt 131): clicking a camera marker opens it.
+  const [openCameraId, setOpenCameraId] = useState<string | null>(null);
   // Every beacon whose marker/circle currently contains the cursor — not just
   // one. Computed in JS (handleMapMouseMove) rather than via per-marker DOM
   // hover, because the DOM can only ever deliver a mouse event to one topmost
@@ -239,6 +242,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   }
 
   return (
+    <>
     <div
       ref={outerRef}
       className="relative w-full rounded-xl overflow-hidden border border-s-border bg-s-elevated shadow-sm"
@@ -324,19 +328,23 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
             );
           })}
 
-          {/* CCTV markers */}
+          {/* CCTV markers — click opens the camera panel (Prompt 131) */}
           {cctvs.map((cctv) => {
-            const status = cctv.mac ? (cctvStatuses[cctv.mac.toUpperCase()] ?? "offline") : null;
-            const dotColor = status === "online" ? "#22c55e" : status === "offline" ? "#ef4444" : null;
-            const label = cctv.mac ? `${cctv.name} — ${cctv.mac} — ${status}` : cctv.name;
+            const mac = (cctv.device_mac ?? cctv.mac)?.toUpperCase();
+            const status = mac ? (cctvStatuses[mac]?.status ?? "unknown") : null;
+            const dotColor = status === "online" ? "#22c55e" : status === "offline" ? "#ef4444" : status === "unknown" ? "#6b7280" : null;
+            const label = mac ? `${cctv.name} — ${mac} — ${status}` : cctv.name;
             return (
               <div
                 key={cctv.id}
                 className="absolute"
-                style={{ left: `${cctv.x_pct * 100}%`, top: `${cctv.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10 }}
+                style={{ left: `${cctv.x_pct * 100}%`, top: `${cctv.y_pct * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "auto", zIndex: 10, cursor: "pointer" }}
                 onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
                 onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
                 onMouseLeave={() => setHoveredMarker(null)}
+                onClick={(e) => { e.stopPropagation(); setHoveredMarker(null); setOpenCameraId(cctv.id); }}
+                role="button"
+                aria-label={`Open camera ${cctv.name}`}
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
@@ -422,5 +430,24 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
         document.body
       )}
     </div>
+
+    {/* Camera panel — status, recent events, live-video slot. Rendered outside
+        the map container: React events bubble out of portals to their React
+        parent, and the map's own mouse handlers mustn't see the panel's. */}
+    {(() => {
+      const cam = openCameraId ? cctvs.find((c) => c.id === openCameraId) : undefined;
+      if (!cam || !buildingId) return null;
+      const mac = (cam.device_mac ?? cam.mac)?.toUpperCase();
+      return (
+        <CameraPanel
+          buildingId={buildingId}
+          cctv={cam}
+          aps={aps}
+          heartbeat={mac ? cctvStatuses[mac] : undefined}
+          onClose={() => setOpenCameraId(null)}
+        />
+      );
+    })()}
+    </>
   );
 }

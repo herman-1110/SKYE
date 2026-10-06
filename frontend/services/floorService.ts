@@ -37,6 +37,13 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+      // FastAPI's own 422s carry a list of {msg} objects rather than a sentence.
+      else if (parsed && Array.isArray(parsed.detail)) {
+        const msgs = parsed.detail
+          .map((d: { msg?: unknown }) => (typeof d?.msg === "string" ? d.msg : null))
+          .filter(Boolean);
+        if (msgs.length) detail = msgs.join("; ");
+      }
     } catch {
       // Not JSON — use the raw text as-is.
     }
@@ -196,6 +203,30 @@ export interface CCTVRecord {
   y_pct: number;
   created_at: string;
   mac?: string | null;
+  // Prompt 131 — absent on records written before it (read as the defaults).
+  source_type?: "ipc" | "nvr";      // "ipc" by default; hidden in the UI
+  device_mac?: string | null;        // the reporting device's MAC; equals mac for "ipc"
+  channel?: number;                  // 1 for a direct camera; hidden in the UI
+  ip?: string | null;                // alarms are only accepted from this address
+  checkpoint_ap_id?: string | null;  // the AP (checkpoint) this camera covers
+  timezone?: string | null;          // read from the camera at registration, e.g. "UTC+08:00"
+  camera_key?: string | null;        // API responses only: "ipc:98BA5F8B1003:1"
+}
+
+/** One alarm event in a camera's last 15 minutes (backend memory only). */
+export interface CameraDetectionRow {
+  received_at: string;               // server UTC, ISO 8601
+  event_type: string;                // "PEOPLE" | "MOTION" | …
+  is_human: boolean;                 // true only for PEOPLE
+  obj_num: number | null;            // people/objects in frame (enhanced format only)
+  payload_format: "legacy" | "enhanced";
+}
+
+export interface CameraDetections {
+  camera_key: string | null;
+  process_started_at: string;        // detections before this were lost with the restart
+  window_s: number;
+  detections: CameraDetectionRow[];  // newest first
 }
 
 export const listAPs = (buildingId: string, floorId: string): Promise<APRecord[]> =>
@@ -225,12 +256,34 @@ export const deleteAP = (buildingId: string, floorId: string, apId: string): Pro
 export const listCCTVs = (buildingId: string, floorId: string): Promise<CCTVRecord[]> =>
   req("GET", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`);
 
+// MAC may use dashes or colons; the backend normalises it. A bad MAC/IP/checkpoint
+// comes back as a 422 and a MAC already registered as a 409, each with a sentence
+// the caller can show as-is (err.message).
 export const createCCTV = (
   buildingId: string,
   floorId: string,
-  body: { name: string; x_pct: number; y_pct: number; mac?: string | null },
+  body: {
+    name: string; x_pct: number; y_pct: number;
+    mac?: string | null; ip?: string | null; checkpoint_ap_id?: string | null;
+  },
 ): Promise<CCTVRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`, body);
+
+// Only the fields sent change; send null to clear ip or checkpoint_ap_id.
+export const updateCCTV = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+  body: { name?: string; mac?: string | null; ip?: string | null; checkpoint_ap_id?: string | null },
+): Promise<CCTVRecord> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`, body);
+
+export const getCCTVDetections = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+): Promise<CameraDetections> =>
+  req("GET", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}/detections`);
 
 export const updateCCTVPosition = (
   buildingId: string,
