@@ -8,12 +8,15 @@ import {
   type CameraDetections,
 } from "@/services/floorService";
 import type { CCTVHeartbeat, CCTVStatus } from "@/hooks/useCCTVHeartbeats";
+import CameraLiveView from "./CameraLiveView";
 
 // Prompt 131 T9: opened by clicking a camera marker on the floor map. Status
 // comes from the /cctv_heartbeats subscription (useCCTVHeartbeats, passed in);
-// recent events come from the backend's in-memory 15-minute buffer.
+// recent events come from the backend's in-memory 15-minute buffer. Prompt 132
+// added the live video at the top (CameraLiveView).
 
 const POLL_MS = 3_000;
+const LIVE_ONLINE_MS = 10_000;   // as useCCTVHeartbeats' ONLINE_THRESHOLD_MS and the backend's live-view check
 
 const PROBE_TEXT: Record<string, string> = {
   ok: "Camera API reachable and the login works",
@@ -107,6 +110,9 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Live view needs the camera's RTSP port reachable - the backend's own check.
+  // Not `status`, which also stays "unknown" until the first OpenAPI probe.
+  const reachable = !!heartbeat?.lastSeen && nowMs - heartbeat.lastSeen * 1000 < LIVE_ONLINE_MS;
   const startedRecently = data?.process_started_at
     ? nowMs - Date.parse(data.process_started_at) < (data.window_s ?? 900) * 1000
     : false;
@@ -130,14 +136,9 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
           </button>
         </div>
 
-        {/* Live video: Prompt 132 */}
+        {/* Live video (Prompt 132): admins only; closes with the panel */}
         <div className="px-5 pt-4">
-          <div className="aspect-video w-full rounded-lg flex items-center justify-center text-center px-4"
-               style={{ border: "1.5px dashed var(--border)", background: "var(--bg-elevated)" }}>
-            <span className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
-              Live video: coming in Prompt 132
-            </span>
-          </div>
+          <CameraLiveView buildingId={buildingId} cctv={cctv} online={reachable} />
         </div>
 
         <div className="px-5 py-3">

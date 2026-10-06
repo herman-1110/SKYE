@@ -47,10 +47,15 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     } catch {
       // Not JSON — use the raw text as-is.
     }
-    throw new Error(detail);
+    // The HTTP status rides along for callers that react to it (Prompt 132:
+    // live view tells "camera offline" apart from "relay not running").
+    throw Object.assign(new Error(detail), { status: res.status });
   }
   return res.json();
 }
+
+/** An error thrown by these API helpers: the backend's sentence plus the HTTP status. */
+export type ApiError = Error & { status?: number };
 
 export function subscribeToFloors(
   buildingId: string,
@@ -300,6 +305,19 @@ export const getCCTVDetections = (
   cctvId: string,
 ): Promise<CameraDetections> =>
   req("GET", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}/detections`);
+
+// Live view (Prompt 132, admins only): the browser's WebRTC offer goes to the
+// backend, which forwards it to go2rtc on the server and returns the answer.
+// "sub" is the 848x480 stream; "main" is the HD one. The reply is only the SDP
+// answer - the camera's stream address never reaches the browser.
+export const openCCTVLiveView = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+  sdp: string,
+  quality: "sub" | "main",
+): Promise<{ type: "answer"; sdp: string }> =>
+  req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}/webrtc`, { sdp, quality });
 
 export const updateCCTVPosition = (
   buildingId: string,
