@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import type { FloorRecord } from "@/types/floor";
 import {
   subscribeToAPs, createAP, deleteAP, updateAPPosition,
-  subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTV, updateCCTVPosition,
+  subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTV, updateCCTVPosition, discoverCameras,
   type APRecord, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
@@ -61,6 +61,21 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const unregisteredOnlineAPs = Object.values(apHeartbeats)
     .filter((hb) => hb.status === "online" && !placedMacs.has(hb.mac.toUpperCase()))
     .map((hb) => ({ mac: hb.mac, name: hb.name }));
+
+  // Prompt 131b: cameras the backend found (ONVIF discovery or an alarm push)
+  // that aren't on this floor — the camera twin of the AP list above. A node
+  // with a probe field belongs to a camera registered somewhere (only
+  // registered cameras get OpenAPI checks), so it's left out: tighter than
+  // the AP list, which shows other floors' APs until the create 409s.
+  // Listed while online, or found by a scan in the last 10 minutes.
+  const placedCamMacs = new Set(cctvs.map((c) => (c.device_mac ?? c.mac ?? "").toUpperCase()).filter(Boolean));
+  const nowS = Math.floor(Date.now() / 1000);
+  const unplacedCameras = Object.values(cctvHeartbeats)
+    .filter((hb) => hb.discoveredVia && hb.probe === null && !placedCamMacs.has(hb.mac)
+      && (hb.status === "online" || (hb.discoveredAt !== null && nowS - hb.discoveredAt < 600)))
+    .sort((a, b) => a.mac.localeCompare(b.mac));
+  const [scanning, setScanning] = useState(false);
+  const [fixingIpId, setFixingIpId] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -264,6 +279,41 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); resetCctvForm();
   };
 
+  const scanForCameras = async () => {
+    setScanning(true);
+    try {
+      const { found } = await discoverCameras();
+      const fresh = found.filter((c) => !c.registered).length;
+      toast.success(found.length === 0
+        ? "Scan finished: no cameras found on this network"
+        : `Scan finished: ${found.length} camera${found.length > 1 ? "s" : ""} found` + (fresh ? `, ${fresh} not on any floor yet` : ""));
+    } catch (err: unknown) {
+      toast.error(err instanceof Error && err.message ? `Scan failed: ${err.message}` : "Scan failed");
+    } finally { setScanning(false); }
+  };
+
+  // Click a discovered camera: start placement with its name, MAC and IP
+  // filled in; clicking the map opens the usual dialog to pick the checkpoint and save.
+  const startPlacingDetectedCamera = (mac: string, name: string | null, ip: string | null) => {
+    resetCctvForm();
+    setCctvMac(mac.toUpperCase());
+    setCctvName(name ?? "");
+    setCctvIp(ip ?? "");
+    setPendingPct(null);
+    setPlacementMode("cctv");
+    toast.info(`Click on the map to place ${name || mac}`);
+  };
+
+  const applyDiscoveredIp = async (cctv: CCTVRecord, ip: string) => {
+    setFixingIpId(cctv.id);
+    try {
+      await updateCCTV(buildingId, floor.id, cctv.id, { ip });
+      toast.success(`${cctv.name} now accepts alarms from ${ip}`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update the camera's IP");
+    } finally { setFixingIpId(null); }
+  };
+
   const startPlacingDetectedAP = (mac: string, name = "") => {
     setApMac(mac);
     setApName(name);
@@ -353,6 +403,69 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Online cameras not on the map (Prompt 131b) — always shown on a
+          calibrated floor, so "Scan now" is there even before anything is found */}
+      {floor.scale_pixels_per_meter && (
+        <div className="bento-card p-3 border border-s-border">
+          <div className="flex items-center gap-2 mb-2">
+            {unplacedCameras.length > 0 && (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-s-accent opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-s-accent" />
+              </span>
+            )}
+            <span className={`font-mono text-[10px] tracking-widest uppercase ${unplacedCameras.length > 0 ? "text-s-accent" : "text-s-muted"}`}>
+              {unplacedCameras.length > 0
+                ? `${unplacedCameras.length} camera${unplacedCameras.length > 1 ? "s" : ""} online but not placed`
+                : "Cameras not on the map"}
+            </span>
+            <button
+              onClick={scanForCameras}
+              disabled={scanning}
+              className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-s-elevated border border-s-border text-[10px] font-mono text-s-muted hover:text-s-text transition-colors disabled:opacity-40"
+            >
+              {scanning && <span className="h-2.5 w-2.5 rounded-full border-2 border-s-muted border-t-transparent animate-spin" />}
+              {scanning ? "Scanning…" : "Scan now"}
+            </button>
+          </div>
+          {unplacedCameras.length === 0 ? (
+            <p className="font-mono text-[10px] text-s-muted leading-relaxed">
+              No cameras found yet. The backend looks for VIGI cameras on this network every minute; Scan now looks straight away.
+            </p>
+          ) : (
+            <>
+              <p className="font-mono text-[10px] text-s-muted mb-2.5 leading-relaxed">
+                These cameras are on the network but not on this floor yet. Click one to place it.
+              </p>
+              <div className="flex flex-col gap-1.5">
+                {unplacedCameras.map((hb) => (
+                  <button
+                    key={hb.mac}
+                    onClick={() => startPlacingDetectedCamera(hb.mac, hb.deviceName, hb.ip)}
+                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-s-elevated border border-s-border hover:border-s-accent transition-colors text-left group"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <StatusDot status={hb.status} />
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
+                      </svg>
+                      <div className="flex flex-col leading-tight min-w-0">
+                        <span className="font-mono text-[11px] text-s-text truncate">{hb.deviceName ?? "VIGI camera"}</span>
+                        <span className="font-mono text-[10px] text-s-muted">{hb.ip ?? "IP unknown"} · {hb.mac} · {hb.status}</span>
+                      </div>
+                    </div>
+                    <span className="flex items-center gap-1.5 font-mono text-[10px] text-s-accent opacity-0 group-hover:opacity-100 transition-opacity">
+                      Place
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -511,6 +624,26 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                     {checkpoint && (
                       <div className="font-mono text-[10px] text-s-muted mt-0.5 pl-4">covers {checkpoint.name}</div>
                     )}
+                    {(() => {
+                      // Prompt 131b: discovery found this camera at another IP.
+                      const moved = mac ? cctvHeartbeats[mac]?.ipMismatch : null;
+                      if (!moved || moved === cctv.ip) return null;
+                      return (
+                        <div className="flex items-center gap-2 mt-1 pl-4 flex-wrap">
+                          <span className="font-mono text-[10px]" style={{ color: "var(--warning, #f59e0b)" }}>
+                            ⚠ Found at {moved}, but alarms are only accepted from {cctv.ip ?? "its registered IP"}
+                          </span>
+                          <button
+                            onClick={() => applyDiscoveredIp(cctv, moved)}
+                            disabled={fixingIpId === cctv.id}
+                            className="px-2 py-0.5 rounded-md border text-[10px] font-mono transition-colors disabled:opacity-40"
+                            style={{ borderColor: "var(--warning, #f59e0b)", color: "var(--warning, #f59e0b)" }}
+                          >
+                            {fixingIpId === cctv.id ? "Saving…" : "Use the new IP"}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted capitalize">{status === "unknown" ? "CCTV Camera" : status}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">

@@ -278,6 +278,22 @@ export const updateCCTV = (
 ): Promise<CCTVRecord> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`, body);
 
+/** One camera found by a discovery round (Prompt 131b). */
+export interface DiscoveredCamera {
+  mac: string;                 // "98:BA:5F:8B:10:03"
+  ip: string;
+  name: string | null;
+  model: string | null;
+  discovered_via: string;      // "onvif", "arp+onvif", "alarm", …
+  registered: boolean;
+  registered_ip: string | null;
+}
+
+// "Scan now": one discovery round on the backend's LAN segments (about 3 s,
+// admin only, no credentials). Results also land in /cctv_heartbeats.
+export const discoverCameras = (): Promise<{ scanned_at: string; found: DiscoveredCamera[] }> =>
+  req("POST", "/api/cctvs/discover");
+
 export const getCCTVDetections = (
   buildingId: string,
   floorId: string,

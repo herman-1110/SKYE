@@ -160,6 +160,14 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
             <span className="text-s-muted"> · </span>
             <span className="font-mono">{cctv.ip ?? "no IP set"}</span>
           </Row>
+          {heartbeat?.ipMismatch && heartbeat.ipMismatch !== cctv.ip && (
+            <Row label="IP warning">
+              <span style={{ color: "var(--warning, #f59e0b)" }}>
+                Found at {heartbeat.ipMismatch}, but alarms are only accepted from {cctv.ip ?? "its registered IP"}.
+                Use &quot;Use the new IP&quot; in the floor plan&apos;s device editor.
+              </span>
+            </Row>
+          )}
         </div>
 
         <div className="px-5 pb-5">

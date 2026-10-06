@@ -20,11 +20,17 @@ export interface CCTVHeartbeat {
   probe: string | null;         // "ok" | "auth_error" | "no_credentials" | "unreachable" | "error"; null on simulator nodes
   probeOkAt: number | null;     // unix s — last time probe was "ok"; null until the first one
   alarmConfig: string | null;   // "mismatch" | "unknown"; null until checked
+  // Prompt 131b — camera discovery
+  ip: string | null;            // where discovery (or an alarm push) last found it
+  discoveredVia: string | null; // "onvif", "arp+onvif", "alarm", …; null on nodes discovery never touched
+  discoveredAt: number | null;  // unix s
+  ipMismatch: string | null;    // registered camera found at this other IP; alarms only come in from the registered one
 }
 
 type RawNode = Partial<{
   mac: string; last_seen: number; last_event_at: number; device_name: string;
   probe: string; probe_ok_at: number; alarm_config: string;
+  ip: string; discovered_via: string; discovered_at: number; ip_mismatch: string;
 }>;
 
 const num = (v: unknown) => (typeof v === "number" ? v : null);
@@ -73,6 +79,10 @@ export function useCCTVHeartbeats(): Record<string, CCTVHeartbeat> {
           probe: str(entry.probe),
           probeOkAt: num(entry.probe_ok_at),
           alarmConfig: str(entry.alarm_config),
+          ip: str(entry.ip),
+          discoveredVia: str(entry.discovered_via),
+          discoveredAt: num(entry.discovered_at),
+          ipMismatch: str(entry.ip_mismatch),
         };
       }
       rawRef.current = raw;
