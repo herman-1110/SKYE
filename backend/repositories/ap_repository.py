@@ -55,6 +55,15 @@ class APRepository:
             "y_m": round(y_m, 4),
         })
 
+    def rename(self, building_id: str, floor_id: str, ap_id: str, name: str) -> AccessPoint | None:
+        """Set the AP's name. Returns the updated AP, or None if it doesn't exist."""
+        doc_ref = self._col(building_id, floor_id).document(ap_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return None
+        doc_ref.update({"name": name})
+        return AccessPoint(**{**(doc.to_dict() or {}), "name": name})
+
     def delete(self, building_id: str, floor_id: str, ap_id: str) -> str | None:
         """Delete AP document from Firestore. Returns the AP's MAC address, or None if not found."""
         doc_ref = self._col(building_id, floor_id).document(ap_id)

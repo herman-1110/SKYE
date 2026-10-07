@@ -186,4 +186,5 @@ use a logs dir that holds only that run's files:
 | `vigi_fake_camera.py` | Fake VIGI camera: RTSP-port listener + HTTPS OpenAPI with real digest checks. |
 | `vigi_131b_inprocess.py` | Prompt 131b camera discovery checks against a loopback WS-Discovery responder. |
 | `vigi_132_inprocess.py` | Prompt 132 live-view checks: signaling route, go2rtc config, secrets, against a fake go2rtc. |
+| `ap_rename_inprocess.py` | Renaming an AP (`PATCH .../aps/{id}`): auth, trimmed name stored, MAC/position untouched, 422/404. Expect `4 passed`. |
 | `fixtures/vigi/` | Real InSight S445 alarm payloads (legacy and enhanced), request paths stripped. |

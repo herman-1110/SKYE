@@ -44,6 +44,13 @@ class APCreateRequest(BaseModel):
         return v.strip().upper()
 
 
+class APUpdateRequest(BaseModel):
+    name: str   # checked in update_ap so a blank name is a 422 with a plain sentence
+
+
+AP_NAME_MAX_LEN = 64
+
+
 class CCTVCreateRequest(BaseModel):
     name: str
     x_pct: float
@@ -223,6 +230,28 @@ def create_ap(
         y_m=y_m,
     )
     ap_repository.save(building_id, floor_id, ap)
+    return ap.__dict__
+
+
+@router.patch("/{floor_id}/aps/{ap_id}")
+def update_ap(
+    building_id: str,
+    floor_id: str,
+    ap_id: str,
+    body: APUpdateRequest,
+    admin: UserRecord = Depends(require_admin),
+) -> dict:
+    """Rename an AP. Only the name: the MAC is the AP's identity. Patrol logs
+    already written keep the old name; new ones pick the new name up within
+    the 30 s AP caches (omada_ingest_service, patrol_tracker_service)."""
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Give the AP a name.")
+    if len(name) > AP_NAME_MAX_LEN:
+        raise HTTPException(status_code=422, detail=f"Keep the AP name to {AP_NAME_MAX_LEN} characters or fewer.")
+    ap = ap_repository.rename(building_id, floor_id, ap_id, name)
+    if ap is None:
+        raise HTTPException(status_code=404, detail="Access point not found.")
     return ap.__dict__
 
 
