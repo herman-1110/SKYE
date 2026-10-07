@@ -50,15 +50,16 @@ class Settings:
     GO2RTC_API_URL: str
     GO2RTC_CONFIG_PATH: str
     GO2RTC_WEBRTC_HOST: str
+    GO2RTC_FFMPEG_PATH: str
 
 
-def _go2rtc_config_path(value: str) -> str:
-    """Absolute path of the go2rtc config the backend writes. Empty means
-    tools/go2rtc/go2rtc.yaml (gitignored), where tools/go2rtc/start.ps1 looks
-    by default; a relative path is taken from backend/, as start.ps1 does."""
+def _go2rtc_path(value: str, default_name: str) -> str:
+    """Absolute path of a go2rtc file. Empty means tools/go2rtc/<default_name>
+    (gitignored), where tools/go2rtc/start.ps1 looks by default; a relative
+    path is taken from backend/, as start.ps1 does."""
     value = value.strip()
     if not value:
-        return str(_BACKEND_DIR.parent / "tools" / "go2rtc" / "go2rtc.yaml")
+        return str(_BACKEND_DIR.parent / "tools" / "go2rtc" / default_name)
     path = Path(value)
     return str(path if path.is_absolute() else (_BACKEND_DIR / path).resolve())
 
@@ -208,13 +209,18 @@ def _load() -> Settings:
         # (services/live_view_service.py), rewritten only when it changes;
         # start.ps1 relaunches go2rtc when it does. It holds
         # ${VIGI_CAMERA_PASSWORD}, never the value.
-        GO2RTC_CONFIG_PATH=_go2rtc_config_path(os.environ.get("GO2RTC_CONFIG_PATH", "")),
+        GO2RTC_CONFIG_PATH=_go2rtc_path(os.environ.get("GO2RTC_CONFIG_PATH", ""), "go2rtc.yaml"),
         # The address go2rtc's WebRTC media listens on (port 8555). Empty means
         # this laptop's LAN address, found from the route to the registered
         # camera. Not 127.0.0.1: Windows won't let a browser's WebRTC sockets
         # (bound to the LAN address) reach loopback - measured in the 132 live
         # check. Windows Firewall's inbound rules decide who else can reach it.
         GO2RTC_WEBRTC_HOST=os.environ.get("GO2RTC_WEBRTC_HOST", "").strip(),
+        # ffmpeg, which go2rtc runs per viewing to read the camera and strip
+        # its per-frame SEI (copy, no re-encoding): go2rtc 1.9.14's own RTSP
+        # reader drops this camera's frames (marker bit on a trailing SEI).
+        # Default tools/go2rtc/bin/ffmpeg.exe (gitignored); relative to backend/.
+        GO2RTC_FFMPEG_PATH=_go2rtc_path(os.environ.get("GO2RTC_FFMPEG_PATH", ""), "bin/ffmpeg.exe"),
     )
 
 

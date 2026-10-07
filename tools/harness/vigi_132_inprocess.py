@@ -8,9 +8,11 @@
      its own sentence; go2rtc error (its body holds the test password) ->
      502 with a fixed sentence; go2rtc too slow -> 504; camera offline or
      never seen -> 409; no IP / NVR -> 409; unknown camera -> 404; an offer
-     that would send video or audio -> 422
-  3  the generated config: written at startup; _sub/_main streams with the
-     right paths for each registered camera; ${VIGI_CAMERA_PASSWORD} and
+     that would send video or audio -> 422; ffmpeg missing -> 503
+  3  the generated config: written at startup; per camera, _sub/_main
+     streams that run ffmpeg (exec, the only binary exec may run) on the
+     right camera path, copying video, stripping SEI, no audio, silent, MPEG-TS
+     to go2rtc; no RTSP module; ${VIGI_CAMERA_PASSWORD} and
      never the test password; API on loopback, WebRTC on the address towards
      the camera or GO2RTC_WEBRTC_HOST; rewritten after a create, an IP edit, a
      delete and (at the next viewing) an address change, and NOT rewritten
@@ -123,6 +125,11 @@ def main() -> int:
         return 2
     run_dir = C.prepare_run_dir(os.path.join(C.RUNS_DIR, "vigi132_inprocess"))
     config_path = os.path.join(run_dir, "go2rtc", "go2rtc.yaml")
+    fake_ffmpeg = os.path.join(run_dir, "bin", "ffmpeg.exe")   # only has to exist; the fake go2rtc never runs it
+    os.makedirs(os.path.dirname(fake_ffmpeg))
+    with open(fake_ffmpeg, "wb") as f:
+        f.write(b"not a real ffmpeg")
+    ffmpeg_fwd = fake_ffmpeg.replace("\\", "/")
     fake = FakeGo2rtc()
     for k in list(os.environ):
         if k.startswith(("VIGI_", "OMADA_", "FIREBASE_", "GEMINI_", "LLM_", "HARNESS_", "GO2RTC_")):
@@ -140,6 +147,7 @@ def main() -> int:
         "VIGI_OPENAPI_START_DELAY_S": "3600",
         "GO2RTC_API_URL": fake.url,
         "GO2RTC_CONFIG_PATH": config_path,
+        "GO2RTC_FFMPEG_PATH": fake_ffmpeg,
         "HARNESS_FAKE_AUTH": "1",
         "HARNESS_SEED_STALE": "0",
     })
@@ -205,17 +213,32 @@ def main() -> int:
 
         # 3. written at startup, from the registry
         text = config_text() or ""
-        a_sub = f'"{CAM_A["stream"]}_sub": "rtsp://admin:${{VIGI_CAMERA_PASSWORD}}@{CAM_A["ip"]}:554/stream2#media=video"'
-        a_main = f'"{CAM_A["stream"]}_main": "rtsp://admin:${{VIGI_CAMERA_PASSWORD}}@{CAM_A["ip"]}:554/stream1#media=video"'
-        check(3, "config written at startup: _sub -> stream2 and _main -> stream1, audio excluded",
-              a_sub in text and a_main in text, f"exists={bool(text)} sub={a_sub in text} main={a_main in text}")
+
+        def stream_line(cfg_text, name):
+            return next((ln for ln in cfg_text.splitlines() if ln.startswith(f'  "{name}": ')), "")
+
+        def ffmpeg_source_ok(line, ip, path):
+            return (line.startswith(f'"exec:{ffmpeg_fwd} ', line.index(": ") + 2 if ": " in line else 0)
+                    and f" -i rtsp://admin:${{VIGI_CAMERA_PASSWORD}}@{ip}:554/{path} " in line
+                    and all(s in line for s in (" -c:v copy ", " -bsf:v filter_units=remove_types=6 ", " -an ",
+                                                " -loglevel quiet ", " -rtsp_transport tcp ", " -f mpegts "))
+                    and line.endswith(' -"'))
+
+        a_sub = stream_line(text, f"{CAM_A['stream']}_sub")
+        a_main = stream_line(text, f"{CAM_A['stream']}_main")
+        check(3, "config written at startup: each stream is ffmpeg (exec) reading the camera - _sub stream2, "
+                 "_main stream1 - copying the video, stripping SEI, no audio, MPEG-TS to go2rtc, silent",
+              ffmpeg_source_ok(a_sub, CAM_A["ip"], "stream2") and ffmpeg_source_ok(a_main, CAM_A["ip"], "stream1"),
+              f"exists={bool(text)} sub_found={bool(a_sub)} main_found={bool(a_main)}")
         check(3, "config holds ${VIGI_CAMERA_PASSWORD} and never the test password",
               "${VIGI_CAMERA_PASSWORD}" in text and TEST_PASSWORD not in text, "")
         settings_ok = all(s in text for s in (
-            "modules: [api, rtsp, webrtc]", 'listen: "127.0.0.1:1984"', 'allow_paths: ["/api", "/api/webrtc"]',
-            'rtsp:\n  listen: ""', 'listen: "127.0.0.1:8555"', 'candidates: ["127.0.0.1:8555"]', "ice_servers: []"))
-        check(3, "config: only api/rtsp/webrtc, API on 127.0.0.1, WebRTC on the address towards the camera "
-                 "(127.0.0.1 for these loopback test cameras), no RTSP re-server, no ICE servers", settings_ok, "")
+            "modules: [api, webrtc, exec]", 'listen: "127.0.0.1:1984"', 'allow_paths: ["/api", "/api/webrtc"]',
+            f'exec:\n  allow_paths: ["{ffmpeg_fwd}"]', 'listen: "127.0.0.1:8555"', 'candidates: ["127.0.0.1:8555"]',
+            "ice_servers: []")) and "\nrtsp:" not in text and "rtsp," not in text
+        check(3, "config: only api/webrtc/exec (no RTSP server), exec may run only that ffmpeg, API on 127.0.0.1, "
+                 "WebRTC on the address towards the camera (127.0.0.1 for these loopback test cameras), no ICE servers",
+              settings_ok, "")
         cam_lan = CCTV(id="x", floor_id=C.FLOOR_ID, building_id=C.BUILDING_ID, name="x", x_pct=0, y_pct=0,
                        created_at="", mac=CAM_A["mac"], device_mac=CAM_A["mac"], ip="192.168.0.101")
         lan = L.render_config([cam_lan], "192.168.0.5")
@@ -318,6 +341,15 @@ def main() -> int:
         check(2, "offers that would send video, ask for audio, or aren't SDP -> 422, never forwarded",
               (r_send.status_code, r_audio.status_code, r_junk.status_code) == (422, 422, 422) and not fake.requests,
               f"send={r_send.status_code} audio={r_audio.status_code} junk={r_junk.status_code} forwarded={len(fake.requests)}")
+        L.settings = dataclasses.replace(real_settings, GO2RTC_FFMPEG_PATH=os.path.join(run_dir, "no-such-ffmpeg.exe"))
+        fake.requests.clear()
+        online(CAM_A)
+        r_noff = offer(CAM_A["id"])
+        L.settings = real_settings
+        L.refresh_config()
+        check(2, "ffmpeg missing -> 503 with its own sentence, nothing sent to go2rtc",
+              r_noff.status_code == 503 and r_noff.json().get("detail") == L.NO_FFMPEG and not fake.requests,
+              f"{r_noff.status_code} forwarded={len(fake.requests)}")
         fake.close()
         online(CAM_A)
         r_down = offer(CAM_A["id"])
@@ -330,9 +362,10 @@ def main() -> int:
                                      "ip": "127.0.0.24"}, ADMIN)
         cam_b = r_c.json() if r_c.status_code == 200 else {}
         t_create, m1 = config_text() or "", mtime()
-        b_sub = '"ipc_AABBCC132A04_1_sub": "rtsp://admin:${VIGI_CAMERA_PASSWORD}@127.0.0.24:554/stream2#media=video"'
+        b_sub = stream_line(t_create, "ipc_AABBCC132A04_1_sub")
         check(3, "create -> config rewritten with the new camera's streams",
-              r_c.status_code == 200 and m1 != m0 and b_sub in t_create and a_sub in t_create, f"create={r_c.status_code}")
+              r_c.status_code == 200 and m1 != m0 and ffmpeg_source_ok(b_sub, "127.0.0.24", "stream2")
+              and a_sub in t_create, f"create={r_c.status_code}")
         r_n = client.patch(f"{BASE}/cctvs/{cam_b.get('id')}", json={"name": "P132 B renamed"}, headers=ADMIN)
         responses.append(r_n.text)
         m2 = mtime()
@@ -366,6 +399,8 @@ def main() -> int:
     live_lines = backend_log.count("[LIVE]")
     check(1, "each opened stream logs where go2rtc told the browser to connect (here 127.0.0.1:8555 udp)",
           "opened ipc:AABBCC132A01:1 (sub); answer candidates: 127.0.0.1:8555 udp" in backend_log, "")
+    check(3, "the config-written log line counts the streams (2 at startup: camera A's sub and main)",
+          "[LIVE] go2rtc config written: 2 stream(s)" in backend_log, "")
     check(4, "the test password is in no log line, response body or config file",
           not hits and resp_hits == 0 and live_lines > 0 and len(responses) > 20,
           f"files searched={len(files)} hits={hits} responses={len(responses)} with password={resp_hits} [LIVE] lines={live_lines}")

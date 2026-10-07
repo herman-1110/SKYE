@@ -15,8 +15,20 @@ when it loads the file and masks as *** in its own logs.
 
 Each registered camera gets two streams, <camera_key>_sub (stream2,
 848x480) and <camera_key>_main (stream1, 2688x1520), with the key's ':'
-replaced by '_' so the name is a plain YAML key. #media=video keeps audio
-out (Herman's decision 7).
+replaced by '_' so the name is a plain YAML key.
+
+Why ffmpeg sits in front (Herman's option 2, 7 Oct). The InSight S445 ends
+every frame with a small SEI NAL that carries the RTP marker bit, and go2rtc
+1.9.14's H.264 depacketizer (pkg/h264/rtp.go:45-48) drops a marked SEI under
+128 bytes without completing the frame - so go2rtc's own RTSP reader never
+emits a frame from this camera (measured on 6 Oct; unchanged on go2rtc
+master). Each stream is therefore an exec: source: ffmpeg reads the camera
+over RTSP, copies the video (no re-encoding), strips SEI NALs
+(filter_units=remove_types=6), drops audio (Herman's decision 7) and pipes
+MPEG-TS to go2rtc, which never runs its RTP depacketizer on a pipe. ffmpeg
+logs nothing (-loglevel quiet), so its error text - which would contain the
+camera address - can't reach go2rtc's log or its API. The password is on
+ffmpeg's command line while it runs (Herman accepted that, 7 Oct).
 
 Where WebRTC listens. go2rtc's API stays on 127.0.0.1:1984, but its WebRTC
 media port (8555) listens on this laptop's LAN address (Herman's option A,
@@ -60,6 +72,12 @@ MAX_OFFER_BYTES = 64 * 1024    # a browser's video-only offer is a few KB
 _CONNECT_TIMEOUT_S = 2.0
 _ANSWER_TIMEOUT_S = 20.0       # go2rtc dials the camera before answering; an unreachable one fails after ~10 s
 
+# ffmpeg per stream: read the camera, copy the video, strip SEI (NAL type 6),
+# no audio, MPEG-TS to stdout. Silent, so no error text carries the address.
+FFMPEG_ARGS = ("-hide_banner -loglevel quiet -nostdin -fflags nobuffer -rtsp_transport tcp -i {camera} "
+               "-map 0:v:0 -c:v copy -bsf:v filter_units=remove_types=6 -an "
+               "-f mpegts -muxdelay 0 -muxpreload 0 -")
+
 NOT_RUNNING = "Live view isn't running on the server"
 NOT_LOADED = "Live view hasn't picked up this camera yet. Try again in a few seconds."
 STREAM_FAILED = ("The camera's video couldn't be started. Check that the camera is online and that "
@@ -71,6 +89,7 @@ NO_IP = "This camera has no IP address set, so it has no live view."
 NVR_LATER = "Live view for cameras behind an NVR isn't supported yet."
 NOT_FOUND = "Camera not found."
 BAD_OFFER = "The live-view request wasn't a video-only WebRTC offer."
+NO_FFMPEG = "Live view isn't fully installed on the server: ffmpeg is missing from tools/go2rtc/bin."
 
 
 class LiveViewError(Exception):
@@ -86,10 +105,17 @@ def stream_name(cam: CCTV, quality: str) -> str:
     return f"{cam.camera_key.replace(':', '_')}_{quality}"
 
 
+def ffmpeg_path() -> str:
+    """settings.GO2RTC_FFMPEG_PATH with forward slashes: it goes into YAML
+    double-quoted strings, where a backslash would be an escape."""
+    return settings.GO2RTC_FFMPEG_PATH.replace("\\", "/")
+
+
 def source_url(cam: CCTV, quality: str) -> str:
-    """The one place a stream address is built. It holds the password only as
-    go2rtc's ${VIGI_CAMERA_PASSWORD} variable, and it only ever goes into the
-    config file - never into a response, a log line or the browser."""
+    """The one place a stream source is built: go2rtc's exec: running ffmpeg
+    on the camera's RTSP address. That address holds the password only as
+    go2rtc's ${VIGI_CAMERA_PASSWORD} variable, and the source only ever goes
+    into the config file - never into a response, a log line or the browser."""
     if cam.source_type == "nvr":
         # An NVR's per-channel RTSP path is UNCONFIRMED (design §8).
         raise NotImplementedError("NVR streams are not supported yet")
@@ -97,8 +123,8 @@ def source_url(cam: CCTV, quality: str) -> str:
         raise ValueError(f"unknown source type {cam.source_type!r}")
     if not cam.ip:
         raise ValueError("camera has no IP")
-    return (f"rtsp://admin:${{VIGI_CAMERA_PASSWORD}}@{cam.ip}:{RTSP_PORT}"
-            f"/{QUALITIES[quality]}#media=video")
+    camera = f"rtsp://admin:${{VIGI_CAMERA_PASSWORD}}@{cam.ip}:{RTSP_PORT}/{QUALITIES[quality]}"
+    return f"exec:{ffmpeg_path()} " + FFMPEG_ARGS.format(camera=camera)
 
 
 # ── the config file (T2) ─────────────────────────────────────────────────────
@@ -112,19 +138,21 @@ _HEADER = """\
 # (start.ps1 reads it from backend/.env).
 
 app:
-  modules: [api, rtsp, webrtc]   # nothing else loads: no exec/ffmpeg sources, no HomeKit SRTP on :8443
+  modules: [api, webrtc, exec]   # nothing else loads: no RTSP server, no HomeKit SRTP on :8443
 
 api:
   listen: "127.0.0.1:1984"
-  allow_paths: ["/api", "/api/webrtc"]   # no web UI, no stream/config/log API
-
-rtsp:
-  listen: ""                     # the RTSP client stays (it reads the camera); no RTSP re-server
+  allow_paths: ["/api", "/api/webrtc"]   # no web UI, no stream/config/log API, so no new streams
 
 log:
   output: "file:go2rtc.log"      # next to this file: start.ps1 runs go2rtc in this folder
   format: text
   level: info
+"""
+
+_EXEC_BLOCK = """\
+exec:
+  allow_paths: ["{ffmpeg}"]   # exec: may run this ffmpeg and nothing else
 """
 
 _WEBRTC_BLOCK = """\
@@ -199,7 +227,7 @@ def render_config(cameras: Iterable[CCTV], host: Optional[str] = None) -> str:
     streams = "streams:\n" + "\n".join(lines) + "\n" if lines else "streams: {}\n"
     webrtc = _WEBRTC_BLOCK.format(host=host, port=WEBRTC_PORT,
                                   loopback="    loopback: true\n" if host.startswith("127.") else "")
-    return _HEADER + "\n" + webrtc + "\n" + streams
+    return _HEADER + "\n" + _EXEC_BLOCK.format(ffmpeg=ffmpeg_path()) + "\n" + webrtc + "\n" + streams
 
 
 _write_lock = threading.Lock()
@@ -247,7 +275,7 @@ def write_config() -> bool:
             except OSError:
                 pass
             raise
-    streams = data.count(b'": "rtsp://')
+    streams = data.count(b'": "exec:')
     log.info("[LIVE] go2rtc config written: %d stream(s), WebRTC on %s:%d, %s", streams, host, WEBRTC_PORT, path)
     return True
 
@@ -365,6 +393,9 @@ def open_stream(building_id: str, floor_id: str, cctv_id: str, sdp, quality: str
     # A no-op unless this laptop's LAN address changed since the last write
     # (DHCP); then start.ps1 relaunches go2rtc on the new one.
     refresh_config()
+    if not os.path.isfile(settings.GO2RTC_FFMPEG_PATH):
+        log.info("[LIVE] %s %s: ffmpeg isn't at %s", cam.camera_key, quality, settings.GO2RTC_FFMPEG_PATH)
+        raise LiveViewError(503, NO_FFMPEG)
     answer = _exchange(cam, quality, sdp)
     log.info("[LIVE] %s opened %s (%s); answer candidates: %s",
              user_id or "an admin", cam.camera_key, quality, answer_candidates(answer))

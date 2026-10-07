@@ -6,7 +6,9 @@ terminal open:
 
 It runs go2rtc (tools\go2rtc\bin\go2rtc.exe, gitignored, never committed)
 with the config the SKYE backend generates from the camera registry
-(GO2RTC_CONFIG_PATH in backend\.env; default tools\go2rtc\go2rtc.yaml), and:
+(GO2RTC_CONFIG_PATH in backend\.env; default tools\go2rtc\go2rtc.yaml).
+go2rtc in turn runs ffmpeg (tools\go2rtc\bin\ffmpeg.exe, also gitignored)
+once per viewer to read the camera; stopping go2rtc stops those too. It:
 
   - reads VIGI_CAMERA_PASSWORD from backend\.env and hands it to go2rtc
     through go2rtc's own environment only. It is never printed, written to
@@ -51,12 +53,16 @@ function Read-EnvValue([string]$name) {
     return $value
 }
 
-function Get-ConfigPath {
-    $setting = Read-EnvValue "GO2RTC_CONFIG_PATH"
-    if (-not $setting) { return (Join-Path $PSScriptRoot "go2rtc.yaml") }
+function Resolve-Go2rtcPath([string]$name, [string]$default) {
+    # As the backend does: the setting from backend\.env, else tools\go2rtc\<default>;
+    # a relative setting is taken from backend\.
+    $setting = Read-EnvValue $name
+    if (-not $setting) { return (Join-Path $PSScriptRoot $default) }
     if ([IO.Path]::IsPathRooted($setting)) { return $setting }
     return [IO.Path]::GetFullPath((Join-Path (Join-Path $repo "backend") $setting))
 }
+
+function Get-ConfigPath { return (Resolve-Go2rtcPath "GO2RTC_CONFIG_PATH" "go2rtc.yaml") }
 
 function Get-Stamp([string]$path) {
     if (-not (Test-Path -LiteralPath $path)) { return "" }
@@ -78,8 +84,10 @@ function Test-ApiUp {
 }
 
 function Stop-Go2rtc($proc) {
+    # The whole tree: go2rtc starts an ffmpeg per viewer, and a killed go2rtc
+    # must not leave one behind holding a camera connection.
     if ($proc -and -not $proc.HasExited) {
-        $proc.Kill()
+        & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null
         $proc.WaitForExit(5000) | Out-Null
     }
 }
@@ -114,6 +122,10 @@ try {
             continue
         }
         $said = ""
+        $ffmpeg = Resolve-Go2rtcPath "GO2RTC_FFMPEG_PATH" "bin\ffmpeg.exe"
+        if (-not (Test-Path -LiteralPath $ffmpeg)) {
+            Write-Host "ffmpeg isn't installed: $ffmpeg is missing. go2rtc will run, but live view won't play until it's there."
+        }
         $passwordPrint = Get-Fingerprint $password
         $configStamp = Get-Stamp $config
         $envStamp = Get-Stamp $envFile
