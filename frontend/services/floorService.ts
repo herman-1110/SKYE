@@ -255,6 +255,16 @@ export const updateAPPosition = (
 ): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}/position`, body);
 
+// Rename an AP (the MAC is its identity and can't change). A blank name comes
+// back as a 422 with a sentence the caller can show as-is (err.message).
+export const updateAP = (
+  buildingId: string,
+  floorId: string,
+  apId: string,
+  body: { name: string },
+): Promise<APRecord> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}`, body);
+
 export const deleteAP = (buildingId: string, floorId: string, apId: string): Promise<void> =>
   req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}`);
 

@@ -16,6 +16,7 @@ import CameraLiveView from "./CameraLiveView";
 // added the live video at the top (CameraLiveView).
 
 const POLL_MS = 3_000;
+const EVENTS_SHOWN = 200;        // rows rendered in the scrolling events list
 const LIVE_ONLINE_MS = 10_000;   // as useCCTVHeartbeats' ONLINE_THRESHOLD_MS and the backend's live-view check
 
 const PROBE_TEXT: Record<string, string> = {
@@ -26,10 +27,27 @@ const PROBE_TEXT: Record<string, string> = {
   error: "Camera API answered with an error",
 };
 
-const ALARM_TEXT: Record<string, string> = {
-  mismatch: "Human detection is switched off on the camera, so no People events will arrive",
-  unknown: "Can't be confirmed through the camera's API. Check Settings > Event > Alarm Server on the camera",
-};
+// "Alarm setup" from what actually arrives. The camera's API can't read its
+// Alarm Server settings (Prompt 131 D3), but last_event_at proves them: the
+// backend only writes it for an alarm from this camera's MAC, posted from its
+// registered IP to the secret alarm path. An empty scene sends nothing, so an
+// old last alarm is only a hint, never "broken".
+const ALARM_RECENT_S = 24 * 3600;
+const CHECK_ALARM_SERVER = "check Settings > Event > Alarm Server on the camera";
+
+function alarmSetup(heartbeat: CCTVHeartbeat | undefined, nowMs: number): { text: string; color?: string } {
+  if (heartbeat?.alarmConfig === "mismatch") {
+    return { text: "Human detection is switched off on the camera, so no People events will arrive", color: "var(--warning, #f59e0b)" };
+  }
+  const last = heartbeat?.lastEventAt;
+  if (last && nowMs / 1000 - last < ALARM_RECENT_S) {
+    return { text: `Working: the camera's alarms are reaching SKYE (last one ${ago(last, nowMs)})`, color: "var(--success, #22c55e)" };
+  }
+  if (last) {
+    return { text: `Last alarm ${ago(last, nowMs)}. If people have been in view since, ${CHECK_ALARM_SERVER}` };
+  }
+  return { text: `No alarm received yet. If people have been in view, ${CHECK_ALARM_SERVER}` };
+}
 
 const STATUS_COLOR: Record<CCTVStatus, string> = {
   online: "var(--success, #22c55e)",
@@ -153,7 +171,10 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
             {heartbeat?.probe ? (PROBE_TEXT[heartbeat.probe] ?? heartbeat.probe) : "Not checked yet"}
           </Row>
           <Row label="Alarm setup">
-            {heartbeat?.alarmConfig ? (ALARM_TEXT[heartbeat.alarmConfig] ?? heartbeat.alarmConfig) : "Not checked yet"}
+            {(() => {
+              const setup = alarmSetup(heartbeat, nowMs);
+              return <span style={setup.color ? { color: setup.color } : undefined}>{setup.text}</span>;
+            })()}
           </Row>
           <Row label="Checkpoint">{checkpoint ? checkpoint.name : cctv.checkpoint_ap_id ? "(AP no longer on this floor)" : "None"}</Row>
           <Row label="MAC / IP">
@@ -174,7 +195,9 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
         <div className="px-5 pb-5">
           <div className="flex items-baseline gap-2 mb-2">
             <span className="font-mono text-[10px] text-s-muted tracking-widest uppercase">Recent events</span>
-            <span className="font-mono text-[10px] text-s-muted">last 15 min · updates every 3 s</span>
+            <span className="font-mono text-[10px] text-s-muted">
+              {data && data.detections.length > 0 ? `${data.detections.length} · ` : ""}last 15 min · updates every 3 s
+            </span>
           </div>
           {startedRecently && (
             <p className="font-mono text-[10px] text-s-muted mb-2">
@@ -186,26 +209,35 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
             <p className="font-mono text-[10px] text-s-muted py-3 text-center">No events in the last 15 minutes</p>
           )}
           {data && data.detections.length > 0 && (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-s-border">
-                  {["Time", "Event", "People"].map((h) => (
-                    <th key={h} className="font-mono text-[10px] text-s-muted tracking-widest uppercase text-left py-1.5">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.detections.slice(0, 100).map((d, i) => (
-                  <tr key={`${d.received_at}-${i}`} className="border-b border-s-border/40 last:border-0">
-                    <td className="py-1 font-mono text-[11px] text-s-muted">{clock(d.received_at)}</td>
-                    <td className="py-1" style={{ color: d.is_human ? "var(--success, #22c55e)" : "var(--text-secondary)" }}>
-                      {eventLabel(d.event_type)}
-                    </td>
-                    <td className="py-1 font-mono text-[11px] text-s-text">{d.is_human ? (d.obj_num ?? "-") : "-"}</td>
+            // Scrolls inside a fixed height (about 10 rows), newest first, with
+            // the header kept in view.
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-s-border/60">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0" style={{ background: "var(--bg-surface)" }}>
+                  <tr className="border-b border-s-border">
+                    {["Time", "Event", "People"].map((h) => (
+                      <th key={h} className="font-mono text-[10px] text-s-muted tracking-widest uppercase text-left py-1.5 px-3">{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.detections.slice(0, EVENTS_SHOWN).map((d, i) => (
+                    <tr key={`${d.received_at}-${i}`} className="border-b border-s-border/40 last:border-0">
+                      <td className="py-1 px-3 font-mono text-[11px] text-s-muted">{clock(d.received_at)}</td>
+                      <td className="py-1 px-3" style={{ color: d.is_human ? "var(--success, #22c55e)" : "var(--text-secondary)" }}>
+                        {eventLabel(d.event_type)}
+                      </td>
+                      <td className="py-1 px-3 font-mono text-[11px] text-s-text">{d.is_human ? (d.obj_num ?? "-") : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {data.detections.length > EVENTS_SHOWN && (
+                <p className="font-mono text-[10px] text-s-muted text-center py-2">
+                  Showing the latest {EVENTS_SHOWN} of {data.detections.length}
+                </p>
+              )}
+            </div>
           )}
         </div>
       </aside>

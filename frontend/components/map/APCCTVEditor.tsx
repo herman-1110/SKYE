@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { FloorRecord } from "@/types/floor";
 import {
-  subscribeToAPs, createAP, deleteAP, updateAPPosition,
+  subscribeToAPs, createAP, deleteAP, updateAP, updateAPPosition,
   subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTV, updateCCTVPosition, discoverCameras,
   type APRecord, type CCTVRecord,
 } from "@/services/floorService";
@@ -11,6 +11,7 @@ import { toast } from "@/store/toastStore";
 import { useAPHeartbeats, type APStatus } from "@/hooks/useAPHeartbeats";
 import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import MacAddressInput from "@/components/shared/MacAddressInput";
+import CctvIcon, { CctvMarker } from "./CctvIcon";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
 
 const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
@@ -54,6 +55,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [cctvCheckpoint, setCctvCheckpoint] = useState("");
   const [cctvFormError, setCctvFormError] = useState("");
   const [editingCctvId, setEditingCctvId] = useState<string | null>(null);
+  const [editingApId, setEditingApId] = useState<string | null>(null);
   const apHeartbeats = useAPHeartbeats();
   const cctvHeartbeats = useCCTVHeartbeats();
 
@@ -175,7 +177,30 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setPendingPct({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) });
   };
 
+  const openEditAP = (ap: APRecord) => {
+    setPendingPct(null); setPlacementMode(null); resetCctvForm();
+    setApName(ap.name); setApMac(ap.mac); setMacError("");
+    setEditingApId(ap.id);
+  };
+
+  // Renaming only: the MAC is the AP's identity (a different MAC is a
+  // different AP - remove this one and place that one).
+  const handleRenameAP = async () => {
+    if (!editingApId) return;
+    const name = apName.trim();
+    if (!name) { setMacError("Give the AP a name"); return; }
+    setSaving(true);
+    try {
+      const ap = await updateAP(buildingId, floor.id, editingApId, { name });
+      toast.success(`AP renamed to "${ap.name}"`);
+      setEditingApId(null); setApName(""); setApMac(""); setMacError("");
+    } catch (err: unknown) {
+      setMacError(err instanceof Error && err.message ? err.message : "Failed to rename the AP");
+    } finally { setSaving(false); }
+  };
+
   const handleSaveAP = async () => {
+    if (editingApId) return handleRenameAP();
     if (!pendingPct) return;
     if (!isCompleteMac(apMac)) { setMacError("Please complete all 6 MAC address segments"); return; }
     if (!isValidMac(apMac))    { setMacError("Invalid MAC address format"); return; }
@@ -217,7 +242,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   };
 
   const openEditCCTV = (cctv: CCTVRecord) => {
-    setPendingPct(null); setPlacementMode(null);
+    setPendingPct(null); setPlacementMode(null); setEditingApId(null);
     setCctvName(cctv.name);
     setCctvMac((cctv.device_mac ?? cctv.mac ?? "").toUpperCase());
     setCctvIp(cctv.ip ?? "");
@@ -276,7 +301,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   };
 
   const cancelPlacement = () => {
-    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); resetCctvForm();
+    setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setEditingApId(null); resetCctvForm();
   };
 
   const scanForCameras = async () => {
@@ -349,9 +374,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "cctv" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
-          </svg>
+          <CctvIcon size={14} style={{ color: "var(--danger)" }} />
           {placementMode === "cctv" ? "Cancel" : "Add CCTV"}
         </button>
         {placementMode && (
@@ -449,9 +472,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <StatusDot status={hb.status} />
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
-                      </svg>
+                      <CctvIcon size={14} style={{ color: "var(--danger)" }} />
                       <div className="flex flex-col leading-tight min-w-0">
                         <span className="font-mono text-[11px] text-s-text truncate">{hb.deviceName ?? "VIGI camera"}</span>
                         <span className="font-mono text-[10px] text-s-muted">{hb.ip ?? "IP unknown"} · {hb.mac} · {hb.status}</span>
@@ -548,9 +569,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
               onMouseMove={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
               onMouseLeave={() => setHoveredMarker(null)}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
-              </svg>
+              <CctvMarker />
               <button
                 onClick={(e) => { e.stopPropagation(); handleDeleteCCTV(cctv.id); }}
                 disabled={deletingId === cctv.id}
@@ -597,8 +616,11 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                     </div>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[10px] text-s-muted capitalize">{status === "unknown" ? "Access Point" : status}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button onClick={() => handleDeleteAP(ap.id)} disabled={deletingId === ap.id} className="text-s-muted hover:text-s-danger transition-colors disabled:opacity-40">
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <button onClick={() => openEditAP(ap)} className="text-s-muted hover:text-s-text transition-colors mr-3" title="Rename AP" aria-label={`Rename ${ap.name}`}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    </button>
+                    <button onClick={() => handleDeleteAP(ap.id)} disabled={deletingId === ap.id} className="text-s-muted hover:text-s-danger transition-colors disabled:opacity-40" title="Remove AP" aria-label={`Remove ${ap.name}`}>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                     </button>
                   </td>
@@ -614,9 +636,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
                       <StatusDot status={status} />
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M4 8 Q4 4 8 4 L22 4 Q28 6 28 10 Q28 14 22 16 L8 16 Q4 16 4 12 Z"/><ellipse cx="5.5" cy="10" rx="3.5" ry="4.5"/><circle cx="5.5" cy="10" r="1.5" fill="var(--danger)" stroke="none"/><path d="M20 16 L19 20 L15 20"/><rect x="13" y="19" width="4" height="6" rx="1"/><rect x="17" y="20" width="5" height="8" rx="1"/>
-                      </svg>
+                      <CctvIcon size={14} style={{ color: "var(--danger)" }} />
                       <span className="text-s-text font-medium">{cctv.name}</span>
                       <span className="font-mono text-[10px] text-s-muted">{mac ?? "no MAC"}</span>
                       {cctv.ip && <span className="font-mono text-[10px] text-s-muted">{cctv.ip}</span>}
@@ -668,34 +688,45 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         </p>
       )}
 
-      {/* AP placement modal */}
-      {pendingPct && placementMode === "ap" && typeof document !== "undefined" && createPortal(
+      {/* AP place / rename modal */}
+      {((pendingPct && placementMode === "ap") || editingApId) && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={cancelPlacement}>
           <div className="w-full max-w-xs rounded-xl overflow-hidden" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }} onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-s-border">
-              <h3 className="font-mono text-xs text-s-muted tracking-widest uppercase">Place Access Point</h3>
+              <h3 className="font-mono text-xs text-s-muted tracking-widest uppercase">{editingApId ? "Rename Access Point" : "Place Access Point"}</h3>
             </div>
             <div className="px-5 py-4 space-y-3">
               <div className="space-y-1">
                 <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">AP Name</label>
-                <input autoFocus type="text" placeholder="e.g. EAP725-Outdoor" value={apName} onChange={(e) => setApName(e.target.value)} className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors" />
+                <input autoFocus type="text" placeholder="e.g. EAP725-Outdoor" value={apName}
+                  onChange={(e) => { setApName(e.target.value); if (editingApId) setMacError(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && editingApId) handleSaveAP(); }}
+                  className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm text-s-text placeholder:text-s-muted focus:outline-none focus:border-s-accent transition-colors" />
               </div>
-              <div className="space-y-1">
-                <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
-                  MAC Address <span className="text-s-danger">*</span>
-                </label>
-                <MacAddressInput
-                  value={apMac}
-                  onChange={(mac) => { setApMac(mac); setMacError(""); }}
-                  error={macError}
-                />
-              </div>
+              {editingApId ? (
+                <div className="space-y-1">
+                  <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">MAC Address</label>
+                  <p className="font-mono text-xs text-s-text">{apMac}</p>
+                  {macError && <p style={{ color: "var(--danger, #ef4444)", fontSize: 11 }}>{macError}</p>}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
+                    MAC Address <span className="text-s-danger">*</span>
+                  </label>
+                  <MacAddressInput
+                    value={apMac}
+                    onChange={(mac) => { setApMac(mac); setMacError(""); }}
+                    error={macError}
+                  />
+                </div>
+              )}
             </div>
             <div className="flex gap-2 px-5 py-4 border-t border-s-border">
               <button onClick={cancelPlacement} className="px-4 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors">Cancel</button>
               <button onClick={handleSaveAP} disabled={saving} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
                 {saving && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
-                {saving ? "Placing…" : "Place AP"}
+                {editingApId ? (saving ? "Saving…" : "Save AP") : (saving ? "Placing…" : "Place AP")}
               </button>
             </div>
           </div>
