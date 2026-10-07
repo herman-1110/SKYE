@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { collection, onSnapshot, query } from "firebase/firestore";
 import { fsdb } from "@/config/firebase";
 import { useAuth } from "@/hooks/useAuth";
-import { updateUserStatus, deleteUser } from "@/services/userService";
+import { updateUserStatus, updateUserRole, deleteUser } from "@/services/userService";
 import { signOut } from "@/services/authService";
 import { toast } from "@/store/toastStore";
 import type { UserRecord, UserStatus } from "@/types/user";
@@ -97,7 +97,8 @@ function DeleteModal({ target, isSelf, onCancel, onConfirm, loading }: {
 }
 
 export default function UsersPage() {
-  const { user } = useAuth();
+  const { user, userRecord } = useAuth();
+  const isOwner = userRecord?.role === "owner";
   const router = useRouter();
   const { cachedUsers, setCachedUsers } = useDashboardStore();
   const [users, setUsers] = useState<UserRecord[]>(cachedUsers);
@@ -131,6 +132,28 @@ export default function UsersPage() {
       toast.success(`User ${status}`);
     } catch {
       toast.error("Failed to update status");
+    }
+  }
+
+  async function handlePromote(uid: string) {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      await updateUserRole(uid, "admin", token);
+      toast.success("User promoted to admin");
+    } catch {
+      toast.error("Failed to promote user");
+    }
+  }
+
+  async function handleDemote(uid: string) {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      await updateUserRole(uid, "user", token);
+      toast.success("Admin demoted to user");
+    } catch {
+      toast.error("Failed to demote user");
     }
   }
 
@@ -205,7 +228,7 @@ export default function UsersPage() {
           {users.map((u) => {
             const isSelf = u.uid === user?.uid;
             const statusColor = u.status === "approved" ? "var(--success)" : u.status === "suspended" ? "var(--danger)" : "var(--text-secondary)";
-            const roleColor = u.role === "admin" ? "var(--accent)" : "var(--text-secondary)";
+            const roleColor = u.role === "owner" || u.role === "admin" ? "var(--accent)" : "var(--text-secondary)";
             return (
               <div
                 key={u.uid}
@@ -253,6 +276,16 @@ export default function UsersPage() {
                   {u.status === "pending" && (
                     <button onClick={() => handleStatus(u.uid, "approved")} style={actionBtn("var(--success)")} className="hover:opacity-80 transition-opacity">
                       Approve
+                    </button>
+                  )}
+                  {isOwner && u.role === "user" && u.status === "approved" && (
+                    <button onClick={() => handlePromote(u.uid)} style={actionBtn("var(--accent)")} className="hover:opacity-80 transition-opacity">
+                      Promote to Admin
+                    </button>
+                  )}
+                  {isOwner && u.role === "admin" && (
+                    <button onClick={() => handleDemote(u.uid)} style={actionBtn("var(--text-secondary)")} className="hover:opacity-80 transition-opacity">
+                      Demote to User
                     </button>
                   )}
                   <button onClick={() => setDeleteTarget(u)} style={actionBtn("var(--danger)")} className="hover:opacity-80 transition-opacity">

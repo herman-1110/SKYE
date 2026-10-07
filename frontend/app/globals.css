@@ -308,8 +308,8 @@ input[type='number']::-webkit-outer-spin-button {
   margin: 0;
 }
 
-/* ─── Floor selector dropdown ────────────────────────────────────────────── */
-.floor-trigger {
+/* ─── Custom select dropdown (Building / Floor selectors) ──────────────────── */
+.dropdown-trigger {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -325,17 +325,17 @@ input[type='number']::-webkit-outer-spin-button {
   white-space: nowrap;
 }
 
-.floor-trigger:hover {
+.dropdown-trigger:hover {
   border-color: var(--accent);
   background: var(--bg-surface);
 }
 
-.floor-trigger:focus {
+.dropdown-trigger:focus {
   outline: none;
   border-color: var(--accent);
 }
 
-.floor-dropdown-menu {
+.dropdown-menu {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
@@ -347,13 +347,16 @@ input[type='number']::-webkit-outer-spin-button {
   margin: 0;
   list-style: none;
   z-index: 9999;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   animation: dropdownFadeIn 120ms ease;
 }
 
-.floor-dropdown-item {
+.dropdown-menu--scroll {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.dropdown-item {
   padding: 8px 12px;
   border-radius: 6px;
   font-family: 'IBM Plex Mono', monospace;
@@ -364,12 +367,12 @@ input[type='number']::-webkit-outer-spin-button {
   transition: background 100ms ease, color 100ms ease;
 }
 
-.floor-dropdown-item:hover {
+.dropdown-item:hover {
   background: var(--bg-surface);
   color: var(--text-primary);
 }
 
-.floor-dropdown-item.active {
+.dropdown-item.active {
   color: var(--accent);
   background: rgba(245, 158, 11, 0.08);
 }
@@ -505,4 +508,40 @@ input[type='number']::-webkit-outer-spin-button {
   font-size: 13px;
   color: var(--accent);
   margin-bottom: 10px;
+}
+
+/* ─── Patrol report print (Prompt 115) ──────────────────────────────────────
+   Scoped to .patrol-report-root so this never leaks into any other page's
+   print output. Forces light colours regardless of the active theme — this
+   is a compliance document that gets photocopied, not a themed UI screen. */
+@media print {
+  body * { visibility: hidden; }
+  .patrol-report-root, .patrol-report-root * { visibility: visible; }
+  .patrol-report-root {
+    position: absolute; left: 0; top: 0; width: 100%;
+    background: #ffffff !important; color: #0f172a !important;
+    /* Fixed, print-safe values for every CSS var PatrolRouteOverlay draws
+       with — independent of the active theme. Chosen for luminance spread
+       (not just hue) so the four checkpoint states stay distinguishable
+       after greyscale photocopying, not only in colour. */
+    --bg-base: #ffffff;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f3f4f6;
+    --border: #cbd5e1;
+    --success: #16a34a;         /* visited   — luminance ~111 */
+    --warning: #92400e;         /* short-dwell — luminance ~83 */
+    --danger: #7f1d1d;          /* missed    — luminance ~58 */
+    --accent: #1d4ed8;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;  /* pending/no-record — luminance ~101 */
+  }
+  .no-print { display: none !important; }
+
+  .patrol-report-root table { page-break-inside: auto; }
+  .patrol-report-root thead { display: table-header-group; }
+  .patrol-report-root tr { page-break-inside: avoid; }
+
+  /* Keep the map block together on one page where it fits; the table is
+     allowed to break across pages (with its header repeating, above). */
+  .patrol-report-map { page-break-inside: avoid; }
 }

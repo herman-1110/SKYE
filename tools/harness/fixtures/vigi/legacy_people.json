@@ -1,0 +1,19 @@
+{
+  "description": "legacy format, PEOPLE only",
+  "source": "skye-log-archive/vigi-2026-10-05/20261005.log record #1, received 2026-10-05T06:32:29.075Z from the real InSight S445",
+  "content_type": "application/json; charset=utf-8",
+  "body": {
+    "ip": "192.168.0.101",
+    "mac": "98-ba-5f-8b-10-03",
+    "protocol": "HTTP",
+    "device_name": "InSight S445 1.0_1003",
+    "event_list": [
+      {
+        "dateTime": "20261005143227",
+        "event_type": [
+          "PEOPLE"
+        ]
+      }
+    ]
+  }
+}

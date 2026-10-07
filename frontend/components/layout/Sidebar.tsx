@@ -5,8 +5,15 @@ import { usePathname } from "next/navigation";
 import { useDashboardStore } from "@/store/dashboardStore";
 import { subscribeToPendingCount } from "@/services/userService";
 import { useAuth } from "@/hooks/useAuth";
+import { isAdminRole } from "@/types/user";
+import { useBeaconScans } from "@/hooks/useBeaconScans";
 import type { PositionRecord } from "@/types/position";
 import type { AlertRecord } from "@/types/alert";
+
+// Matches BeaconManager's UnknownBeaconsPanel — a beacon drops off the badge
+// count within ~10s of going quiet rather than lingering forever (RTDB scan
+// nodes persist after the beacon is gone).
+const UNKNOWN_BEACON_ONLINE_THRESHOLD_S = 10;
 
 const NAV_ALL = [
   {
@@ -24,6 +31,10 @@ const NAV_ALL = [
   {
     href: "/dashboard/floor-plans", label: "Floor Plans", adminOnly: false,
     icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>,
+  },
+  {
+    href: "/dashboard/patrol-reports", label: "Patrol Reports", adminOnly: false,
+    icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 7l8 10"/></svg>,
   },
   {
     href: "/dashboard/beacons", label: "Beacons", adminOnly: true,
@@ -54,13 +65,17 @@ interface Props { collapsed: boolean; onToggle: () => void }
 export default function Sidebar({ collapsed, onToggle }: Props) {
   const pathname = usePathname();
   const { userRecord } = useAuth();
-  const isAdmin = userRecord?.role === "admin";
+  const isAdmin = isAdminRole(userRecord?.role);
   const positions = useDashboardStore((s) => s.positions);
   const personnel = Object.values(positions) as PositionRecord[];
   const [pendingCount, setPendingCount] = useState(0);
   const alerts = useDashboardStore((s) => s.alerts);
   const activeAlertCount = Object.values(alerts as Record<string, AlertRecord>)
     .filter((a) => !a.resolved).length;
+  const beaconScans = useBeaconScans();
+  const unknownBeaconCount = Object.values(beaconScans).filter(
+    (s) => !s.registered && Date.now() / 1000 - s.last_seen < UNKNOWN_BEACON_ONLINE_THRESHOLD_S
+  ).length;
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -94,11 +109,13 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
       <nav className={`pt-3 ${collapsed ? "flex flex-col items-center gap-2 px-2" : "flex flex-col gap-0.5 px-2"}`}>
         {navItems.map(({ href, label, icon }) => {
           const active = pathname === href;
-          const isUsers  = href === "/dashboard/users";
-          const isAlerts = href === "/dashboard/alerts";
+          const isUsers   = href === "/dashboard/users";
+          const isAlerts  = href === "/dashboard/alerts";
+          const isBeacons = href === "/dashboard/beacons";
           const badgeCount =
-            isUsers  ? pendingCount :
-            isAlerts ? activeAlertCount : 0;
+            isUsers   ? pendingCount :
+            isAlerts  ? activeAlertCount :
+            isBeacons ? unknownBeaconCount : 0;
           const showBadge = badgeCount > 0;
 
           if (collapsed) {

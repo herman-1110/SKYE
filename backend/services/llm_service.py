@@ -131,7 +131,9 @@ class LLMService:
         ]
 
         shift_id = log_id
-        rag_context = rag_service.get_context(f"shift {shift_id} safety audit")
+        rag_context, rag_feedback_ids = rag_service.get_context_with_sources(
+            f"shift {shift_id} safety audit"
+        )
         prompt = self._build_prompt(shift_id, checkpoints, alert_summaries, rag_context)
 
         report_text = provider.generate(prompt)
@@ -143,7 +145,7 @@ class LLMService:
             generated_at=utcnow_iso(),
             patrol_summary=str(checkpoints),
             alert_summary=str(alert_summaries),
-            rag_examples_used=[rag_context],
+            rag_examples_used=rag_feedback_ids,
             report_text=report_text,
             model_used=provider.get_model_name(),
             report_type="patrol",

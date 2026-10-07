@@ -1,0 +1,55 @@
+{
+  "description": "enhanced format, MOTION and PEOPLE as separate events in one POST",
+  "source": "skye-log-archive/vigi-2026-10-05/20261005.log record #824, received 2026-10-05T08:24:09.022Z from the real InSight S445",
+  "content_type": "application/json; charset=utf-8",
+  "body": {
+    "ip": "192.168.0.101",
+    "mac": "98-ba-5f-8b-10-03",
+    "protocol": "HTTP",
+    "device_name": "InSight S445 1.0_1003",
+    "event_list": [
+      {
+        "camera": "1",
+        "dateTime": "2026-10-05 16:24:07",
+        "event_type": "MOTION",
+        "extra_text": [
+          {
+            "region_id": [
+              1
+            ],
+            "obj_rect_info": [
+              {
+                "x": 781,
+                "y": 4722,
+                "height": 5139,
+                "width": 1484
+              }
+            ],
+            "obj_num": 1
+          }
+        ]
+      },
+      {
+        "camera": "1",
+        "dateTime": "2026-10-05 16:24:07",
+        "event_type": "PEOPLE",
+        "extra_text": [
+          {
+            "region_id": [
+              1
+            ],
+            "obj_rect_info": [
+              {
+                "x": 390,
+                "y": 4722,
+                "height": 3194,
+                "width": 1406
+              }
+            ],
+            "obj_num": 1
+          }
+        ]
+      }
+    ]
+  }
+}

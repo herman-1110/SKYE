@@ -13,7 +13,7 @@ export function useBuildings(): { buildings: BuildingRecord[]; isLoading: boolea
 
   useEffect(() => {
     if (!user?.uid) return;
-    const unsub = subscribeToBuildings(user.uid, (data) => {
+    const unsub = subscribeToBuildings((data) => {
       setBuildings(data);
       setCachedBuildings(data);
       setIsLoading(false);

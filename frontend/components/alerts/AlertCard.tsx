@@ -29,7 +29,14 @@ export default function AlertCard({ alert, selected, onClick, onDelete, deleting
       {!selected && critical && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-s-danger animate-amber-pulse" />}
 
       <div className="flex items-start justify-between gap-2">
-        <AlertTypeBadge type={alert.alert_type} />
+        <div className="flex items-center gap-1.5">
+          <AlertTypeBadge type={alert.alert_type} />
+          {alert.alert_type === "man_down" && alert.cause === "signal_loss" && (
+            <span className="text-[9px] font-mono uppercase tracking-wide text-s-muted">
+              signal lost
+            </span>
+          )}
+        </div>
         <span className={`shrink-0 text-[10px] font-mono px-2 py-0.5 rounded-full border
           ${alert.resolved
             ? "border-s-success text-s-success"

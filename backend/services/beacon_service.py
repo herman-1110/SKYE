@@ -5,6 +5,7 @@ from firebase_admin import db as rtdb
 from config.beacon_registry import make_ibeacon_key
 from models.beacon import Beacon
 from repositories.beacon_repository import beacon_repository
+from repositories.position_repository import position_repository
 from utils.timestamp_utils import utcnow_iso
 
 
@@ -51,18 +52,31 @@ class BeaconService:
         # the Sidebar reflects the new name without waiting for the next solve.
         if "label" in patch and updated.person_id:
             try:
-                rtdb.reference(f"/positions/{updated.person_id}").update({
-                    "label": patch["label"],
-                })
+                ref = rtdb.reference(f"/positions/{updated.person_id}")
+                # Only patch an existing record — never create one. person_id only
+                # matches the /positions key for real Omada devices (reporter_mac ==
+                # person_id there); for simulated beacons the key is a MAC instead,
+                # so blindly updating here would create an orphaned partial node.
+                if ref.get() is not None:
+                    ref.update({"label": patch["label"]})
             except Exception as e:
                 print(f"[BEACON] WARNING: RTDB label patch failed for {updated.person_id}: {e}")
 
         return updated
 
     def delete(self, beacon_id: str) -> bool:
+        beacon = beacon_repository.get_by_id(beacon_id)
         ok = beacon_repository.delete(beacon_id)
         if ok:
             self._invalidate_cache()
+            # Drop the live position too, or a deleted beacon's person keeps
+            # showing up in the dashboard's Personnel list / map markers until
+            # something else happens to overwrite that RTDB node.
+            if beacon and beacon.person_id:
+                try:
+                    position_repository.delete(beacon.person_id)
+                except Exception as e:
+                    print(f"[BEACON] WARNING: RTDB position delete failed for {beacon.person_id}: {e}")
         return ok
 
     def _invalidate_cache(self) -> None:

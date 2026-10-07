@@ -37,6 +37,8 @@ MANIFEST
 # Environment Variables & Secrets
 serviceAccountKey.json
 backend/serviceAccountKey.json
+# Local camera-auth script with a plaintext password; never commit it
+backend/encode.py
 .env
 .env.*
 !.env.example
@@ -54,3 +56,20 @@ backend/serviceAccountKey.json
 Thumbs.db
 .claude/
 
+
+skye-measure*.log
+tsconfig.tsbuildinfo
+payload.json
+
+backend/skye-measure.log
+backend/skye-capture-*.log
+
+# Durable capture logs written by the backend itself (Prompt 128)
+backend/logs/
+
+# go2rtc live-view relay (Prompt 132): the binary, the config the backend generates,
+# its temp files and go2rtc's log never go into git
+tools/go2rtc/bin/
+tools/go2rtc/go2rtc.yaml
+tools/go2rtc/*.tmp
+tools/go2rtc/go2rtc.log*

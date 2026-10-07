@@ -25,13 +25,14 @@ def make_ibeacon_key(uuid: str, major: str, minor: str) -> str:
 
 # Legacy seed only — migrated into Firestore on startup (idempotent), then vestigial.
 # iBeacon identity key → person identity
-SEED_BEACONS: Dict[str, BeaconIdentity] = {
-    # Test phone (nRF Connect iBeacon) — Guard Alpha
-    "c001405c0e9f43b8af4aea309ba7e130:0001:0001": {
-        "person_id": "guard-001",
-        "person_type": "guard",
-        "label": "Guard Alpha (Real)",
-    },
-}
+#
+# Empty by design: the one entry that used to live here (the nRF Connect test
+# phone, "Guard Alpha (Real)") was deleted from the live registry on purpose.
+# seed_from_legacy() re-creates anything listed here that's missing from
+# Firestore — it can't tell "never seeded" apart from "deleted on purpose" —
+# so a deleted beacon must also be removed from this dict, or it comes back
+# on every restart. Don't re-add it; register beacons via the dashboard/API
+# instead, which is the actual source of truth now.
+SEED_BEACONS: Dict[str, BeaconIdentity] = {}
 
 # resolve_beacon_by_ibeacon() removed — see OmadaIngestService._resolve_beacon (cached)

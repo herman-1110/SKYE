@@ -34,7 +34,9 @@ class ZoneService:
             created_at=utcnow_iso(),
             created_by=user_id,
         )
-        return zone_repository.save(building_id, floor_id, zone)
+        result = zone_repository.save(building_id, floor_id, zone)
+        self._invalidate_positioning_cache()
+        return result
 
     def update_zone(
         self,
@@ -48,6 +50,7 @@ class ZoneService:
         result = zone_repository.update(building_id, floor_id, zone_id, fields)
         if result is None:
             raise ValueError(f"Zone {zone_id} not found")
+        self._invalidate_positioning_cache()
         return result
 
     def delete_zone(
@@ -58,6 +61,12 @@ class ZoneService:
         user_id: str,
     ) -> None:
         zone_repository.delete(building_id, floor_id, zone_id)
+        self._invalidate_positioning_cache()
+
+    def _invalidate_positioning_cache(self) -> None:
+        # local import: keeps zone_service<->positioning_service decoupled at module-load time
+        from services.positioning_service import positioning_service
+        positioning_service.invalidate_scale_cache()
 
     def ai_detect_zones(self, building_id: str, floor_id: str) -> List[dict]:
         floor = floor_repository.get_by_id(building_id, floor_id)

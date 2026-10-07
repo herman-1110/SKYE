@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, signInWithGoogle } from "@/services/authService";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,7 +10,17 @@ function getRedirectPath(role: string, status: string): string {
   return "/dashboard";
 }
 
+// useSearchParams() must sit under a Suspense boundary for Next 15 to
+// prerender /login; without it `next build` fails at this page.
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const registered = searchParams.get("registered");

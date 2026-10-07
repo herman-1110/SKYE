@@ -49,7 +49,7 @@ The backend is a Python FastAPI application that receives BLE telemetry, runs th
 
 6. **Start the server:**
    ```bash
-   uvicorn main:app --reload
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000   
    ```
    API is available at `http://localhost:8000` (or the port set in `.env`).
 
@@ -93,6 +93,7 @@ The frontend is a Next.js dashboard for real-time monitoring, alert management, 
    
    Simulation Patrol: venv/Scripts/python.exe services/simulation_patrol.py
    Simulation Events: venv/Scripts/python.exe services/simulation_events.py
+   Simulation Shift : venv/Scripts/python.exe services/simulation_shift.py 
 
 ## Backend Environment Variables
 

@@ -51,6 +51,23 @@ class FloorService:
         positioning_service.invalidate_scale_cache()
         self._recalculate_ap_coordinates(building_id, floor_id, scale)
 
+    def derive_ap_metres(self, building_id: str, floor_id: str, x_pct: float, y_pct: float) -> tuple[float, float]:
+        """Re-derive real-world metre coordinates from x_pct/y_pct — same
+        arithmetic _recalculate_ap_coordinates() applies when re-deriving every
+        AP on a floor after a scale change, used here instead for one AP at
+        create/reposition time. Raises ValueError if the floor isn't
+        calibrated; callers turn that into a 409 (placement/reposition on an
+        uncalibrated floor would otherwise store zeroed coordinates)."""
+        floor = floor_repository.get_by_id(building_id, floor_id)
+        if not floor or not floor.scale_pixels_per_meter or not floor.image_width_px or not floor.image_height_px:
+            raise ValueError(
+                "Floor is not calibrated — set the scale before placing APs. "
+                "Placing now would store zeroed coordinates and break positioning."
+            )
+        x_m = x_pct * floor.image_width_px / floor.scale_pixels_per_meter
+        y_m = y_pct * floor.image_height_px / floor.scale_pixels_per_meter
+        return x_m, y_m
+
     def _recalculate_ap_coordinates(self, building_id: str, floor_id: str, scale: float) -> None:
         floor = floor_repository.get_by_id(building_id, floor_id)
         if not floor or not floor.image_width_px or not floor.image_height_px:
@@ -95,8 +112,11 @@ class FloorService:
         cctvs = cctv_repository.get_all(building_id, floor_id)
         for cctv in cctvs:
             cctv_repository.delete(building_id, floor_id, cctv.id)
-            if cctv.mac:
-                cctv_repository.delete_cctv_heartbeat(cctv.mac)
+            if cctv.device_mac or cctv.mac:
+                cctv_repository.delete_cctv_heartbeat(cctv.device_mac or cctv.mac)
+        if cctvs:
+            from services.cctv_service import cctv_service
+            cctv_service.invalidate()
 
         # 4. Delete floorplan image from Firebase Storage
         if floor.storage_path:
@@ -119,6 +139,10 @@ class FloorService:
             from services.simulation_events import remove_ap as events_remove_ap
             patrol_remove_ap(mac)
             events_remove_ap(mac)
+
+        # Cameras that covered this checkpoint now cover nothing (Prompt 131 T2).
+        from services.cctv_service import cctv_service
+        cctv_service.unlink_ap(building_id, floor_id, ap_id)
 
         floor = floor_repository.get_by_id(building_id, floor_id)
         if floor and floor.patrol_route:

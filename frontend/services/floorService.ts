@@ -1,14 +1,17 @@
 import {
   collection,
+  limit,
   onSnapshot,
   orderBy,
   query,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, fsdb, storage } from "@/config/firebase";
 import type { FloorRecord } from "@/types/floor";
+import type { PatrolLogRecord } from "@/types/patrolLog";
 
 async function token(): Promise<string> {
   const t = await auth.currentUser?.getIdToken();
@@ -26,11 +29,33 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText);
-    throw new Error(detail);
+    const raw = await res.text().catch(() => res.statusText);
+    // FastAPI error bodies are JSON — {"detail": "message"} — not the plain
+    // message text. Extract it so callers showing err.message directly (e.g.
+    // via toast) get a readable string instead of a raw JSON blob.
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+      // FastAPI's own 422s carry a list of {msg} objects rather than a sentence.
+      else if (parsed && Array.isArray(parsed.detail)) {
+        const msgs = parsed.detail
+          .map((d: { msg?: unknown }) => (typeof d?.msg === "string" ? d.msg : null))
+          .filter(Boolean);
+        if (msgs.length) detail = msgs.join("; ");
+      }
+    } catch {
+      // Not JSON — use the raw text as-is.
+    }
+    // The HTTP status rides along for callers that react to it (Prompt 132:
+    // live view tells "camera offline" apart from "relay not running").
+    throw Object.assign(new Error(detail), { status: res.status });
   }
   return res.json();
 }
+
+/** An error thrown by these API helpers: the backend's sentence plus the HTTP status. */
+export type ApiError = Error & { status?: number };
 
 export function subscribeToFloors(
   buildingId: string,
@@ -54,11 +79,15 @@ export async function uploadFloor(
   name: string,
   floorNumber: number,
   onProgress?: (pct: number) => void,
+  onTaskReady?: (cancel: () => void) => void,
 ): Promise<FloorRecord> {
+  if (file.size === 0) throw new Error("File is empty");
   if (file.size > MAX_BYTES) throw new Error("File too large — maximum 10MB");
   if (!ALLOWED_TYPES.includes(file.type)) throw new Error("Invalid file type — PNG, JPG, PDF only");
 
-  // Read natural pixel dimensions before upload (images only; PDFs → null)
+  // Read natural pixel dimensions before upload (images only; PDFs → null).
+  // A decode failure means the file is corrupt/truncated — reject it here
+  // rather than uploading an image that will never render.
   let image_width_px: number | null = null;
   let image_height_px: number | null = null;
   if (file.type.startsWith("image/")) {
@@ -68,7 +97,9 @@ export async function uploadFloor(
       img.onerror = () => resolve(null);
       img.src = URL.createObjectURL(file);
     });
-    if (dims) { image_width_px = dims.w; image_height_px = dims.h; console.log("[uploadFloor] image dimensions:", dims.w, "×", dims.h); }
+    if (!dims) throw new Error("Could not read this image — it may be corrupt or empty.");
+    image_width_px = dims.w; image_height_px = dims.h;
+    console.log("[uploadFloor] image dimensions:", dims.w, "×", dims.h);
   }
 
   if (!auth.currentUser) {
@@ -83,13 +114,16 @@ export async function uploadFloor(
   const storagePath = `buildings/${buildingId}/floors/${Date.now()}_${file.name}`;
   const storageRef = ref(storage, storagePath);
   const task = uploadBytesResumable(storageRef, file);
+  onTaskReady?.(() => task.cancel());
 
   return new Promise((resolve, reject) => {
     task.on(
       "state_changed",
       (snap) => onProgress?.(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
       (err) => {
-        if (err.code === "storage/unauthorized") {
+        if (err.code === "storage/canceled") {
+          reject(new Error("CANCELLED"));
+        } else if (err.code === "storage/unauthorized") {
           reject(new Error("Storage permission denied — check Firebase Storage rules"));
         } else {
           reject(new Error("Upload failed. Please try again."));
@@ -130,10 +164,12 @@ export const savePatrolConfig = (
   floorId: string,
   patrolEnabled: boolean,
   patrolRoute: string[],
+  patrolIntervalMinutes: number,
 ): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/patrol`, {
     patrol_enabled: patrolEnabled,
     patrol_route: patrolRoute,
+    patrol_interval_minutes: patrolIntervalMinutes,
   });
 
 export const renameFloor = (buildingId: string, floorId: string, name: string): Promise<void> =>
@@ -172,17 +208,62 @@ export interface CCTVRecord {
   y_pct: number;
   created_at: string;
   mac?: string | null;
+  // Prompt 131 — absent on records written before it (read as the defaults).
+  source_type?: "ipc" | "nvr";      // "ipc" by default; hidden in the UI
+  device_mac?: string | null;        // the reporting device's MAC; equals mac for "ipc"
+  channel?: number;                  // 1 for a direct camera; hidden in the UI
+  ip?: string | null;                // alarms are only accepted from this address
+  checkpoint_ap_id?: string | null;  // the AP (checkpoint) this camera covers
+  timezone?: string | null;          // read from the camera at registration, e.g. "UTC+08:00"
+  camera_key?: string | null;        // API responses only: "ipc:98BA5F8B1003:1"
+}
+
+/** One alarm event in a camera's last 15 minutes (backend memory only). */
+export interface CameraDetectionRow {
+  received_at: string;               // server UTC, ISO 8601
+  event_type: string;                // "PEOPLE" | "MOTION" | …
+  is_human: boolean;                 // true only for PEOPLE
+  obj_num: number | null;            // people/objects in frame (enhanced format only)
+  payload_format: "legacy" | "enhanced";
+}
+
+export interface CameraDetections {
+  camera_key: string | null;
+  process_started_at: string;        // detections before this were lost with the restart
+  window_s: number;
+  detections: CameraDetectionRow[];  // newest first
 }
 
 export const listAPs = (buildingId: string, floorId: string): Promise<APRecord[]> =>
   req("GET", `/api/buildings/${buildingId}/floors/${floorId}/aps`);
 
+// x_m/y_m are not part of either request body — the backend derives them
+// server-side from x_pct/y_pct + the floor's calibrated scale and ignores
+// anything sent here (see floor_routes.py's create_ap/update_ap_position).
 export const createAP = (
   buildingId: string,
   floorId: string,
-  body: { name: string; mac: string; x_pct: number; y_pct: number; x_m: number; y_m: number },
+  body: { name: string; mac: string; x_pct: number; y_pct: number },
 ): Promise<APRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/aps`, body);
+
+export const updateAPPosition = (
+  buildingId: string,
+  floorId: string,
+  apId: string,
+  body: { x_pct: number; y_pct: number },
+): Promise<void> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}/position`, body);
+
+// Rename an AP (the MAC is its identity and can't change). A blank name comes
+// back as a 422 with a sentence the caller can show as-is (err.message).
+export const updateAP = (
+  buildingId: string,
+  floorId: string,
+  apId: string,
+  body: { name: string },
+): Promise<APRecord> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}`, body);
 
 export const deleteAP = (buildingId: string, floorId: string, apId: string): Promise<void> =>
   req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/aps/${apId}`);
@@ -190,12 +271,71 @@ export const deleteAP = (buildingId: string, floorId: string, apId: string): Pro
 export const listCCTVs = (buildingId: string, floorId: string): Promise<CCTVRecord[]> =>
   req("GET", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`);
 
+// MAC may use dashes or colons; the backend normalises it. A bad MAC/IP/checkpoint
+// comes back as a 422 and a MAC already registered as a 409, each with a sentence
+// the caller can show as-is (err.message).
 export const createCCTV = (
   buildingId: string,
   floorId: string,
-  body: { name: string; x_pct: number; y_pct: number; mac?: string | null },
+  body: {
+    name: string; x_pct: number; y_pct: number;
+    mac?: string | null; ip?: string | null; checkpoint_ap_id?: string | null;
+  },
 ): Promise<CCTVRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`, body);
+
+// Only the fields sent change; send null to clear ip or checkpoint_ap_id.
+export const updateCCTV = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+  body: { name?: string; mac?: string | null; ip?: string | null; checkpoint_ap_id?: string | null },
+): Promise<CCTVRecord> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`, body);
+
+/** One camera found by a discovery round (Prompt 131b). */
+export interface DiscoveredCamera {
+  mac: string;                 // "98:BA:5F:8B:10:03"
+  ip: string;
+  name: string | null;
+  model: string | null;
+  discovered_via: string;      // "onvif", "arp+onvif", "alarm", …
+  registered: boolean;
+  registered_ip: string | null;
+}
+
+// "Scan now": one discovery round on the backend's LAN segments (about 3 s,
+// admin only, no credentials). Results also land in /cctv_heartbeats.
+export const discoverCameras = (): Promise<{ scanned_at: string; found: DiscoveredCamera[] }> =>
+  req("POST", "/api/cctvs/discover");
+
+export const getCCTVDetections = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+): Promise<CameraDetections> =>
+  req("GET", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}/detections`);
+
+// Live view (Prompt 132, admins only): the browser's WebRTC offer goes to the
+// backend, which forwards it to go2rtc on the server and returns the answer.
+// "sub" is the 848x480 stream; "main" is the HD one. The reply is only the SDP
+// answer - the camera's stream address never reaches the browser.
+export const openCCTVLiveView = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+  sdp: string,
+  quality: "sub" | "main",
+): Promise<{ type: "answer"; sdp: string }> =>
+  req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}/webrtc`, { sdp, quality });
+
+export const updateCCTVPosition = (
+  buildingId: string,
+  floorId: string,
+  cctvId: string,
+  body: { x_pct: number; y_pct: number },
+): Promise<void> =>
+  req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}/position`, body);
 
 export const deleteCCTV = (buildingId: string, floorId: string, cctvId: string): Promise<void> =>
   req("DELETE", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`);
@@ -211,6 +351,47 @@ export function subscribeToAPs(
   );
   return onSnapshot(q, (snap) => {
     callback(snap.docs.map((d) => d.data() as APRecord));
+  });
+}
+
+// Bounded and ordered — unlike patrolLogService.ts's unbounded getDocs() (which
+// has zero callers and stays that way). There is no backend endpoint for patrol
+// logs and no floor_id/cycle_id field to filter this query on server-side, so
+// this pulls the N most recent logs across ALL floors/guards and the caller
+// filters to its own floor client-side via checkpoint_id -> AP mac membership.
+export function subscribeToPatrolLogs(
+  limitN: number,
+  callback: (logs: PatrolLogRecord[]) => void,
+): Unsubscribe {
+  const q = query(
+    collection(fsdb, "patrol_logs"),
+    orderBy("expected_arrival", "desc"),
+    limit(limitN),
+  );
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => d.data() as PatrolLogRecord));
+  });
+}
+
+// One guard's full log history, newest first. Requires a composite index on
+// patrol_logs (guard_id ASC, expected_arrival DESC) — see firestore.indexes.json
+// — because Firestore needs one for an equality filter combined with an
+// orderBy on a different field (verified directly against this project's
+// Firestore: without it, this query throws FailedPrecondition). Deploy via
+// `firebase deploy --only firestore:indexes` before this is used in production.
+export function subscribeToPatrolLogsByGuard(
+  guardId: string,
+  limitN: number,
+  callback: (logs: PatrolLogRecord[]) => void,
+): Unsubscribe {
+  const q = query(
+    collection(fsdb, "patrol_logs"),
+    where("guard_id", "==", guardId),
+    orderBy("expected_arrival", "desc"),
+    limit(limitN),
+  );
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => d.data() as PatrolLogRecord));
   });
 }
 
