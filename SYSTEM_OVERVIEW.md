@@ -138,7 +138,7 @@ Traditional safety patrols rely on manual logbooks and radio check-ins. Supervis
 
 | Alert Type | Trigger | Suppression |
 |---|---|---|
-| `man_down` | Worker/guard stays within `MAN_DOWN_MOVEMENT_EPSILON_M` of an anchor position for longer than `MAN_DOWN_MINUTES` — a **physical-stillness** check on server wall-clock time (the anchor re-seeds whenever the person moves past the epsilon). This is *not* payload-timestamp staleness despite the similar name. Forklifts exempt. Fires regardless of zone. Only checked on telemetry arrival — see §9b for the stop-gap. | 30s per person_id |
+| `man_down` | Worker/guard stays within `MAN_DOWN_MOVEMENT_EPSILON_M` of an anchor position for longer than `MAN_DOWN_MINUTES` — a **physical-stillness** check on server wall-clock time (the anchor re-seeds whenever the person moves past the epsilon). This is *not* payload-timestamp staleness despite the similar name. Forklifts exempt. Fires regardless of zone. Only checked on telemetry arrival — see §9b for the stop-gap. | Once per stillness episode (until the anchor re-seeds), plus 30s per person_id |
 | `collision` | Worker's Kalman-predicted position converges with forklift's within threshold. Stores both parties (`other_person_id`). | **10s** per worker+forklift pair |
 | `ghost_patrol` | BLE tag detected at checkpoint but VIGI camera does NOT confirm human presence | Per patrol log event — **only reachable from the simulation today, see §9b** |
 | `patrol_violation` | Guard misses checkpoint (actual_arrival is null) or dwell_time < MIN_DWELL_SECONDS | Per patrol log event — **only reachable from the simulation today, see §9b** |
@@ -590,7 +590,8 @@ SafetyService.run_all_checks()
   ├─ check_man_down(current)
   │    stillness within MAN_DOWN_MOVEMENT_EPSILON_M past MAN_DOWN_MINUTES?
   │    → RTDB /alerts ← AlertRecord (man_down)
-  │    30s suppression via _last_man_down dict
+  │    once per stillness episode via _still_alerted set,
+  │    plus 30s suppression via _last_man_down dict
   └─ check_collision(all_positions)
        predicted positions converge? → RTDB /alerts ← AlertRecord (collision, other_person_id)
        10s suppression via _last_collision dict per worker|forklift pair

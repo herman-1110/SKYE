@@ -137,8 +137,8 @@ CameraDetection: camera_key, source_type, device_mac, channel,
 - **Linked cameras:** checkpoint AP MAC (`checkpoint_id`, `:391`) → AP id (from the AP cache) → cameras with that `checkpoint_ap_id`. If **any** linked camera says `seen`, the result is `seen`. If none is `seen` and **all** say `not_seen`, the result is `not_seen`. Otherwise it's `unknown`.
 - **Writes:**
   - The verdict goes onto the patrol-log doc: a new `camera_verdict` field (tri-state), `camera_keys`, `human_events_in_window`; `vigi_detected` becomes `camera_verdict == "seen"`.
-  - On `not_seen`, the evaluator (not the tracker) calls `safety_service.verify_multimodal(log, ble_detected=True, vigi_detected=False)` (`safety_service.py:439-457`). That keeps the existing alert schema: `alert_type="ghost_patrol"`, `zone=checkpoint_name`, `cause=None` (`models/alert.py:5-22`).
-- **Rate bound:** **at most one `ghost_patrol` per `(guard_id, checkpoint, cycle_id)`.** `verify_multimodal` has no suppression of its own, unlike man-down's 30 s (`safety_service.py:172-174`). Without this cap, a parked tag would repeat the 325-alert day.
+  - On `not_seen`, the evaluator (not the tracker) calls `safety_service.verify_multimodal(log, ble_detected=True, vigi_detected=False)` (`safety_service.py:456-474`). That keeps the existing alert schema: `alert_type="ghost_patrol"`, `zone=checkpoint_name`, `cause=None` (`models/alert.py:5-22`).
+- **Rate bound:** **at most one `ghost_patrol` per `(guard_id, checkpoint, cycle_id)`.** `verify_multimodal` has no suppression of its own, unlike man-down's once-per-stillness-episode latch and 30 s gate (`safety_service.py:183-191`, since 9 Oct). Without this cap, a parked tag would repeat the 325-alert day.
 - **Prerequisite:** patrol is **off on both floors** (`patrol_enabled=false`, empty route; read 5 Oct). Ghost Patrol needs patrol enabled and a route on the TPLink floor.
 
 ## 8. Live view

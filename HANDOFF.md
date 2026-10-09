@@ -18,9 +18,7 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
   - The camera panel's events list scrolls.
   - "Alarm setup" now reports from the alarms that actually arrive.
 - **Git:** everything is merged and pushed to `main` (`ef1a1d3`). The work branch `claude/repo-review-r1fviz` was deleted on GitHub by someone after the merge, then pruned and deleted locally. **Work happens on `main` now.**
-- **Waiting on Herman:**
-  - The man-down stillness alert flood (Open #1): no decision yet.
-  - Whether to post the go2rtc issue report (`docs/go2rtc-sei-issue.md`).
+- **9 Oct:** the man-down flood is fixed (latch once per episode; live, not committed; Open #1). The go2rtc issue won't be posted (Open #16). `/alerts` was cleared by Herman (Open #2).
 - **Next up:** Prompt 133, Ghost Patrol.
 
 ## Git
@@ -267,10 +265,11 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
 - On the Sep 7 replay, a 2 s grace would lift 3-AP decisions from 73% to 95.5%. That's input for Prompt 129.
 
 ## Open threads — ask Herman, don't assume
-1. **Man-down stillness alert flood** (found 5 Oct; **still no decision**).
-   - **The cause:** once a beacon has been still past `man_down_minutes` (Firestore 60, which Herman owns), `check_man_down` raises a new alert every 30 s for as long as it stays still. The repeat suppression is at `safety_service.py:172-175`, and the stillness anchor is never reset after an alert. Signal-loss alerts latch once per episode (`_stale_alerted`); stillness alerts don't.
-   - **The options:** latch once per stillness episode (recommended), or re-alert every 10–15 minutes.
-2. **`/alerts` was cleared before 5 Oct 11:13.** Herman was asked whether he did it and hasn't answered.
+1. **Man-down stillness alert flood: fixed 9 Oct, live, not committed yet.** Herman chose latch once per stillness episode.
+   - `_still_alerted` in `safety_service.py`: one stillness alert per episode, cleared wherever the anchor is (re)seeded (cold start, approximate→exact upgrade, movement past the epsilon). The 30 s gate stays.
+   - A beacon that goes dark and comes back still within epsilon of the same anchor is the same episode, so there's no second stillness alert. A resolved alert doesn't re-fire until the person moves.
+   - Test: `tools/harness/man_down_latch_inprocess.py` (6/6; HEAD before the fix fails 4, with 116 extra alerts in an hour).
+2. **`/alerts` was cleared before 5 Oct 11:13:** Herman did it (answered 9 Oct). Resolved.
 3. **Prompt 127** needs ground truth for the Sep 30 and Oct 1 captures.
 4. **Prompt 129,** the null-RSSI grace period, is not started.
 5. **The simulator's Ghost Patrol bug:** `simulation_events._write_patrol_log` calls `verify_multimodal` for every record, so its missed-checkpoint segment also raises a spurious `ghost_patrol`. Matters for 133.
@@ -298,7 +297,7 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
     - The animejs `frontend/package*.json` and the root `package-lock.json` are in git now; don't modify them.
 14. **DHCP:** the laptop's `.5` reservation didn't hold (it's `.2` now). The camera's `.101` reservation was never verified. Live view adapts by itself; check the camera's Alarm Server target if alarms stop.
 15. **Reload noise:** right after every backend reload there's a 1–2 s burst of 3–15 "RuntimeError: No response returned" tracebacks. These are requests queued during the reload, in Starlette's BaseHTTPMiddleware. It's pre-existing (also seen 5 Oct) and harmless, but noisy.
-16. **`docs/go2rtc-sei-issue.md`:** Herman decides whether to post it to AlexxIT/go2rtc. Its `/api/streams` figures come from the MP4 consumer, not WebRTC.
+16. **`docs/go2rtc-sei-issue.md`: not posting** (Herman, 9 Oct). The ffmpeg workaround is enough for SKYE; don't raise it again unless he asks. The draft is kept: it cites `master` `c245815` (bug still there on 9 Oct) and links #2277 ("VIGI no video"). Its `/api/streams` figures come from the MP4 consumer, not WebRTC.
 
 ## Test harness (`tools/harness/`; `tools/harness/README.md` has the commands)
 - **Point it at a `git archive` export, never the live `backend/`:**

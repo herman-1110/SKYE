@@ -29,6 +29,14 @@ _man_down_tracker: Dict[str, tuple[float, float, str, bool]] = {}
 # a beacon that's simply staying dead. Cleared in check_man_down() the moment
 # a fresh position for that person arrives.
 _stale_alerted: Set[str] = set()
+# person_ids that have already fired a stillness man-down for the current
+# stillness episode, i.e. since their anchor was last (re)seeded. One alert per
+# episode, the same latch _stale_alerted gives signal-loss; without it a
+# motionless beacon re-alerted every 30 s for as long as it stayed still.
+# Cleared only where the anchor is (re)seeded in check_man_down(), so a beacon
+# that goes dark and comes back still within epsilon of the same anchor is the
+# same episode and doesn't alert again. Per-process, in-memory, like the rest.
+_still_alerted: Set[str] = set()
 
 
 @dataclass
@@ -122,6 +130,7 @@ class SafetyService:
         # never moves — begins counting from first sighting.)
         if prev is None:
             _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
+            _still_alerted.discard(pid)
             return None
 
         anchor_x, anchor_y, since_iso, anchor_is_approximate = prev
@@ -150,6 +159,7 @@ class SafetyService:
             # waits man_down_minutes from their first exact solve rather than
             # from first sighting — an accepted, correct cost.
             _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
+            _still_alerted.discard(pid)
             return None
         if current.is_approximate != anchor_is_approximate:
             # Exact anchor + approximate current: never downgrade. Leave
@@ -163,13 +173,19 @@ class SafetyService:
         # anchor chases position jitter and the person never appears still.
         if moved >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
             _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
+            _still_alerted.discard(pid)
             return None
 
         # Within epsilon: still. Has the clock run past the threshold?
         if seconds_between(since_iso, now) < cfg.man_down_minutes * 60:
             return None
 
-        # Repeat-alert suppression (unchanged): one man-down per person per 30s.
+        # One stillness alert per episode (see _still_alerted).
+        if pid in _still_alerted:
+            return None
+
+        # Plus the shared 30 s per-person suppression, which also spaces this
+        # alert from a signal-loss one fired by check_man_down_stale().
         last_ts = _last_man_down.get(pid)
         if last_ts and seconds_between(last_ts, now) < 30:
             return None
@@ -185,6 +201,7 @@ class SafetyService:
         )
         alert_repository.save(record)
         _last_man_down[pid] = record.timestamp
+        _still_alerted.add(pid)
         return record
 
     def check_man_down_stale(self) -> List[AlertRecord]:

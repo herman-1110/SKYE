@@ -1,8 +1,10 @@
 **Title:** RTSP/H264: no frames are ever emitted when the camera puts the RTP marker bit on a trailing SEI (TP-Link VIGI InSight S445)
 
-**go2rtc version:** 1.9.14 (b5948cf), windows/amd64. `pkg/h264/rtp.go` on `master` has the same logic.
+**go2rtc version:** 1.9.14 (b5948cf), windows/amd64. `RTPDepay` in `pkg/h264/rtp.go` is unchanged on `master` (c245815, checked 2026-10-09).
 
 **Camera:** TP-Link VIGI InSight S445 v1.0, firmware 3.3.2 Build 260708. RTSP over TCP (interleaved). Captured on the sub stream (`/stream2`, H.264 High@3.0, 848x480, 25 fps).
+
+**Possibly related:** #2277 (a VIGI camera with black video while the audio plays). PCMA audio doesn't go through the H.264 depacketizer, so this bug would explain that symptom too.
 
 ### Symptom
 - **WebRTC:** ICE and DTLS connect within half a second, but the browser never receives an RTP packet. No `inbound-rtp` stats appear, and the candidate pair carries only STUN keep-alives.
