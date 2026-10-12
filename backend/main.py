@@ -111,6 +111,10 @@ async def lifespan(app: FastAPI):
     if not vigi_service.secret_configured():
         logging.warning("[VIGI] VIGI_ALARM_PATH_SECRET is unset or shorter than 24 characters: "
                         "/vigi/alarm/ answers 404 to everything")
+    # Prompt 135 (SEC-01): say once that the AP ingest takes any source address.
+    if not settings.OMADA_INGEST_ALLOWED_IPS:
+        logging.warning("[OMADA] OMADA_INGEST_ALLOWED_IPS is not set: /telemetry/omada accepts "
+                        "AP reports from any address")
     # Prompt 132: bring go2rtc's live-view config in line with the camera
     # registry. Written only if it changed, so --reload restarts don't make
     # start.ps1 relaunch go2rtc.

@@ -1,3 +1,4 @@
+import ipaddress
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,7 @@ class Settings:
     DEBUG: bool
     OMADA_ACCESS_TOKEN: str
     OMADA_RAW_DUMP_ENABLED: bool
+    OMADA_INGEST_ALLOWED_IPS: tuple   # normalised IPv4 strings; () = no restriction (Prompt 135)
     PATH_LOSS_EXPONENT: float
     TX_POWER_DEFAULT: float
     PATROL_PROXIMITY_RADIUS_M: float
@@ -64,6 +66,23 @@ def _go2rtc_path(value: str, default_name: str) -> str:
     return str(path if path.is_absolute() else (_BACKEND_DIR / path).resolve())
 
 
+def _ipv4_list(name: str, value: str) -> tuple:
+    """A comma-separated list of IPv4 addresses -> a tuple of normalised
+    strings; empty or unset -> (). An entry that isn't an IPv4 address stops
+    startup with a message naming the setting and the entry, rather than
+    being dropped: a dropped entry could silently shut out an AP."""
+    out = []
+    for part in (value or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(str(ipaddress.IPv4Address(part)))
+        except ValueError:
+            raise ValueError(f"{name}: {part!r} is not an IPv4 address") from None
+    return tuple(out)
+
+
 def _load() -> Settings:
     return Settings(
         FIREBASE_KEY_PATH=os.environ["FIREBASE_KEY_PATH"],
@@ -82,6 +101,11 @@ def _load() -> Settings:
         # payload shape, deviceClass/model on an unfamiliar beacon) with
         # PYTHONIOENCODING=utf-8 set first.
         OMADA_RAW_DUMP_ENABLED=os.environ.get("OMADA_RAW_DUMP_ENABLED", "false").lower() == "true",
+        # Addresses allowed to post to /telemetry/omada (Prompt 135, SEC-01),
+        # checked before the token. Empty: any address, with one startup
+        # warning. Set it once the APs have DHCP reservations.
+        OMADA_INGEST_ALLOWED_IPS=_ipv4_list("OMADA_INGEST_ALLOWED_IPS",
+                                            os.environ.get("OMADA_INGEST_ALLOWED_IPS", "")),
         PATH_LOSS_EXPONENT=float(os.environ.get("PATH_LOSS_EXPONENT", "2.5")),
         TX_POWER_DEFAULT=float(os.environ.get("TX_POWER_DEFAULT", "-59")),
         # Radius (m) within which a guard's smoothed position counts as "at" a

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from firebase_admin import db
 from starlette.concurrency import run_in_threadpool
 
-from middleware.auth_middleware import verify_omada_token
+from middleware.auth_middleware import require_loopback, verify_omada_token
 from models.telemetry import APRssiReading, OmadaTelemetryPayload
 from schemas.telemetry_schema import TelemetryRequest
 from services.positioning_service import positioning_service
@@ -41,10 +41,14 @@ def _process_telemetry(payload: OmadaTelemetryPayload, readings: list[APRssiRead
     return {"status": "ok"}
 
 
-@router.post("/telemetry", dependencies=[Depends(verify_omada_token)])
+@router.post("/telemetry", dependencies=[Depends(require_loopback), Depends(verify_omada_token)])
 @limiter.limit("200/minute")
 async def ingest_telemetry(request: Request, body: TelemetryRequest) -> dict:
-    """Receive RSSI payload from Omada Controller, compute position, run safety checks.
+    """Receive a beacon-centric RSSI payload, compute position, run safety checks.
+
+    Callers are the simulators and the harness, always on this machine: a
+    non-loopback caller gets 403 before the token is checked (Prompt 135, SEC-01).
+    Real APs post to /telemetry/omada instead.
 
     Firebase calls inside _process_telemetry are blocking; offloaded via
     run_in_threadpool so a burst of simulation ticks can't freeze the event

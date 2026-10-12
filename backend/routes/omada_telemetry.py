@@ -1,14 +1,16 @@
 from fastapi import APIRouter, Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from middleware.auth_middleware import verify_omada_body_token
+from middleware.auth_middleware import verify_omada_body_token, verify_omada_source
 from services.omada_ingest_service import omada_ingest_service
 from utils.limiter import limiter
 
 router = APIRouter(tags=["omada-telemetry"])
 
 
-@router.post("/telemetry/omada", dependencies=[Depends(verify_omada_body_token)])
+# The source allowlist (OMADA_INGEST_ALLOWED_IPS, when set) is checked before
+# the token: dependencies run in list order (Prompt 135, SEC-01).
+@router.post("/telemetry/omada", dependencies=[Depends(verify_omada_source), Depends(verify_omada_body_token)])
 @limiter.limit("600/minute")
 async def ingest_omada_telemetry(request: Request) -> dict:
     """
