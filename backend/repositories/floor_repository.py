@@ -111,5 +111,10 @@ class FloorRepository:
             "patrol_interval_minutes": patrol_interval_minutes,
         })
 
+    def update_patrol_route(self, building_id: str, floor_id: str, patrol_route: List[str]) -> None:
+        """Set patrol_route only; patrol_enabled and patrol_interval_minutes are
+        left as they are (Prompt 135, COR-08: used when an AP is deleted)."""
+        self._col(building_id).document(floor_id).update({"patrol_route": patrol_route})
+
 
 floor_repository = FloorRepository()

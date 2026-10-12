@@ -132,6 +132,16 @@ class FloorService:
         floor_repository.delete(building_id, floor_id)
 
     def delete_ap(self, building_id: str, floor_id: str, ap_id: str) -> None:
+        # Take the AP out of the patrol route first, with an update that
+        # touches only patrol_route (Prompt 135, COR-08). This used to run
+        # last, through update_patrol_config() with four of its five
+        # arguments, so deleting an AP that was on a route raised TypeError -
+        # a 500 - after the AP itself was already gone.
+        floor = floor_repository.get_by_id(building_id, floor_id)
+        if floor and ap_id in floor.patrol_route:
+            floor_repository.update_patrol_route(
+                building_id, floor_id, [pid for pid in floor.patrol_route if pid != ap_id])
+
         mac = ap_repository.delete(building_id, floor_id, ap_id)
         if mac:
             position_repository.delete_ap_heartbeat(mac)
@@ -143,14 +153,6 @@ class FloorService:
         # Cameras that covered this checkpoint now cover nothing (Prompt 131 T2).
         from services.cctv_service import cctv_service
         cctv_service.unlink_ap(building_id, floor_id, ap_id)
-
-        floor = floor_repository.get_by_id(building_id, floor_id)
-        if floor and floor.patrol_route:
-            cleaned_route = [pid for pid in floor.patrol_route if pid != ap_id]
-            if len(cleaned_route) != len(floor.patrol_route):
-                floor_repository.update_patrol_config(
-                    building_id, floor_id, floor.patrol_enabled or False, cleaned_route
-                )
 
 
 floor_service = FloorService()
