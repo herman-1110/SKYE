@@ -61,6 +61,20 @@ def _format_mac_colons(mac_no_colons: str) -> str:
     return ":".join(m[i : i + 2] for i in range(0, len(m), 2))
 
 
+def redact_ingest_token(raw):
+    """A copy of an AP report that is safe to print: meta.access_token, the
+    ingest credential, becomes "***" (Prompt 135, SEC-04). The raw dump is for
+    analysing payload shape and is copied into the capture log, so the token
+    must never reach it. The caller's dict is not modified - the ingest still
+    reads it afterwards. Anything without a meta.access_token is returned as is."""
+    if not isinstance(raw, dict):
+        return raw
+    meta = raw.get("meta")
+    if not isinstance(meta, dict) or "access_token" not in meta:
+        return raw
+    return {**raw, "meta": {**meta, "access_token": "***"}}
+
+
 @dataclass
 class _BeaconReading:
     ap_mac_colons: str
@@ -396,7 +410,8 @@ class OmadaIngestService:
                 print(f"[OMADA]   └─")
 
             print(f"[OMADA] ── Raw JSON ──")
-            print(f"[OMADA] {json.dumps(raw, separators=(',', ':'))}")
+            # The token is masked in the printed copy only (SEC-04).
+            print(f"[OMADA] {json.dumps(redact_ingest_token(raw), separators=(',', ':'))}")
             print("[OMADA] ═══════════════════════════════════════════════════════════")
         # ─────────────────────────────────────────────────────────────────
 

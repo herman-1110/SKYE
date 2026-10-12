@@ -188,4 +188,5 @@ use a logs dir that holds only that run's files:
 | `vigi_132_inprocess.py` | Prompt 132 live-view checks: signaling route, go2rtc config, secrets, against a fake go2rtc. |
 | `ap_rename_inprocess.py` | Renaming an AP (`PATCH .../aps/{id}`): auth, trimmed name stored, MAC/position untouched, 422/404. Expect `4 passed`. |
 | `man_down_latch_inprocess.py` | Man-down stillness latch: one alert per stillness episode, a new one after moving past the epsilon or an approximate→exact upgrade. Clock patched, no server. Expect `6 passed` (HEAD before 9 Oct fails 4). |
+| `sec04_dump_redaction_inprocess.py` | SEC-04 (Prompt 135): with the raw dump on, the dumped AP report shows `***` for `meta.access_token` and is otherwise unchanged; the ingest still accepts the report. Expect `5 passed` (`2f00309` fails 2). |
 | `fixtures/vigi/` | Real InSight S445 alarm payloads (legacy and enhanced), request paths stripped. |
