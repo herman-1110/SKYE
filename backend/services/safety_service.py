@@ -37,6 +37,10 @@ _stale_alerted: Set[str] = set()
 # that goes dark and comes back still within epsilon of the same anchor is the
 # same episode and doesn't alert again. Per-process, in-memory, like the rest.
 _still_alerted: Set[str] = set()
+# person_id (or /positions key) -> monotonic time its unreadable timestamp was
+# last logged by check_man_down_stale() (Prompt 135, COR-01): once an hour each.
+_bad_timestamp_logged: Dict[str, float] = {}
+_BAD_TIMESTAMP_LOG_EVERY_S = 3600.0
 
 
 @dataclass
@@ -233,7 +237,20 @@ class SafetyService:
             if pid in _stale_alerted:
                 continue
 
-            age = seconds_between(record.timestamp, now)
+            # One unreadable timestamp (not ISO 8601, no time zone, not a
+            # string) must not abort the sweep for everyone (Prompt 135,
+            # COR-01): skip that record, and say so at most once an hour.
+            try:
+                age = seconds_between(record.timestamp, now)
+            except Exception:
+                who = pid or key
+                t = time.monotonic()
+                last = _bad_timestamp_logged.get(who)
+                if last is None or t - last >= _BAD_TIMESTAMP_LOG_EVERY_S:
+                    _bad_timestamp_logged[who] = t
+                    print(f"[SAFETY] WARNING: skipping /positions/{key} in the signal-loss sweep: "
+                          f"its timestamp isn't an ISO 8601 date-time with a time zone")
+                continue
             if age < settings.MAN_DOWN_STALE_SECONDS:
                 continue
             if age > settings.MAN_DOWN_STALE_MAX_AGE_S:
