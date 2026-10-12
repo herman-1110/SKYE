@@ -241,28 +241,43 @@ def _tick_patrol(beacon: Dict, skip_ap_idx: int = -1, move_speed: float = 0.6) -
     return None
 
 # ── Patrol log writer ──────────────────────────────────────────────────────
-def _write_patrol_log(beacon: Dict, cp_id: str, cp_name: str,
-                       compliant: bool, vigi_detected: bool,
-                       dwell_s: Optional[int] = None) -> None:
-    dwell = dwell_s if dwell_s is not None else random.randint(settings.MIN_DWELL_SECONDS, 60)
+def _write_patrol_log(beacon: Dict, cp_id: str, cp_name: str, event: str) -> None:
+    """One scripted patrol-log record, and exactly its own alert (Prompt 135, COR-12):
+
+      "ghost"   the guard's tag reached the checkpoint - a BLE arrival time and a
+                dwell over the minimum - but the camera confirmed nobody:
+                verify_multimodal() only, which raises one ghost_patrol.
+      "missed"  the checkpoint was skipped (no arrival): check_patrol_compliance()
+                only, which raises one patrol_violation (missed_checkpoint).
+
+    Before 135 both checks ran for both events, so each event also raised the
+    other's alert. verify_multimodal() itself is unchanged; its per-cycle limit
+    is Prompt 133's job."""
+    ghost = event == "ghost"
+    now = utcnow_iso()
     record = PatrolLogRecord(
         log_id=str(uuid.uuid4()),
         guard_id=beacon["person_id"],
         checkpoint_id=cp_id,
         checkpoint_name=cp_name,
-        expected_arrival=utcnow_iso(),
-        actual_arrival=utcnow_iso() if compliant else None,
-        dwell_time_seconds=dwell,
+        expected_arrival=now,
+        actual_arrival=now if ghost else None,
+        dwell_time_seconds=random.randint(settings.MIN_DWELL_SECONDS, 60) if ghost else 0,
         min_dwell_required=settings.MIN_DWELL_SECONDS,
         ble_detected=True,
-        vigi_detected=vigi_detected,
-        compliant=compliant,
+        vigi_detected=False,
+        compliant=ghost,   # recomputed below by the same rule the tracker uses
         shift_id=_shift_id,
     )
-    patrol_log_repository.save(record)
     if _safety_svc:
+        record.compliant = not _safety_svc.is_patrol_violation(record)
+    patrol_log_repository.save(record)
+    if not _safety_svc:
+        return
+    if ghost:
+        _safety_svc.verify_multimodal(record, ble_detected=True, vigi_detected=False)
+    else:
         _safety_svc.check_patrol_compliance(record)
-        _safety_svc.verify_multimodal(record, ble_detected=True, vigi_detected=vigi_detected)
 
 # ── RSSI / payload ─────────────────────────────────────────────────────────
 def _rssi_from_distance(d: float) -> int:
@@ -353,13 +368,7 @@ def _tick_ghost_patrol(tick: int) -> None:
     if tick == 2 and not _event_fired:
         _event_fired = True
         cp_ap = _floor_aps[0]
-        _write_patrol_log(
-            guard_a,
-            cp_id=cp_ap["mac"],
-            cp_name=cp_ap["name"],
-            compliant=False,
-            vigi_detected=False,
-        )
+        _write_patrol_log(guard_a, cp_id=cp_ap["mac"], cp_name=cp_ap["name"], event="ghost")
         print(f"[SIM] Ghost patrol event fired for {guard_a['label']} at {cp_ap['name']}")
 
     _tick_patrol(guard_b)
@@ -376,14 +385,7 @@ def _tick_missed_checkpoint(tick: int) -> None:
         _event_fired = True
         skipped_name = result.replace("SKIPPED:", "")
         skipped_ap = _floor_aps[1] if len(_floor_aps) > 1 else _floor_aps[0]
-        _write_patrol_log(
-            guard_a,
-            cp_id=skipped_ap["mac"],
-            cp_name=skipped_name,
-            compliant=False,
-            vigi_detected=False,
-            dwell_s=0,
-        )
+        _write_patrol_log(guard_a, cp_id=skipped_ap["mac"], cp_name=skipped_name, event="missed")
         print(f"[SIM] Missed checkpoint event fired: {skipped_name}")
 
     _tick_patrol(guard_b)
