@@ -8,6 +8,7 @@ POST /simulation/stop                → stops whichever is running
 GET  /simulation/status              → returns running/stopped + current mode
 """
 import asyncio
+import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -25,6 +26,27 @@ _current_mode: Optional[str] = None
 
 def _is_running() -> bool:
     return _task is not None and not _task.done()
+
+
+async def cancel_running_simulation(timeout: float = 8.0) -> bool:
+    """Cancel a running simulation and wait up to `timeout` seconds for it to
+    end, so its finally block removes its people from /positions. Called by
+    main.py's lifespan on shutdown and on every --reload (Prompt 135, CON-04).
+    asyncio.wait, not wait_for: on a timeout wait_for would cancel the task a
+    second time and cut its clean-up short. True if a simulation was running."""
+    global _task, _current_mode
+    task = _task
+    if task is None or task.done():
+        return False
+    task.cancel()
+    done, _pending = await asyncio.wait({task}, timeout=timeout)
+    if not done:
+        logging.warning("[SIM] the running simulation didn't stop within %.0f s of shutdown", timeout)
+    elif not task.cancelled():
+        task.exception()   # retrieved, so asyncio doesn't warn that it never was
+    _task = None
+    _current_mode = None
+    return True
 
 
 @router.post("/simulation/start")

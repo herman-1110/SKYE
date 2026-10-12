@@ -31,6 +31,7 @@ from models.patrol_log import PatrolLogRecord
 from repositories.ap_repository import ap_repository
 from repositories.floor_repository import floor_repository
 from repositories.patrol_log_repository import patrol_log_repository
+from services.simulation_cleanup import position_keys, remove_positions
 from utils.timestamp_utils import utcnow_iso
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -403,6 +404,16 @@ def _reset_actors() -> None:
 
 # ── Main loop ──────────────────────────────────────────────────────────────
 async def run_simulation() -> None:
+    """Run until cancelled. However it ends - stopped from the dashboard,
+    cancelled on shutdown or reload, or failed - this simulation's people are
+    removed from /positions (Prompt 135, COR-05)."""
+    try:
+        await _run_simulation()
+    finally:
+        await remove_positions(position_keys(SIMULATED_BEACONS), "simulation_events")
+
+
+async def _run_simulation() -> None:
     global _floor_aps, _floor_bounds, _shift_id
     global _segment_idx, _segment_tick, _event_fired, _mandown_seeded
 

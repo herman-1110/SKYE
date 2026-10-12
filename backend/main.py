@@ -51,7 +51,7 @@ from routes.report_routes import router as report_router
 from routes.safety_settings_routes import router as safety_settings_router
 from routes.telemetry_routes import router as telemetry_router
 from routes.omada_telemetry import router as omada_telemetry_router
-from routes.simulation_routes import router as simulation_router
+from routes.simulation_routes import cancel_running_simulation, router as simulation_router
 from routes.user_routes import router as user_router
 from routes.vigi_routes import router as vigi_router
 from routes.zone_routes import router as zone_router
@@ -60,6 +60,7 @@ from services.camera_detection_buffer import detection_buffer
 from services.camera_discovery_service import camera_discovery_service
 from services.camera_health_service import camera_health_service
 from services.safety_service import safety_service
+from services.simulation_cleanup import all_simulated_position_keys, remove_positions
 from services.vigi_service import vigi_service
 from utils.limiter import limiter
 from utils.log_redaction import install_log_redaction
@@ -119,6 +120,10 @@ async def lifespan(app: FastAPI):
     # registry. Written only if it changed, so --reload restarts don't make
     # start.ps1 relaunch go2rtc.
     await asyncio.to_thread(live_view_service.refresh_config)
+    # Prompt 135 (COR-05): no simulation can be running yet, so any simulated
+    # person still in /positions is a leftover from a hard kill. Remove them
+    # before the signal-loss loop below can raise a man-down for them.
+    await remove_positions(all_simulated_position_keys(), "startup")
     tasks = [
         asyncio.create_task(_man_down_stale_loop()),
         asyncio.create_task(camera_health_service.liveness_loop()),
@@ -127,6 +132,9 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(camera_discovery_service.discovery_loop()),
     ]
     yield
+    # Prompt 135 (CON-04): stop a running simulation first, while the loop and
+    # the thread pool still run, so its finally block removes its people.
+    await cancel_running_simulation(timeout=8.0)
     for task in tasks:
         task.cancel()
     for task in tasks:
