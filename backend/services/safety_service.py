@@ -62,6 +62,20 @@ class _ApproxRun:
 
 
 _approx_runs: Dict[str, _ApproxRun] = {}
+# person_id -> time.monotonic() of their latest fresh position, recorded by
+# check_man_down() under pipeline_lock (Prompt 136, CON-03). The signal-loss
+# sweep reads /positions outside the lock, so it skips anyone seen after its
+# snapshot: their record was already out of date when it decided.
+_last_fresh_mono: Dict[str, float] = {}
+
+
+@dataclass
+class _SweepRead:
+    """What one signal-loss sweep read, outside pipeline_lock (Prompt 136,
+    CON-03). taken_at is noted before the first read."""
+    taken_at: float                     # time.monotonic()
+    now: str                            # ISO 8601
+    candidates: List[PositionRecord]    # non-forklifts whose record is stale but not dead
 
 
 @dataclass
@@ -145,6 +159,7 @@ class SafetyService:
         # fire a signal-loss alert a second time if it goes dark again later.
         # Before the forklift early-return so it applies regardless of type.
         _stale_alerted.discard(current.person_id)
+        _last_fresh_mono[current.person_id] = time.monotonic()
 
         if current.person_type == "forklift":
             return None
@@ -319,11 +334,21 @@ class SafetyService:
         itself — none of which ever produce a fresh position, so check_man_down()
         (which only runs after a position is successfully computed) never sees them.
 
-        Called from a background sweep, not per-telemetry-packet.
+        Called from a background sweep, not per-telemetry-packet, in a worker
+        thread. The reads happen outside positioning_service.pipeline_lock;
+        the decision and the save inside it (Prompt 136, CON-03), so the sweep
+        never holds up ingest across a read, and can't alert for someone whose
+        fresh position arrived after it read their old one.
         """
+        return self._decide_sweep(self._read_for_sweep())
+
+    def _read_for_sweep(self) -> _SweepRead:
+        """The sweep's reads, outside pipeline_lock. The latch checks here
+        only save work; the locked step repeats them."""
+        taken_at = time.monotonic()
         now = utcnow_iso()
         raw_all = position_repository.get_all()
-        fired: List[AlertRecord] = []
+        candidates: List[PositionRecord] = []
 
         for key, v in raw_all.items():
             if not isinstance(v, dict):
@@ -360,25 +385,46 @@ class SafetyService:
             if age > settings.MAN_DOWN_STALE_MAX_AGE_S:
                 # Dead record, not an active incident — see MAN_DOWN_STALE_MAX_AGE_S.
                 continue
+            candidates.append(record)
 
-            # Second dedup layer, same suppressor check_man_down() uses.
-            last_ts = _last_man_down.get(pid)
-            if last_ts and seconds_between(last_ts, now) < 30:
-                continue
+        return _SweepRead(taken_at=taken_at, now=now, candidates=candidates)
 
-            alert = AlertRecord(
-                alert_id=str(uuid.uuid4()),
-                alert_type="man_down",
-                person_id=pid,
-                zone=record.zone,
-                timestamp=now,
-                approximate=record.is_approximate,
-                cause="signal_loss",
-            )
-            alert_repository.save(alert)
-            _last_man_down[pid] = alert.timestamp
-            _stale_alerted.add(pid)
-            fired.append(alert)
+    def _decide_sweep(self, read: _SweepRead) -> List[AlertRecord]:
+        """The sweep's decisions and saves, under pipeline_lock: no fresh
+        position can be processed in between, and none may have been since
+        the read (_last_fresh_mono)."""
+        # local import, as for the patrol tracker in run_all_checks()
+        from services.positioning_service import positioning_service
+
+        now = read.now
+        fired: List[AlertRecord] = []
+        with positioning_service.pipeline_lock:
+            for record in read.candidates:
+                pid = record.person_id
+                if pid in _stale_alerted:
+                    continue
+                seen = _last_fresh_mono.get(pid)
+                if seen is not None and seen > read.taken_at:
+                    continue
+
+                # Second dedup layer, same suppressor check_man_down() uses.
+                last_ts = _last_man_down.get(pid)
+                if last_ts and seconds_between(last_ts, now) < 30:
+                    continue
+
+                alert = AlertRecord(
+                    alert_id=str(uuid.uuid4()),
+                    alert_type="man_down",
+                    person_id=pid,
+                    zone=record.zone,
+                    timestamp=now,
+                    approximate=record.is_approximate,
+                    cause="signal_loss",
+                )
+                alert_repository.save(alert)
+                _last_man_down[pid] = alert.timestamp
+                _stale_alerted.add(pid)
+                fired.append(alert)
 
         return fired
 
