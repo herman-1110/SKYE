@@ -30,6 +30,8 @@ class Settings:
     MAN_DOWN_STALE_SECONDS: float
     MAN_DOWN_STALE_MAX_AGE_S: float
     MAN_DOWN_UPGRADE_CONFIRM_S: float
+    AP_SILENT_AFTER_S: float
+    AP_ALIVE_GRACE_S: float
     COLLISION_DISTANCE_M: float
     COLLISION_ALERT_SECONDS: int
     COLLISION_MAX_AGE_S: float
@@ -161,6 +163,17 @@ def _load() -> Settings:
         # upgraded to a red man_down (Prompt 136, COR-03). One exact fix alone
         # isn't trusted to confirm the person is still where they lay.
         MAN_DOWN_UPGRADE_CONFIRM_S=float(os.environ.get("MAN_DOWN_UPGRADE_CONFIRM_S", "30")),
+        # An AP whose last report is older than this (seconds) is silent
+        # (Prompt 136, REL-01). The signal-loss sweep holds a person's alert
+        # while none of the APs that last heard them is reporting, and raises
+        # one positioning_offline when no placed AP is. Same 10 s as the
+        # dashboard's AP online threshold (frontend/hooks/useAPHeartbeats.ts).
+        AP_SILENT_AFTER_S=float(os.environ.get("AP_SILENT_AFTER_S", "10")),
+        # An AP that has just started reporting again only counts as alive
+        # once its current run of reports is this old (seconds): positions
+        # take a few seconds to refresh after an outage, and a sweep landing
+        # in between would raise signal-loss for everyone who is still there.
+        AP_ALIVE_GRACE_S=float(os.environ.get("AP_ALIVE_GRACE_S", "30")),
         COLLISION_DISTANCE_M=float(os.environ.get("COLLISION_DISTANCE_M", "2.0")),
         COLLISION_ALERT_SECONDS=int(os.environ.get("COLLISION_ALERT_SECONDS", "3")),
         # A /positions record older than this (seconds) takes no part in the

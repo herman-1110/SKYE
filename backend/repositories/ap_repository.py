@@ -34,6 +34,12 @@ class APRepository:
         )
         return [AccessPoint(**d.to_dict()) for d in docs]
 
+    def get_all_placed(self) -> list[AccessPoint]:
+        """Every AP placed on any floor of any building: one collection-group
+        read, used once per signal-loss sweep (Prompt 136)."""
+        docs = firestore.client().collection_group("access_points").stream()
+        return [AccessPoint(**d.to_dict()) for d in docs]
+
     def update_coordinates(self, building_id: str, floor_id: str, ap_id: str, x_m: float, y_m: float) -> None:
         self._col(building_id, floor_id).document(ap_id).update({
             "x_m": round(x_m, 4),

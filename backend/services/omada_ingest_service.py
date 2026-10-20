@@ -136,6 +136,11 @@ class OmadaIngestService:
         self._rssi_null_count: Dict[str, int] = {}
         self._last_null_rate_summary_run: float = 0.0
         self._NULL_RATE_SUMMARY_INTERVAL_S = 60.0
+        # ap_mac (colons) -> unix time of its last report, and of the start of
+        # its current unbroken run of reports (Prompt 136, REL-01). In memory,
+        # so the first report after a backend start begins a new run.
+        self._ap_last_report: Dict[str, int] = {}
+        self._ap_up_since: Dict[str, int] = {}
 
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
@@ -240,13 +245,25 @@ class OmadaIngestService:
     def _write_ap_heartbeat(self, ap_mac_colons: str, name: str = "") -> None:
         """Write last-seen heartbeat for a reporting AP to RTDB.
         Called for every reporting AP — registered or not — so the dashboard can
-        surface online-but-unplaced APs (with their reported name) in the detection panel."""
+        surface online-but-unplaced APs (with their reported name) in the detection panel.
+
+        up_since is when this AP's current unbroken run of reports began: a
+        report more than AP_SILENT_AFTER_S after the previous one starts a new
+        run. The signal-loss sweep only counts an AP as alive once that run is
+        AP_ALIVE_GRACE_S old (Prompt 136, REL-01). Runs under pipeline_lock
+        (ingest() holds it), like the rest of this service's state."""
         key = ap_mac_colons.replace(":", "_")
+        now = int(time.time())
+        last = self._ap_last_report.get(ap_mac_colons)
+        if last is None or now - last > settings.AP_SILENT_AFTER_S:
+            self._ap_up_since[ap_mac_colons] = now
+        self._ap_last_report[ap_mac_colons] = now
         try:
             rtdb.reference(f"/ap_heartbeats/{key}").set({
                 "mac": ap_mac_colons,
                 "name": name or "",
-                "last_seen": int(time.time()),
+                "last_seen": now,
+                "up_since": self._ap_up_since[ap_mac_colons],
             })
         except Exception as e:
             print(f"[OMADA] WARNING: heartbeat write failed for {ap_mac_colons}: {e}")

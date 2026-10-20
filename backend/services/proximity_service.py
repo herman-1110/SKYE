@@ -18,6 +18,7 @@ from config.settings import settings
 from models.position import PositionRecord
 from models.telemetry import APRssiReading
 from repositories.position_repository import position_repository
+from utils.mac_utils import ap_mac_colons
 from utils.rssi_utils import rssi_to_distance
 from utils.timestamp_utils import utcnow_iso
 
@@ -66,6 +67,8 @@ class ProximityService:
             radius_m=radius_m,
             is_approximate=True,
             anchor_ap_mac=nearest.ap_mac,
+            # Every AP that heard the beacon, not just the anchor (Prompt 136, REL-01)
+            heard_by=sorted({ap_mac_colons(r.ap_mac) for r in readings}),
         )
         position_repository.save(record)
         return record

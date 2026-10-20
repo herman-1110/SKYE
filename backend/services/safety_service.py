@@ -10,9 +10,11 @@ from models.patrol_log import PatrolLogRecord
 from models.position import PositionRecord
 from models.safety_settings import SafetySettings
 from repositories.alert_repository import alert_repository
+from repositories.ap_repository import ap_repository
 from repositories.position_repository import position_repository
 from repositories.safety_settings_repository import safety_settings_repository
-from utils.timestamp_utils import utcnow_iso, seconds_between
+from utils.mac_utils import ap_mac_colons
+from utils.timestamp_utils import parse_iso, utcnow_iso, seconds_between
 
 
 _last_man_down: Dict[str, str] = {}    # person_id → ISO timestamp of last alert
@@ -67,6 +69,9 @@ _approx_runs: Dict[str, _ApproxRun] = {}
 # sweep reads /positions outside the lock, so it skips anyone seen after its
 # snapshot: their record was already out of date when it decided.
 _last_fresh_mono: Dict[str, float] = {}
+# person_ids whose signal-loss alert the last sweep held because none of their
+# APs was alive (Prompt 136, REL-01): logged once per person per outage.
+_held_logged: Set[str] = set()
 
 
 @dataclass
@@ -76,6 +81,30 @@ class _SweepRead:
     taken_at: float                     # time.monotonic()
     now: str                            # ISO 8601
     candidates: List[PositionRecord]    # non-forklifts whose record is stale but not dead
+    # /ap_heartbeats by "AA:BB:..." MAC; None if it couldn't be read (REL-01)
+    heartbeats: Optional[Dict[str, dict]] = None
+    # placed APs' MACs by (building_id, floor_id); None if they couldn't be read
+    placed: Optional[Dict[tuple, List[str]]] = None
+
+
+def _unix(iso: str) -> float:
+    return parse_iso(iso).timestamp()
+
+
+def _ap_reporting(hb: Optional[dict], now_unix: float) -> bool:
+    """The AP's last report is no older than AP_SILENT_AFTER_S."""
+    last = (hb or {}).get("last_seen")
+    return isinstance(last, (int, float)) and now_unix - last <= settings.AP_SILENT_AFTER_S
+
+
+def _ap_alive(hb: Optional[dict], now_unix: float) -> bool:
+    """Reporting, and its current run of reports is at least AP_ALIVE_GRACE_S
+    old (Prompt 136, REL-01). No up_since (every writer but the Omada ingest)
+    counts as alive while it's reporting."""
+    if not _ap_reporting(hb, now_unix):
+        return False
+    up = hb.get("up_since")
+    return not isinstance(up, (int, float)) or now_unix - up >= settings.AP_ALIVE_GRACE_S
 
 
 @dataclass
@@ -112,6 +141,9 @@ class SafetyService:
         self._settings_cache: Optional[SafetySettings] = None
         self._settings_cache_ts: float = 0.0
         self._tracker_health = _TrackerHealth()
+        # One positioning_offline per outage: set when it's raised, cleared
+        # when a placed AP reports again (Prompt 136, REL-01).
+        self._positioning_offline_latched = False
 
     def get_tracker_health(self) -> dict:
         """Read-only snapshot for the /health/tracker route."""
@@ -334,6 +366,12 @@ class SafetyService:
         itself — none of which ever produce a fresh position, so check_man_down()
         (which only runs after a position is successfully computed) never sees them.
 
+        A stale record is only evidence when the APs could have heard the
+        person (Prompt 136, REL-01): the alert is held while none of the APs
+        in the record's heard_by (or, for an older record, none placed on its
+        floor) is alive. When no placed AP is reporting at all, the sweep
+        raises one positioning_offline instead.
+
         Called from a background sweep, not per-telemetry-packet, in a worker
         thread. The reads happen outside positioning_service.pipeline_lock;
         the decision and the save inside it (Prompt 136, CON-03), so the sweep
@@ -387,7 +425,63 @@ class SafetyService:
                 continue
             candidates.append(record)
 
-        return _SweepRead(taken_at=taken_at, now=now, candidates=candidates)
+        # Which APs are reporting, and which are placed (REL-01). If either
+        # can't be read, the sweep alerts as it did before 136 rather than
+        # holding alerts on missing information.
+        heartbeats: Optional[Dict[str, dict]] = None
+        try:
+            heartbeats = {}
+            for key, hb in position_repository.get_ap_heartbeats().items():
+                if isinstance(hb, dict):
+                    heartbeats[ap_mac_colons(hb.get("mac") or key)] = hb
+        except Exception as e:
+            heartbeats = None
+            print(f"[SAFETY] WARNING: signal-loss sweep couldn't read /ap_heartbeats: {e}")
+        placed: Optional[Dict[tuple, List[str]]] = None
+        try:
+            placed = {}
+            for a in ap_repository.get_all_placed():
+                placed.setdefault((a.building_id, a.floor_id), []).append(ap_mac_colons(a.mac))
+        except Exception as e:
+            placed = None
+            print(f"[SAFETY] WARNING: signal-loss sweep couldn't read the placed APs: {e}")
+
+        return _SweepRead(taken_at=taken_at, now=now, candidates=candidates,
+                          heartbeats=heartbeats, placed=placed)
+
+    def _aps_for(self, record: PositionRecord, read: _SweepRead) -> List[str]:
+        """The APs whose silence would explain this record going stale: its
+        heard_by, or for a record written before 136, every AP placed on its
+        floor. Empty (don't hold the alert) when neither is known."""
+        if record.heard_by:
+            return [ap_mac_colons(m) for m in record.heard_by]
+        if read.placed is None or not record.floor_id:
+            return []
+        return read.placed.get((record.building_id, record.floor_id), [])
+
+    def _check_positioning_offline(self, read: _SweepRead, now_unix: float) -> Optional[AlertRecord]:
+        """One positioning_offline while no placed AP is reporting, if at least
+        one placed AP ever has (REL-01). The latch clears when one reports
+        again. Never resolved automatically."""
+        if read.heartbeats is None or read.placed is None:
+            return None
+        placed_hbs = [read.heartbeats[m] for macs in read.placed.values() for m in macs if m in read.heartbeats]
+        if any(_ap_reporting(hb, now_unix) for hb in placed_hbs):
+            self._positioning_offline_latched = False
+            return None
+        if not placed_hbs or self._positioning_offline_latched:
+            return None
+        alert = AlertRecord(
+            alert_id=str(uuid.uuid4()),
+            alert_type="positioning_offline",
+            person_id="",
+            zone="",
+            timestamp=read.now,
+            cause=None,
+        )
+        alert_repository.save(alert)
+        self._positioning_offline_latched = True
+        return alert
 
     def _decide_sweep(self, read: _SweepRead) -> List[AlertRecord]:
         """The sweep's decisions and saves, under pipeline_lock: no fresh
@@ -397,14 +491,32 @@ class SafetyService:
         from services.positioning_service import positioning_service
 
         now = read.now
+        now_unix = _unix(now)
         fired: List[AlertRecord] = []
+        held: Set[str] = set()
         with positioning_service.pipeline_lock:
+            offline = self._check_positioning_offline(read, now_unix)
+            if offline is not None:
+                fired.append(offline)
+
             for record in read.candidates:
                 pid = record.person_id
                 if pid in _stale_alerted:
                     continue
                 seen = _last_fresh_mono.get(pid)
                 if seen is not None and seen > read.taken_at:
+                    continue
+
+                # Hold the alert while none of the person's APs is alive: the
+                # record went stale because nothing could hear anyone, not
+                # because this beacon went dark. Not latched, so the next
+                # sweep looks again (REL-01).
+                aps = self._aps_for(record, read) if read.heartbeats is not None else []
+                if aps and not any(_ap_alive(read.heartbeats.get(m), now_unix) for m in aps):
+                    held.add(pid)
+                    if pid not in _held_logged:
+                        print(f"[SAFETY] holding the signal-loss alert for {pid}: none of the APs that "
+                              f"last heard them is alive ({', '.join(aps)})")
                     continue
 
                 # Second dedup layer, same suppressor check_man_down() uses.
@@ -425,6 +537,10 @@ class SafetyService:
                 _last_man_down[pid] = alert.timestamp
                 _stale_alerted.add(pid)
                 fired.append(alert)
+
+            # Anyone not held this sweep has left the outage: log again next time.
+            _held_logged.intersection_update(held)
+            _held_logged.update(held)
 
         return fired
 

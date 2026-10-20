@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -22,3 +22,6 @@ class PositionRecord:
     radius_m: Optional[float] = None   # set when position is a single-AP proximity estimate
     is_approximate: bool = False       # True when x/y is the anchor AP, not a multilateration solve
     anchor_ap_mac: Optional[str] = None  # MAC of the strongest AP this proximity estimate is anchored to (None for exact solves)
+    # Sorted "AA:BB:CC:DD:EE:FF" MACs of the APs whose readings produced this
+    # position (Prompt 136); None on records written before it
+    heard_by: Optional[List[str]] = None

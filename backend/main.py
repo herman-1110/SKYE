@@ -96,7 +96,8 @@ async def _man_down_stale_loop() -> None:
                 logging.info(
                     "[SAFETY] signal-loss man-down: %d alert(s) — %s",
                     len(fired),
-                    ", ".join(a.person_id for a in fired),
+                    # positioning_offline (Prompt 136) has no person
+                    ", ".join(a.person_id or a.alert_type for a in fired),
                 )
         except asyncio.CancelledError:
             raise

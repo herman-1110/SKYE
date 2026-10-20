@@ -7,8 +7,9 @@ sends "98-ba-5f-8b-10-03" in its alarm payload, OpenAPI's getDeviceInfo
 returns "98-BA-5F-8B-10-03", and the registry and dashboard use
 "98:BA:5F:8B:10:03" - all three must land on the same value.
 
-AP MACs keep their own, older validator in floor_routes.py; this module only
-covers cameras.
+AP MACs keep their own, older validator in floor_routes.py. The one AP helper
+here, ap_mac_colons(), only puts an already-stored AP MAC into one form for
+comparison (Prompt 136): it never validates.
 """
 import re
 
@@ -48,3 +49,16 @@ def mac_heartbeat_key(value: object) -> str:
     """"98_BA_5F_8B_10_03" - the /cctv_heartbeats node key (RTDB keys can't
     hold ':' and use underscores like /ap_heartbeats)."""
     return normalize_mac(value).replace(":", "_")
+
+
+def ap_mac_colons(value: str) -> str:
+    """An AP MAC as "40:AE:30:9D:34:5A", from colons, dashes, underscores (an
+    /ap_heartbeats key) or none, in any case: the form position records'
+    heard_by and the signal-loss sweep compare (Prompt 136). Never raises;
+    anything that isn't 12 hex digits comes back stripped and upper-cased."""
+    text = str(value).strip()
+    hexdigits = re.sub(r"[:\-_]", "", text)
+    if not _BARE.fullmatch(hexdigits):
+        return text.upper()
+    hexdigits = hexdigits.upper()
+    return ":".join(hexdigits[i:i + 2] for i in range(0, 12, 2))

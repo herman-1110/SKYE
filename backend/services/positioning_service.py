@@ -14,6 +14,7 @@ from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
 from repositories.zone_repository import zone_repository
 from services.kalman_service import KalmanService
+from utils.mac_utils import ap_mac_colons
 from utils.multilateration import least_squares_position
 from utils.rssi_utils import rssi_to_distance
 from utils.timestamp_utils import utcnow_iso
@@ -277,6 +278,9 @@ class PositioningService:
             # for man-down (Prompt 111) and a silent default is the wrong
             # mechanism to carry it.
             is_approximate=False,
+            # Which APs heard this person: the signal-loss sweep holds their
+            # alert while none of these is reporting (Prompt 136, REL-01).
+            heard_by=sorted({ap_mac_colons(r.ap_mac) for r in readings}),
         )
         self._last_exact_solve[payload.person_id] = time.monotonic()
         position_repository.save(record)

@@ -22,6 +22,10 @@ class PositionRepository:
         key = beacon_mac.replace(":", "_")
         db.reference(f"{self._PATH}/{key}").delete()
 
+    def get_ap_heartbeats(self) -> Dict[str, Any]:
+        """Read every /ap_heartbeats node (keyed by MAC with underscores)."""
+        return db.reference("/ap_heartbeats").get() or {}
+
     def delete_ap_heartbeat(self, mac: str) -> None:
         """Remove /ap_heartbeats/{mac_underscores} from RTDB."""
         key = mac.replace(":", "_")
