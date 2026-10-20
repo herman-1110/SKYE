@@ -29,6 +29,7 @@ class Settings:
     MAN_DOWN_MOVEMENT_EPSILON_M: float
     MAN_DOWN_STALE_SECONDS: float
     MAN_DOWN_STALE_MAX_AGE_S: float
+    MAN_DOWN_UPGRADE_CONFIRM_S: float
     COLLISION_DISTANCE_M: float
     COLLISION_ALERT_SECONDS: int
     COLLISION_MAX_AGE_S: float
@@ -154,6 +155,12 @@ def _load() -> Settings:
         # restart — without this cap, every restart re-alerts for every
         # beacon that has ever gone offline.
         MAN_DOWN_STALE_MAX_AGE_S=float(os.environ.get("MAN_DOWN_STALE_MAX_AGE_S", "3600.0")),
+        # After an amber possible_man_down (stillness seen by only one or two
+        # APs), how long (seconds) exact three-AP fixes must stay within
+        # MAN_DOWN_MOVEMENT_EPSILON_M of the first one before the alert is
+        # upgraded to a red man_down (Prompt 136, COR-03). One exact fix alone
+        # isn't trusted to confirm the person is still where they lay.
+        MAN_DOWN_UPGRADE_CONFIRM_S=float(os.environ.get("MAN_DOWN_UPGRADE_CONFIRM_S", "30")),
         COLLISION_DISTANCE_M=float(os.environ.get("COLLISION_DISTANCE_M", "2.0")),
         COLLISION_ALERT_SECONDS=int(os.environ.get("COLLISION_ALERT_SECONDS", "3")),
         # A /positions record older than this (seconds) takes no part in the

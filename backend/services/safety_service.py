@@ -20,9 +20,10 @@ _last_collision: Dict[str, str] = {}   # "worker_id|forklift_id" → ISO timesta
 # person_id → (anchor_x, anchor_y, since_iso, anchor_is_approximate): where the
 # person was last seen genuinely moving, and when. Man-down fires if they stay
 # within MAN_DOWN_MOVEMENT_EPSILON_M of the anchor past the threshold.
-# anchor_is_approximate records whether that anchor came from an exact solve or
-# a proximity-fallback estimate, so a later reading of the OTHER kind can be
-# recognised as incomparable rather than measured as movement (Prompt 111 §2).
+# Only exact solves move this anchor or its clock. An approximate anchor is
+# only ever a cold-start placeholder: the first exact solve replaces it
+# (Prompt 113). Approximate readings are timed separately, in _approx_runs
+# (Prompt 136, COR-03).
 _man_down_tracker: Dict[str, tuple[float, float, str, bool]] = {}
 # person_ids that have already fired a signal-loss man-down and haven't been
 # seen again since. Prevents the stale sweep from re-alerting every tick for
@@ -44,6 +45,23 @@ _BAD_TIMESTAMP_LOG_EVERY_S = 3600.0
 # The same once-an-hour log for check_collision() (Prompt 136, COR-04), kept
 # apart so the sweep's log and this one don't silence each other.
 _collision_bad_timestamp_logged: Dict[str, float] = {}
+
+
+@dataclass
+class _ApproxRun:
+    """One person's current approximate run (Prompt 136, COR-03): consecutive
+    approximate (one- or two-AP) readings. Its anchor is the run's first
+    reading; a reading MAN_DOWN_MOVEMENT_EPSILON_M or more from it (in
+    practice, a different strongest AP) starts a new run. An exact fix ends a
+    run that hasn't alerted, and confirms or cancels one that has."""
+    x: float
+    y: float
+    started_at: str                          # ISO 8601: the run's own clock
+    alerted: bool = False                    # its one possible_man_down has fired
+    confirming_since: Optional[str] = None   # first exact fix after that alert
+
+
+_approx_runs: Dict[str, _ApproxRun] = {}
 
 
 @dataclass
@@ -113,10 +131,15 @@ class SafetyService:
         """Alert if a worker or guard has stayed within MAN_DOWN_MOVEMENT_EPSILON_M
         of their last-moved position for longer than MAN_DOWN_MINUTES.
 
-        Forklifts are exempt. Fires regardless of zone. Alerts raised from an
-        approximate (proximity-fallback) position are flagged approximate=True:
-        single/dual-AP coverage cannot reliably tell 'still' from 'small movement',
-        so the alert is treated as a low-confidence welfare check, not a precise fix.
+        Forklifts are exempt. Fires regardless of zone.
+
+        Exact (three-AP) solves raise a red man_down. Approximate positions
+        (one or two APs; x/y is the strongest AP's own coordinate) can't tell
+        'still' from 'small movement', so they never move the exact anchor or
+        its clock. They are timed on their own approximate run instead, and
+        raise an amber possible_man_down (Prompt 136, COR-03; Herman's decision
+        (b), 16 Oct). An exact fix after that alert can upgrade it to a red
+        man_down: see _check_upgrade().
         """
         # A fresh position means this beacon is transmitting again — let it
         # fire a signal-loss alert a second time if it goes dark again later.
@@ -130,47 +153,51 @@ class SafetyService:
         now = utcnow_iso()
         pid = current.person_id
 
+        if current.is_approximate:
+            # Cold start: seed a placeholder anchor, replaced by the first
+            # exact solve (Prompt 113, below). Otherwise the anchor and its
+            # clock stay as they are.
+            if pid not in _man_down_tracker:
+                _man_down_tracker[pid] = (current.x, current.y, now, True)
+                _still_alerted.discard(pid)
+            return self._check_approximate(current, cfg, now)
+
+        run = _approx_runs.get(pid)
+        if run is not None and run.alerted:
+            return self._check_upgrade(current, cfg, now, run)
+        # An exact fix ends an approximate run that hasn't alerted.
+        _approx_runs.pop(pid, None)
+
         prev = _man_down_tracker.get(pid)
 
         # First time we see this person: seed the tracker and start the clock.
         # (Cold-start case — including a beacon that appears in a dead zone and
         # never moves — begins counting from first sighting.)
         if prev is None:
-            _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
+            _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
             return None
 
         anchor_x, anchor_y, since_iso, anchor_is_approximate = prev
 
-        # Asymmetric on purpose (Prompt 113 — fixes a real regression from
-        # Prompt 111's symmetric version). An approximate position's x/y is
-        # the anchor AP's own coordinate, not a comparable fix to an exact
-        # solve's x/y — comparing them reads as a multi-metre teleport. But
-        # the anchor must be allowed to UPGRADE from approximate to exact:
-        # the only two write sites are cold-start (unreachable once an anchor
-        # exists) and the movement-reset below (unreachable while types keep
-        # mismatching), so a symmetric guard permanently locks the anchor to
-        # whichever type happened to seed it first. On real hardware the
-        # first-ever flush after process start almost always seeds
-        # approximate (only one AP has posted yet) — that anchor would then
-        # reject every future exact solve forever, and man-down could never
-        # fire. Downgrading (exact anchor + approximate current) stays
-        # rejected: an approximate reading is never better information than
-        # an exact anchor already holds.
-        if anchor_is_approximate and not current.is_approximate:
+        # The anchor must be allowed to UPGRADE from approximate to exact
+        # (Prompt 113, fixing a regression from Prompt 111). An approximate
+        # position's x/y is the anchor AP's own coordinate, not a fix
+        # comparable to an exact solve's, so it is never measured against one.
+        # On real hardware the first-ever flush after process start almost
+        # always seeds approximate (only one AP has posted yet); without this
+        # re-seed that anchor would block man-down forever.
+        if anchor_is_approximate:
             # Upgrade. Re-seed from here, not from since_iso — the clock
             # deliberately restarts. Before this exact solve there was no
             # real position to measure stillness against; preserving the old
             # since_iso would let a moving person accumulate stillness they
             # never earned. A person already motionless at startup simply
             # waits man_down_minutes from their first exact solve rather than
-            # from first sighting — an accepted, correct cost.
-            _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
+            # from first sighting — an accepted, correct cost. (The exception
+            # is an exact fix after a possible_man_down: _check_upgrade().)
+            _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
-            return None
-        if current.is_approximate != anchor_is_approximate:
-            # Exact anchor + approximate current: never downgrade. Leave
-            # anchor and clock untouched (Prompt 111 §2, unchanged).
             return None
 
         moved = math.hypot(current.x - anchor_x, current.y - anchor_y)
@@ -179,10 +206,84 @@ class SafetyService:
         # Do NOT re-anchor on every call — only when epsilon is broken — or the
         # anchor chases position jitter and the person never appears still.
         if moved >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
-            _man_down_tracker[pid] = (current.x, current.y, now, current.is_approximate)
+            _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
             return None
 
+        return self._stillness_alert(current, cfg, now, since_iso)
+
+    def _check_approximate(self, current: PositionRecord, cfg: SafetySettings, now: str) -> Optional[AlertRecord]:
+        """An approximate reading: extend or restart the person's approximate
+        run, and raise its one possible_man_down once it has lasted
+        man_down_minutes (Prompt 136, COR-03). Neither reads nor writes
+        _last_man_down: the amber alert is a separate signal from the red one."""
+        pid = current.person_id
+        run = _approx_runs.get(pid)
+        if run is not None and math.hypot(current.x - run.x, current.y - run.y) >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
+            # A different strongest AP, in practice. This also ends an
+            # upgrade's confirmation (_check_upgrade).
+            run = None
+        if run is None:
+            _approx_runs[pid] = _ApproxRun(current.x, current.y, now)
+            return None
+        if run.confirming_since is not None:
+            # Confirming an upgrade: an approximate reading at the run's
+            # anchor changes nothing.
+            return None
+        if run.alerted or seconds_between(run.started_at, now) < cfg.man_down_minutes * 60:
+            return None
+
+        record = AlertRecord(
+            alert_id=str(uuid.uuid4()),
+            alert_type="possible_man_down",
+            person_id=pid,
+            zone=current.zone,
+            timestamp=now,
+            approximate=True,
+            cause="stillness",
+        )
+        alert_repository.save(record)
+        run.alerted = True
+        return record
+
+    def _check_upgrade(
+        self, current: PositionRecord, cfg: SafetySettings, now: str, run: _ApproxRun,
+    ) -> Optional[AlertRecord]:
+        """An exact fix after this run's possible_man_down (Prompt 136, COR-03).
+
+        The first one becomes the exact anchor, with its clock at the run's
+        start, so the stillness behind the amber alert counts. Exact fixes
+        that stay within epsilon of it for MAN_DOWN_UPGRADE_CONFIRM_S raise an
+        ordinary stillness man_down, and the run ends. One that moved past
+        epsilon is ordinary movement: the anchor moves, its clock restarts,
+        and the run ends."""
+        pid = current.person_id
+        if run.confirming_since is None:
+            _man_down_tracker[pid] = (current.x, current.y, run.started_at, False)
+            _still_alerted.discard(pid)
+            run.confirming_since = now
+            return None
+
+        anchor_x, anchor_y, since_iso, _ = _man_down_tracker[pid]
+        if math.hypot(current.x - anchor_x, current.y - anchor_y) >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
+            _man_down_tracker[pid] = (current.x, current.y, now, False)
+            _still_alerted.discard(pid)
+            del _approx_runs[pid]
+            return None
+        if seconds_between(run.confirming_since, now) < settings.MAN_DOWN_UPGRADE_CONFIRM_S:
+            return None
+
+        record = self._stillness_alert(current, cfg, now, since_iso)
+        if record is not None:
+            del _approx_runs[pid]
+        return record
+
+    def _stillness_alert(
+        self, current: PositionRecord, cfg: SafetySettings, now: str, since_iso: str,
+    ) -> Optional[AlertRecord]:
+        """The red stillness man_down for an exact fix within epsilon of the
+        exact anchor, if its clock has run past man_down_minutes."""
+        pid = current.person_id
         # Within epsilon: still. Has the clock run past the threshold?
         if seconds_between(since_iso, now) < cfg.man_down_minutes * 60:
             return None

@@ -28,7 +28,7 @@ SKYE is an indoor safety monitoring system for industrial sites such as warehous
 | Area | What's built | Status |
 |---|---|---|
 | Positioning | With three or more APs: signal strength → distance (log-distance path loss) → weighted least squares → Kalman filter. With one or two APs: an approximate position at the strongest AP. | Working with real APs |
-| Man-down | **Stillness:** a person hasn't moved more than `MAN_DOWN_MOVEMENT_EPSILON_M` for the configured number of minutes. **Signal loss:** no position update for `MAN_DOWN_STALE_SECONDS`. | Working |
+| Man-down | **Stillness:** a person hasn't moved more than `MAN_DOWN_MOVEMENT_EPSILON_M` for the configured number of minutes. **Signal loss:** no position update for `MAN_DOWN_STALE_SECONDS`. When only one or two APs can hear a still person, the alert is an amber "possible man-down" instead, which turns red once three APs confirm the stillness. | Working |
 | Collision | A worker's and a forklift's Kalman-predicted positions, `COLLISION_ALERT_SECONDS` ahead, come within the collision distance. | Working |
 | Patrols | Guards' visits to the checkpoints (APs) on a floor's patrol route: dwell times, patrol logs, and violation alerts for each patrol window. | Built. Runs only on floors with patrol enabled and a route set. |
 | Ghost Patrol | Flags a checkpoint visit that the beacon recorded but the camera didn't confirm. | Designed and simulated. Checking real visits against the camera is still to come (Prompt 133). |
@@ -529,6 +529,7 @@ All of them live in `backend/.env` and are read in `backend/config/settings.py`;
 | `MAN_DOWN_MOVEMENT_EPSILON_M` | `2.0` | Movement (m) smaller than this counts as not moving |
 | `MAN_DOWN_STALE_SECONDS` | `120.0` | Seconds without a position update before a signal-loss man-down |
 | `MAN_DOWN_STALE_MAX_AGE_S` | `3600.0` | Older position records are treated as dead, not as an incident |
+| `MAN_DOWN_UPGRADE_CONFIRM_S` | `30` | Seconds of three-AP stillness that turn an amber possible man-down into a red man-down |
 | `COLLISION_DISTANCE_M` | `2.0` | Distance (m) between a worker and a forklift that raises a collision alert * |
 | `COLLISION_ALERT_SECONDS` | `3` | How far ahead (s) the Kalman filter predicts positions for the collision check |
 | `COLLISION_MAX_AGE_S` | `5` | Position records older than this (s) are left out of the collision check |
