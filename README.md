@@ -531,6 +531,7 @@ All of them live in `backend/.env` and are read in `backend/config/settings.py`;
 | `MAN_DOWN_STALE_MAX_AGE_S` | `3600.0` | Older position records are treated as dead, not as an incident |
 | `COLLISION_DISTANCE_M` | `2.0` | Distance (m) between a worker and a forklift that raises a collision alert * |
 | `COLLISION_ALERT_SECONDS` | `3` | How far ahead (s) the Kalman filter predicts positions for the collision check |
+| `COLLISION_MAX_AGE_S` | `5` | Position records older than this (s) are left out of the collision check |
 
 \* These two seed Firestore's `settings/safety` on the first start. After that, the values set on the dashboard's Safety Settings page apply.
 

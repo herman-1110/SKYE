@@ -31,6 +31,7 @@ class Settings:
     MAN_DOWN_STALE_MAX_AGE_S: float
     COLLISION_DISTANCE_M: float
     COLLISION_ALERT_SECONDS: int
+    COLLISION_MAX_AGE_S: float
     MIN_DWELL_SECONDS: int
     RSSI_NOISE_STD: float
     PROXIMITY_RSSI_FLOOR: float
@@ -155,6 +156,12 @@ def _load() -> Settings:
         MAN_DOWN_STALE_MAX_AGE_S=float(os.environ.get("MAN_DOWN_STALE_MAX_AGE_S", "3600.0")),
         COLLISION_DISTANCE_M=float(os.environ.get("COLLISION_DISTANCE_M", "2.0")),
         COLLISION_ALERT_SECONDS=int(os.environ.get("COLLISION_ALERT_SECONDS", "3")),
+        # A /positions record older than this (seconds) takes no part in the
+        # collision check (Prompt 136, COR-04): a beacon that went dark left
+        # its last predicted position behind, and forklifts were "colliding"
+        # with it. Positions refresh about every 1.8 s from the APs and every
+        # 1 s from the simulators, so 5 s rides out one or two missed updates.
+        COLLISION_MAX_AGE_S=float(os.environ.get("COLLISION_MAX_AGE_S", "5")),
         MIN_DWELL_SECONDS=int(os.environ.get("MIN_DWELL_SECONDS", "30")),
         RSSI_NOISE_STD=float(os.environ.get("RSSI_NOISE_STD", "3.0")),
         # Behavioural cutoff for the single-AP proximity fallback: a beacon whose

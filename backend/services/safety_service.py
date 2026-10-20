@@ -41,6 +41,9 @@ _still_alerted: Set[str] = set()
 # last logged by check_man_down_stale() (Prompt 135, COR-01): once an hour each.
 _bad_timestamp_logged: Dict[str, float] = {}
 _BAD_TIMESTAMP_LOG_EVERY_S = 3600.0
+# The same once-an-hour log for check_collision() (Prompt 136, COR-04), kept
+# apart so the sweep's log and this one don't silence each other.
+_collision_bad_timestamp_logged: Dict[str, float] = {}
 
 
 @dataclass
@@ -281,19 +284,46 @@ class SafetyService:
     # ------------------------------------------------------------------
     # FR4 / NFR2 / UC5 — Collision prediction
     # ------------------------------------------------------------------
+    def _fresh_for_collision(self, p: PositionRecord, now: str) -> bool:
+        """True if this record is recent enough to take part in the collision
+        check (Prompt 136, COR-04). An unreadable timestamp counts as not
+        fresh, logged at most once an hour per record, as the sweep does."""
+        try:
+            return seconds_between(p.timestamp, now) <= settings.COLLISION_MAX_AGE_S
+        except Exception:
+            who = p.person_id or p.beacon_mac
+            t = time.monotonic()
+            last = _collision_bad_timestamp_logged.get(who)
+            if last is None or t - last >= _BAD_TIMESTAMP_LOG_EVERY_S:
+                _collision_bad_timestamp_logged[who] = t
+                print(f"[SAFETY] WARNING: skipping {who} in the collision check: its timestamp "
+                      f"isn't an ISO 8601 date-time with a time zone")
+            return False
+
     def check_collision(self, all_positions: List[PositionRecord]) -> List[AlertRecord]:
         """Alert when a worker's Kalman-predicted position converges with a forklift's
         within COLLISION_ALERT_SECONDS. Suppresses repeat alerts for the same pair
-        within 30 seconds."""
-        workers   = [p for p in all_positions if p.person_type == "worker"   and p.predicted_x is not None]
-        forklifts = [p for p in all_positions if p.person_type == "forklift" and p.predicted_x is not None]
+        within 10 seconds.
+
+        Only records younger than COLLISION_MAX_AGE_S take part, and a pair must
+        be on the same floor of the same building (Prompt 136, COR-04)."""
+        now = utcnow_iso()
+        fresh = [p for p in all_positions
+                 if p.person_type in ("worker", "forklift") and p.predicted_x is not None
+                 and self._fresh_for_collision(p, now)]
+        workers   = [p for p in fresh if p.person_type == "worker"]
+        forklifts = [p for p in fresh if p.person_type == "forklift"]
         alerts: List[AlertRecord] = []
 
         cfg = self._get_settings()
         collision_distance = cfg.collision_distance_m
 
         for w in workers:
+            if not w.building_id or not w.floor_id:
+                continue
             for f in forklifts:
+                if (f.building_id, f.floor_id) != (w.building_id, w.floor_id):
+                    continue
                 dist = math.hypot(
                     w.predicted_x - f.predicted_x,  # type: ignore[operator]
                     w.predicted_y - f.predicted_y,  # type: ignore[operator]
