@@ -4,6 +4,13 @@ from typing import Optional, Tuple
 import numpy as np
 from filterpy.kalman import KalmanFilter
 
+# Consecutive outlier rejections after which the filter gives up on its own
+# estimate and re-initialises from the latest measurement (Prompt 136,
+# COR-02). Without it, a person who really did move more than the outlier
+# threshold (or a floor recalibration that shifts every solve) was rejected
+# forever: the output stayed frozen at the old position.
+_REJECTS_BEFORE_RESET = 3
+
 
 class KalmanService:
     """
@@ -32,6 +39,11 @@ class KalmanService:
         self._kf = self._build(self._r)
         self._initialised = False
         self._last_mono: Optional[float] = None
+        self._rejected_in_a_row = 0
+        # False when the last update() rejected its measurement as an outlier,
+        # True when it accepted it or initialised from it. positioning_service
+        # only counts a beacon as seen for an accepted measurement.
+        self.last_update_accepted = True
 
     def _build(self, r: float) -> KalmanFilter:
         kf = KalmanFilter(dim_x=4, dim_z=2)
@@ -72,6 +84,8 @@ class KalmanService:
         Apply a new (x, y) measurement and return the Kalman-smoothed position.
         Measurements further than outlier_threshold_m from the current estimate
         are rejected to prevent noisy multilateration from corrupting the filter.
+        The _REJECTS_BEFORE_RESET-th rejection in a row resets the filter and
+        initialises it from that measurement instead.
         """
         z = np.array([[x], [y]], dtype=float)
         now = time.monotonic()
@@ -80,6 +94,8 @@ class KalmanService:
             self._kf.x = np.array([[x], [y], [0.0], [0.0]], dtype=float)
             self._initialised = True
             self._last_mono = now
+            self._rejected_in_a_row = 0
+            self.last_update_accepted = True
             self._apply_dt(1.0)   # nominal seed step; velocity starts at 0
             self._kf.predict()
             self._kf.update(z)
@@ -95,10 +111,19 @@ class KalmanService:
         est_y = float(self._kf.x[1, 0])
         dist = float(np.sqrt((x - est_x) ** 2 + (y - est_y) ** 2))
         if dist > outlier_threshold_m:
+            self._rejected_in_a_row += 1
+            if self._rejected_in_a_row >= _REJECTS_BEFORE_RESET:
+                # Consistently far from the estimate: the estimate is what's
+                # wrong. Start again from this measurement.
+                self.reset()
+                return self.update(x, y, outlier_threshold_m)
             # Bad measurement — run predict only, do not corrupt state
             self._kf.predict()
+            self.last_update_accepted = False
             return est_x, est_y
 
+        self._rejected_in_a_row = 0
+        self.last_update_accepted = True
         self._kf.predict()
         self._kf.update(z)
         return float(self._kf.x[0, 0]), float(self._kf.x[1, 0])
@@ -123,6 +148,7 @@ class KalmanService:
         from scratch. Call this when a beacon reappears after a long gap."""
         self._initialised = False
         self._last_mono = None
+        self._rejected_in_a_row = 0
         self._kf.P = np.eye(4) * 10.0
         self._kf.x = np.zeros((4, 1), dtype=float)
 

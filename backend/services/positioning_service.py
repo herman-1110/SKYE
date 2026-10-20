@@ -83,9 +83,13 @@ class PositioningService:
         self._last_exact_solve: Dict[str, float] = {}
 
     def _get_filter(self, beacon_mac: str) -> KalmanService:
-        if beacon_mac not in self._filters:
-            self._filters[beacon_mac] = KalmanService()
-        return self._filters[beacon_mac]
+        # Return the object itself, not a second lookup: invalidate_scale_cache()
+        # can clear _filters from another thread between the two (Prompt 136).
+        kf = self._filters.get(beacon_mac)
+        if kf is None:
+            kf = KalmanService()
+            self._filters[beacon_mac] = kf
+        return kf
 
     def _build_context(self, floor) -> _FloorContext:
         """Build a _FloorContext from a resolved FloorRecord (or None). Bounds
@@ -155,9 +159,16 @@ class PositioningService:
         return "unknown"
 
     def invalidate_scale_cache(self) -> None:
-        """Call this after a floor scale, activation, or zone change."""
+        """Call this after a floor scale, activation, or zone change.
+
+        Also drops every Kalman filter (Prompt 136, COR-02): after a
+        recalibration each one holds a position in the old scale, and would
+        reject the new solves as outliers. Not under pipeline_lock: the
+        callers (floor and zone routes) run outside the pipeline, and a filter
+        lost to the clear mid-packet just re-initialises on the next one."""
         self._contexts.clear()
         self._last_seen.clear()
+        self._filters.clear()
 
     def had_recent_exact_solve(self, person_id: str, within_seconds: float) -> bool:
         """True if this person's last successful exact solve happened within
@@ -224,7 +235,6 @@ class PositioningService:
         last = self._last_seen.get(mac)
         if last is not None and (now_unix - last) > KALMAN_RESET_AFTER_S:
             self._filters.pop(mac, None)
-        self._last_seen[mac] = now_unix
 
         # Clamp raw multilateration to floor bounds before feeding Kalman
         raw_x = float(np.clip(raw[0], ctx.x_min, ctx.x_max))
@@ -232,6 +242,11 @@ class PositioningService:
 
         kf = self._get_filter(payload.reporter_mac)
         sx, sy = kf.update(raw_x, raw_y)
+        # Only a measurement the filter used counts as seeing the beacon
+        # (Prompt 136, COR-02). A rejected one used to refresh this too, so a
+        # run of rejections never reached the reset above.
+        if kf.last_update_accepted:
+            self._last_seen[mac] = now_unix
 
         # Clamp Kalman internal state so bad measurements cannot corrupt future predictions
         kf.clamp_state(ctx.x_min, ctx.x_max, ctx.y_min, ctx.y_max)
