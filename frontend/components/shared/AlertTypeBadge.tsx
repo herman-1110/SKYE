@@ -2,6 +2,8 @@ import type { AlertType } from "@/types/alert";
 
 const CONFIG: Record<AlertType, { bg: string; text: string; label: string }> = {
   man_down:         { bg: "bg-s-danger",   text: "text-white",     label: "MAN DOWN" },
+  possible_man_down:   { bg: "bg-s-warning", text: "text-s-base", label: "POSSIBLE MAN DOWN" },
+  positioning_offline: { bg: "bg-s-warning", text: "text-s-base", label: "POSITIONING OFFLINE" },
   collision:        { bg: "bg-s-danger",   text: "text-white",     label: "COLLISION" },
   ghost_patrol:     { bg: "bg-s-accent",   text: "text-s-base",    label: "GHOST PATROL" },
   patrol_violation: { bg: "bg-orange-600", text: "text-white",     label: "PATROL BREACH" },

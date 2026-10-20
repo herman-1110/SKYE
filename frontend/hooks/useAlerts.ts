@@ -8,7 +8,7 @@ import { useDashboardStore } from "@/store/dashboardStore";
 import { useCriticalAlertStore } from "@/store/criticalAlertStore";
 import type { AlertRecord } from "@/types/alert";
 
-const CRITICAL_TYPES = new Set(["man_down", "collision"]);
+const CRITICAL_TYPES = new Set(["man_down", "collision", "possible_man_down", "positioning_offline"]);
 
 export function useAlerts(): {
   alerts: Record<string, AlertRecord>;

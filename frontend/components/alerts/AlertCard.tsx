@@ -11,9 +11,13 @@ interface Props {
 }
 
 const CRITICAL = new Set(["man_down", "collision"]);
+// Amber: needs a look, but the evidence is weaker (possible_man_down) or the
+// checks themselves are paused (positioning_offline)
+const WARNING = new Set(["possible_man_down", "positioning_offline"]);
 
 export default function AlertCard({ alert, selected, onClick, onDelete, deletingId }: Props) {
   const critical = CRITICAL.has(alert.alert_type) && !alert.resolved;
+  const warning = WARNING.has(alert.alert_type) && !alert.resolved;
 
   return (
     <div
@@ -27,6 +31,7 @@ export default function AlertCard({ alert, selected, onClick, onDelete, deleting
       {/* Left indicator */}
       {selected && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-s-accent" />}
       {!selected && critical && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-s-danger animate-amber-pulse" />}
+      {!selected && warning && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-s-warning animate-amber-pulse" />}
 
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5">
@@ -44,7 +49,8 @@ export default function AlertCard({ alert, selected, onClick, onDelete, deleting
           {alert.resolved ? "RESOLVED" : "ACTIVE"}
         </span>
       </div>
-      <p className="text-xs text-s-text mt-1.5 font-medium">{alert.person_id}</p>
+      {/* positioning_offline is about every AP, not one person */}
+      <p className="text-xs text-s-text mt-1.5 font-medium">{alert.person_id || "All APs"}</p>
       {alert.alert_type === "collision" && alert.other_person_id && (
         <p className="text-xs text-s-muted font-medium">
           ↔ {alert.other_person_id}

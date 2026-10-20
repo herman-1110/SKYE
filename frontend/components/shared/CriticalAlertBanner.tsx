@@ -4,11 +4,33 @@ import { useCriticalAlertStore } from "@/store/criticalAlertStore";
 const ALERT_LABELS: Record<string, string> = {
   man_down:  "MAN DOWN",
   collision: "COLLISION WARNING",
+  possible_man_down:   "POSSIBLE MAN DOWN",
+  positioning_offline: "POSITIONING OFFLINE",
 };
 
 const ALERT_DESCRIPTIONS: Record<string, string> = {
   man_down:  "Personnel stationary — possible injury detected",
   collision: "Predicted collision between personnel and forklift",
+  possible_man_down:
+    "Little or no movement, but only one or two APs can hear this person. Check on them.",
+  positioning_offline:
+    "No AP reports are reaching SKYE. Man-down and collision checks are paused until they return.",
+};
+
+// Amber variant for the alerts that need a look but aren't a confirmed
+// emergency; red for the rest.
+const AMBER_TYPES = new Set(["possible_man_down", "positioning_offline"]);
+
+const RED_STYLE = {
+  background: "rgba(220, 38, 38, 0.12)",
+  border: "1.5px solid rgba(220, 38, 38, 0.6)",
+  boxShadow: "0 0 24px rgba(220, 38, 38, 0.25), 0 4px 16px rgba(0,0,0,0.4)",
+};
+
+const AMBER_STYLE = {
+  background: "rgba(245, 158, 11, 0.12)",
+  border: "1.5px solid rgba(245, 158, 11, 0.6)",
+  boxShadow: "0 0 24px rgba(245, 158, 11, 0.25), 0 4px 16px rgba(0,0,0,0.4)",
 };
 
 function WarningIcon() {
@@ -42,68 +64,72 @@ export default function CriticalAlertBanner() {
 
   return (
     <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 w-full max-w-lg px-4 pointer-events-none">
-      {queue.map((alert) => (
-        <div
-          key={alert.alert_id}
-          className="pointer-events-auto rounded-xl px-4 py-3.5 flex items-start gap-3 animate-toast-in"
-          style={{
-            background: "rgba(220, 38, 38, 0.12)",
-            border: "1.5px solid rgba(220, 38, 38, 0.6)",
-            boxShadow: "0 0 24px rgba(220, 38, 38, 0.25), 0 4px 16px rgba(0,0,0,0.4)",
-            backdropFilter: "blur(12px)",
-            WebkitBackdropFilter: "blur(12px)",
-          }}
-        >
-          {/* Pulsing icon */}
-          <span className="shrink-0 text-red-400 mt-0.5 animate-amber-pulse">
-            <WarningIcon />
-          </span>
+      {queue.map((alert) => {
+        const amber = AMBER_TYPES.has(alert.alert_type);
+        const tone = amber ? "text-amber-400" : "text-red-400";
+        return (
+          <div
+            key={alert.alert_id}
+            className="pointer-events-auto rounded-xl px-4 py-3.5 flex items-start gap-3 animate-toast-in"
+            style={{
+              ...(amber ? AMBER_STYLE : RED_STYLE),
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+            }}
+          >
+            {/* Pulsing icon */}
+            <span className={`shrink-0 ${tone} mt-0.5 animate-amber-pulse`}>
+              <WarningIcon />
+            </span>
 
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-mono text-xs font-bold text-red-400 tracking-widest">
-                {ALERT_LABELS[alert.alert_type] ?? alert.alert_type.toUpperCase()}
-              </span>
-              <span className="font-mono text-[10px] text-red-400/60">
-                {alert.timestamp.slice(11, 19)} UTC
-              </span>
-            </div>
-            <p className="text-xs text-s-muted mb-1.5">
-              {ALERT_DESCRIPTIONS[alert.alert_type]}
-            </p>
-            {/* Persons involved */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-mono text-xs text-s-text bg-s-elevated border border-s-border px-2 py-0.5 rounded-md">
-                {alert.person_id}
-              </span>
-              {alert.alert_type === "collision" && alert.other_person_id && (
-                <>
-                  <span className="text-red-400 text-xs font-bold">↔</span>
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`font-mono text-xs font-bold ${tone} tracking-widest`}>
+                  {ALERT_LABELS[alert.alert_type] ?? alert.alert_type.toUpperCase()}
+                </span>
+                <span className={`font-mono text-[10px] ${amber ? "text-amber-400/60" : "text-red-400/60"}`}>
+                  {alert.timestamp.slice(11, 19)} UTC
+                </span>
+              </div>
+              <p className="text-xs text-s-muted mb-1.5">
+                {ALERT_DESCRIPTIONS[alert.alert_type]}
+              </p>
+              {/* Persons involved (none for positioning_offline) */}
+              {alert.person_id && (
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="font-mono text-xs text-s-text bg-s-elevated border border-s-border px-2 py-0.5 rounded-md">
-                    {alert.other_person_id}
+                    {alert.person_id}
                   </span>
-                </>
+                  {alert.alert_type === "collision" && alert.other_person_id && (
+                    <>
+                      <span className="text-red-400 text-xs font-bold">↔</span>
+                      <span className="font-mono text-xs text-s-text bg-s-elevated border border-s-border px-2 py-0.5 rounded-md">
+                        {alert.other_person_id}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+              {/* Zone */}
+              {alert.zone && (
+                <p className="font-mono text-[10px] text-s-muted mt-1.5">
+                  Zone: {alert.zone}
+                </p>
               )}
             </div>
-            {/* Zone */}
-            {alert.zone && (
-              <p className="font-mono text-[10px] text-s-muted mt-1.5">
-                Zone: {alert.zone}
-              </p>
-            )}
-          </div>
 
-          {/* Dismiss */}
-          <button
-            onClick={() => dismissCritical(alert.alert_id)}
-            className="shrink-0 text-s-muted hover:text-red-400 transition-colors mt-0.5"
-            aria-label="Dismiss critical alert"
-          >
-            <XIcon />
-          </button>
-        </div>
-      ))}
+            {/* Dismiss */}
+            <button
+              onClick={() => dismissCritical(alert.alert_id)}
+              className={`shrink-0 text-s-muted ${amber ? "hover:text-amber-400" : "hover:text-red-400"} transition-colors mt-0.5`}
+              aria-label="Dismiss critical alert"
+            >
+              <XIcon />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

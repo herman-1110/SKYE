@@ -8,6 +8,8 @@ type Filter = "all" | AlertType;
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all",              label: "All" },
   { value: "man_down",         label: "Man Down" },
+  { value: "possible_man_down",   label: "Possible Man Down" },
+  { value: "positioning_offline", label: "Positioning Offline" },
   { value: "ghost_patrol",     label: "Ghost Patrol" },
   { value: "collision",        label: "Collision" },
   { value: "patrol_violation", label: "Patrol Breach" },

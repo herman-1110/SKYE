@@ -1,5 +1,7 @@
 export type AlertType =
   | "man_down"
+  | "possible_man_down"     // stillness seen by only one or two APs (amber)
+  | "positioning_offline"   // no AP reports reaching SKYE; person_id and zone are ""
   | "collision"
   | "ghost_patrol"
   | "patrol_violation";
@@ -16,7 +18,8 @@ export interface AlertRecord {
   resolved: boolean;
   other_person_id?: string;   // collision only: the other party
   // man_down: "stillness" | "signal_loss"
+  // possible_man_down: "stillness"
   // patrol_violation: "missed_checkpoint" | "short_dwell" | "no_patrol"
-  // absent on alerts predating this field, and on collision/ghost_patrol
+  // absent on alerts predating this field, and on collision/ghost_patrol/positioning_offline
   cause?: "stillness" | "signal_loss" | "missed_checkpoint" | "short_dwell" | "no_patrol";
 }
