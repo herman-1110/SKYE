@@ -85,6 +85,9 @@ class _SweepRead:
     heartbeats: Optional[Dict[str, dict]] = None
     # placed APs' MACs by (building_id, floor_id); None if they couldn't be read
     placed: Optional[Dict[tuple, List[str]]] = None
+    # /alerts, read only when there was something to decide (COR-06); None
+    # if not read or unreadable
+    alerts: Optional[List[dict]] = None
 
 
 def _unix(iso: str) -> float:
@@ -105,6 +108,30 @@ def _ap_alive(hb: Optional[dict], now_unix: float) -> bool:
         return False
     up = hb.get("up_since")
     return not isinstance(up, (int, float)) or now_unix - up >= settings.AP_ALIVE_GRACE_S
+
+
+def _placed_heartbeats(read: "_SweepRead") -> List[dict]:
+    """The heartbeats of APs placed on a floor; [] if either read failed."""
+    if read.heartbeats is None or read.placed is None:
+        return []
+    return [read.heartbeats[m] for macs in read.placed.values() for m in macs if m in read.heartbeats]
+
+
+def _unresolved_since(alerts: Optional[List[dict]], since_unix: float, alert_type: str,
+                      person_id: str, cause: Optional[str]) -> bool:
+    """True if /alerts holds an unresolved alert of this kind for this person,
+    timestamped at or after since_unix: the episode was already alerted by an
+    earlier process (Prompt 136, COR-06)."""
+    for a in alerts or []:
+        if (a.get("alert_type") != alert_type or a.get("resolved") or a.get("cause") != cause
+                or (a.get("person_id") or "") != person_id):
+            continue
+        try:
+            if _unix(a.get("timestamp")) >= since_unix:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 @dataclass
@@ -370,7 +397,9 @@ class SafetyService:
         person (Prompt 136, REL-01): the alert is held while none of the APs
         in the record's heard_by (or, for an older record, none placed on its
         floor) is alive. When no placed AP is reporting at all, the sweep
-        raises one positioning_offline instead.
+        raises one positioning_offline instead. Neither repeats an alert that
+        an earlier process raised for the same episode and nobody has
+        resolved (COR-06).
 
         Called from a background sweep, not per-telemetry-packet, in a worker
         thread. The reads happen outside positioning_service.pipeline_lock;
@@ -446,8 +475,20 @@ class SafetyService:
             placed = None
             print(f"[SAFETY] WARNING: signal-loss sweep couldn't read the placed APs: {e}")
 
-        return _SweepRead(taken_at=taken_at, now=now, candidates=candidates,
+        read = _SweepRead(taken_at=taken_at, now=now, candidates=candidates,
                           heartbeats=heartbeats, placed=placed)
+
+        # /alerts, once, only when an alert might be raised: the restart
+        # check in _decide_sweep() needs it (COR-06).
+        placed_hbs = _placed_heartbeats(read)
+        offline_possible = (bool(placed_hbs) and not self._positioning_offline_latched
+                            and not any(_ap_reporting(hb, _unix(now)) for hb in placed_hbs))
+        if candidates or offline_possible:
+            try:
+                read.alerts = [a for a in alert_repository.get_all().values() if isinstance(a, dict)]
+            except Exception as e:
+                print(f"[SAFETY] WARNING: signal-loss sweep couldn't read /alerts: {e}")
+        return read
 
     def _aps_for(self, record: PositionRecord, read: _SweepRead) -> List[str]:
         """The APs whose silence would explain this record going stale: its
@@ -462,14 +503,19 @@ class SafetyService:
     def _check_positioning_offline(self, read: _SweepRead, now_unix: float) -> Optional[AlertRecord]:
         """One positioning_offline while no placed AP is reporting, if at least
         one placed AP ever has (REL-01). The latch clears when one reports
-        again. Never resolved automatically."""
-        if read.heartbeats is None or read.placed is None:
-            return None
-        placed_hbs = [read.heartbeats[m] for macs in read.placed.values() for m in macs if m in read.heartbeats]
+        again. Never resolved automatically. After a restart, an unresolved
+        one raised since the last placed AP report means this outage was
+        already alerted (COR-06)."""
+        placed_hbs = _placed_heartbeats(read)
         if any(_ap_reporting(hb, now_unix) for hb in placed_hbs):
             self._positioning_offline_latched = False
             return None
         if not placed_hbs or self._positioning_offline_latched:
+            return None
+        newest = max((hb["last_seen"] for hb in placed_hbs if isinstance(hb.get("last_seen"), (int, float))),
+                     default=0)
+        if _unresolved_since(read.alerts, newest, "positioning_offline", "", None):
+            self._positioning_offline_latched = True
             return None
         alert = AlertRecord(
             alert_id=str(uuid.uuid4()),
@@ -517,6 +563,13 @@ class SafetyService:
                     if pid not in _held_logged:
                         print(f"[SAFETY] holding the signal-loss alert for {pid}: none of the APs that "
                               f"last heard them is alive ({', '.join(aps)})")
+                    continue
+
+                # The in-memory latch is lost on a restart: an unresolved
+                # signal-loss raised since this record was written means this
+                # episode was already alerted (COR-06).
+                if _unresolved_since(read.alerts, _unix(record.timestamp), "man_down", pid, "signal_loss"):
+                    _stale_alerted.add(pid)
                     continue
 
                 # Second dedup layer, same suppressor check_man_down() uses.
