@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -27,3 +27,7 @@ class FloorRecord:
     # riding along on this existing floor->frontend crossing (Prompt 117) instead
     # of a second hardcoded frontend copy or a dedicated settings endpoint.
     patrol_proximity_radius_m: float = 0.0
+    # The last calibration's two points (image fractions) and distance, for
+    # Recalibrate to start from (Prompt 142, D3): {a: {x_pct, y_pct}, b: {...},
+    # distance_m, calibrated_at}. None before 142, or after a scale saved without them.
+    calibration: Optional[Dict[str, Any]] = None

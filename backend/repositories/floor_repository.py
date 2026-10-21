@@ -36,6 +36,7 @@ class FloorRepository:
             # Not Firestore data — always the live global setting, not whatever
             # was stored on the document (Prompt 117 single-source-of-truth).
             patrol_proximity_radius_m=settings.PATROL_PROXIMITY_RADIUS_M,
+            calibration=data["calibration"] if isinstance(data.get("calibration"), dict) else None,
         )
 
     def save(self, floor: FloorRecord) -> FloorRecord:
@@ -97,8 +98,24 @@ class FloorRepository:
                 pass
         return results
 
-    def update_scale(self, building_id: str, floor_id: str, scale: float) -> None:
-        self._col(building_id).document(floor_id).update({"scale_pixels_per_meter": scale})
+    def update_scale(
+        self,
+        building_id: str,
+        floor_id: str,
+        scale: float,
+        calibration: Optional[Dict[str, Any]] = None,
+        zone_bounds: Optional[Dict[str, Dict[str, float]]] = None,
+    ) -> None:
+        """Set the scale and the stored calibration (None clears it), and give
+        each zone in zone_bounds its new metres, in one batch: a failure leaves
+        the floor and its zones as they were (Prompt 142, D3). The zones are
+        the floor's own subcollection, so they're written here."""
+        batch = self._db().batch()
+        floor_ref = self._col(building_id).document(floor_id)
+        batch.update(floor_ref, {"scale_pixels_per_meter": scale, "calibration": calibration})
+        for zone_id, bounds in (zone_bounds or {}).items():
+            batch.update(floor_ref.collection("zones").document(zone_id), bounds)
+        batch.commit()
 
     def set_active(self, building_id: str, floor_id: str) -> None:
         """Activate this floor only. Other floors keep their state: several

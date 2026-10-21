@@ -116,8 +116,14 @@ def update_scale(
     body: FloorScaleRequest,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
+    """The scale, and optionally the two points and the distance it was
+    measured with, which the floor keeps for the next Recalibrate (Prompt
+    142). 422 with one sentence for a bad calibration; 400 for a scale <= 0."""
+    calibration = body.calibration.model_dump() if body.calibration is not None else None
     try:
-        floor_service.update_scale(building_id, floor_id, body.scale_pixels_per_meter)
+        floor_service.update_scale(building_id, floor_id, body.scale_pixels_per_meter, calibration)
+    except FloorError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok"}

@@ -73,15 +73,63 @@ class FloorService:
         )
         return floor_repository.save(floor)
 
-    def update_scale(self, building_id: str, floor_id: str, scale: float) -> None:
+    def update_scale(
+        self, building_id: str, floor_id: str, scale: float, calibration: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Set the floor's px/m (Prompt 142, D3).
+
+        calibration, when sent, is the two points (image fractions) and the
+        distance they were measured with: the floor keeps it for the next
+        Recalibrate. A scale sent without it clears the stored one, which no
+        longer describes the scale. FloorError 422 with one sentence for a
+        point off the image, A equal to B, a distance outside (0, 10000] m, or
+        a calibration missing a part.
+
+        Zones are stored in metres, so each one's bounds are multiplied by
+        old ÷ new px/m to keep it where it's drawn on the image. A first
+        calibration (no old scale) leaves zones alone. APs are re-derived from
+        their image fractions, as before."""
         if scale <= 0:
             raise ValueError("scale_pixels_per_meter must be positive")
-        floor_repository.update_scale(building_id, floor_id, scale)
+        stored = self._checked_calibration(calibration) if calibration is not None else None
+        floor = floor_repository.get_by_id(building_id, floor_id)
+        old = floor.scale_pixels_per_meter if floor else None
+        zone_bounds: Dict[str, Dict[str, float]] = {}
+        if old and old > 0 and old != scale:
+            ratio = old / scale
+            for zone in zone_repository.get_all(building_id, floor_id):
+                zone_bounds[zone.id] = {k: round(getattr(zone, k) * ratio, 4)
+                                        for k in ("x_min", "x_max", "y_min", "y_max")}
+        floor_repository.update_scale(building_id, floor_id, scale, stored, zone_bounds)
         positioning_service.invalidate_scale_cache()
         self._recalculate_ap_coordinates(building_id, floor_id, scale)
+        if zone_bounds:
+            print(f"[CALIBRATION] Rescaled {len(zone_bounds)} zone(s) by {old} / {scale} px/m to keep them in place")
         # Every AP's metres just changed: the ingest mustn't keep using the
         # old ones until its cache expires (Prompt 142).
         _invalidate_ap_cache()
+
+    @staticmethod
+    def _checked_calibration(calibration: Dict[str, Any]) -> Dict[str, Any]:
+        """The calibration as stored: {a: {x_pct, y_pct}, b: {x_pct, y_pct},
+        distance_m, calibrated_at}. FloorError 422 with one sentence otherwise."""
+        a, b = calibration.get("a") or {}, calibration.get("b") or {}
+        points = [a.get("x_pct"), a.get("y_pct"), b.get("x_pct"), b.get("y_pct")]
+        distance = calibration.get("distance_m")
+        if any(v is None for v in points) or distance is None:
+            raise FloorError(422, "Send both calibration points and the distance between them, or none of them.")
+        if not all(0.0 <= v <= 1.0 for v in points):
+            raise FloorError(422, "Each calibration point must be on the floor plan (fractions from 0 to 1).")
+        if points[:2] == points[2:]:
+            raise FloorError(422, "The two calibration points must be different.")
+        if not 0.0 < distance <= 10_000.0:
+            raise FloorError(422, "The distance must be more than 0 m and at most 10,000 m.")
+        return {
+            "a": {"x_pct": points[0], "y_pct": points[1]},
+            "b": {"x_pct": points[2], "y_pct": points[3]},
+            "distance_m": distance,
+            "calibrated_at": utcnow_iso(),
+        }
 
     def derive_ap_metres(self, building_id: str, floor_id: str, x_pct: float, y_pct: float) -> tuple[float, float]:
         """Re-derive real-world metre coordinates from x_pct/y_pct — same
