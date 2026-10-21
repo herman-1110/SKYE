@@ -4,12 +4,13 @@ import { createPortal } from "react-dom";
 import type { PositionRecord } from "@/types/position";
 import type { FloorRecord } from "@/types/floor";
 import { useZones } from "@/hooks/useZones";
-import { useAPHeartbeats } from "@/hooks/useAPHeartbeats";
+import { apStatus, useAPHeartbeats } from "@/hooks/useAPHeartbeats";
 import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import { useDashboardStore } from "@/store/dashboardStore";
 import WorkerMarker from "./WorkerMarker";
 import PatrolRouteOverlay from "./PatrolRouteOverlay";
 import CameraPanel from "./CameraPanel";
+import ApIcon, { apStatusColor } from "./ApIcon";
 import { CctvMarker } from "./CctvIcon";
 import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
@@ -130,7 +131,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   const outerRef = useRef<HTMLDivElement>(null);
   const workerSvgRef = useRef<SVGSVGElement>(null);
   const { zones } = useZones(buildingId, activeFloor?.id ?? null);
-  const apStatuses = useAPHeartbeats();
+  const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
   const cctvStatuses = useCCTVHeartbeats();
   const scale = activeFloor?.scale_pixels_per_meter ?? null;
 
@@ -305,12 +306,9 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
             />
           ))}
 
-          {/* AP markers */}
+          {/* AP markers, coloured by status (Prompt 142, D2) */}
           {aps.map((ap) => {
-            const status = apStatuses[ap.mac.toUpperCase()]?.status ?? "unknown";
-            const dotColor =
-              status === "online"  ? "#22c55e" :
-              status === "offline" ? "#ef4444" : "#6b7280";
+            const status = apStatus(apHeartbeats, apHeartbeatsLoaded, ap.mac);
             const label = `${ap.name} — ${ap.mac} — ${status}`;
             return (
               <div
@@ -321,10 +319,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
                 onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
                 onMouseLeave={() => setHoveredMarker(null)}
               >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
-                </svg>
-                <span style={{ position: "absolute", bottom: -2, right: -2, width: 7, height: 7, borderRadius: "50%", background: dotColor, border: "1.5px solid var(--bg-base, #111)", display: "block" }} />
+                <ApIcon size={22} style={{ color: apStatusColor(status) }} />
               </div>
             );
           })}

@@ -13,9 +13,12 @@ export interface APHeartbeat {
   status: APStatus;
 }
 
-export function useAPHeartbeats(): Record<string, APHeartbeat> {
+/** Every /ap_heartbeats node by MAC (upper case), with its status, and
+ *  whether the first snapshot has arrived yet. */
+export function useAPHeartbeats(): { heartbeats: Record<string, APHeartbeat>; loaded: boolean } {
   const rawRef = useRef<Record<string, { name: string; last_seen: number }>>({});
   const [heartbeats, setHeartbeats] = useState<Record<string, APHeartbeat>>({});
+  const [loaded, setLoaded] = useState(false);
 
   const recompute = () => {
     const now = Date.now();
@@ -44,6 +47,7 @@ export function useAPHeartbeats(): Record<string, APHeartbeat> {
       }
       rawRef.current = raw;
       recompute();
+      setLoaded(true);
     });
 
     const interval = setInterval(recompute, 1_000);
@@ -54,5 +58,14 @@ export function useAPHeartbeats(): Record<string, APHeartbeat> {
     };
   }, []);
 
-  return heartbeats;
+  return { heartbeats, loaded };
+}
+
+/** One rule for every AP icon and status dot (Prompt 142, D2): online while
+ *  its heartbeat is under 10 s old, offline when older or missing, and
+ *  "unknown" (grey) only until the first snapshot has arrived, so a page load
+ *  never flashes red. */
+export function apStatus(heartbeats: Record<string, APHeartbeat>, loaded: boolean, mac: string): APStatus {
+  if (!loaded) return "unknown";
+  return heartbeats[mac.toUpperCase()]?.status === "online" ? "online" : "offline";
 }

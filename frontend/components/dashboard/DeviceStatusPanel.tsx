@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useAPHeartbeats } from "@/hooks/useAPHeartbeats";
+import { apStatus, useAPHeartbeats } from "@/hooks/useAPHeartbeats";
 import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
@@ -12,7 +12,7 @@ interface Props {
 export default function DeviceStatusPanel({ buildingId, floorId }: Props) {
   const [aps, setAps] = useState<APRecord[]>([]);
   const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
-  const apStatuses = useAPHeartbeats();
+  const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
   const cctvStatuses = useCCTVHeartbeats();
 
   useEffect(() => {
@@ -32,14 +32,16 @@ export default function DeviceStatusPanel({ buildingId, floorId }: Props) {
         <div className="device-status-section">
           <span className="device-status-label">ACCESS POINTS</span>
           {aps.map((ap) => {
-            const status = apStatuses[ap.mac.toUpperCase()]?.status ?? "offline";
+            // The same rule as every AP icon (Prompt 142, D2): grey only until
+            // the first heartbeat snapshot, then no heartbeat reads as offline.
+            const status = apStatus(apHeartbeats, apHeartbeatsLoaded, ap.mac);
             return (
               <div key={ap.id} className="device-status-row">
                 <span className={`device-status-dot ${status}`} />
                 <span className="device-status-name">{ap.name}</span>
                 <span className="device-status-mac">{ap.mac}</span>
                 <span className={`device-status-badge ${status}`}>
-                  {status === "online" ? "Online" : "Offline"}
+                  {status === "online" ? "Online" : status === "offline" ? "Offline" : "Unknown"}
                 </span>
               </div>
             );

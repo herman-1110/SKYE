@@ -8,9 +8,10 @@ import {
   type APRecord, type ApiError, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
-import { useAPHeartbeats, type APStatus } from "@/hooks/useAPHeartbeats";
+import { apStatus, useAPHeartbeats, type APStatus } from "@/hooks/useAPHeartbeats";
 import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import MacAddressInput from "@/components/shared/MacAddressInput";
+import ApIcon, { apStatusColor } from "./ApIcon";
 import CctvIcon, { CctvMarker } from "./CctvIcon";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
 
@@ -56,7 +57,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [cctvFormError, setCctvFormError] = useState("");
   const [editingCctvId, setEditingCctvId] = useState<string | null>(null);
   const [editingApId, setEditingApId] = useState<string | null>(null);
-  const apHeartbeats = useAPHeartbeats();
+  const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
   const cctvHeartbeats = useCCTVHeartbeats();
 
   const placedMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
@@ -363,9 +364,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "ap" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
-          </svg>
+          <ApIcon size={12} />
           {placementMode === "ap" ? "Cancel" : "Add AP"}
         </button>
         <button
@@ -410,9 +409,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-s-elevated border border-s-border hover:border-s-accent transition-colors text-left group"
               >
                 <div className="flex items-center gap-2">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
-                  </svg>
+                  {/* Accent, not a status colour: these aren't placed here yet (Prompt 142, D2) */}
+                  <ApIcon size={12} style={{ color: "var(--accent)" }} />
                   <div className="flex flex-col leading-tight">
                     {ap.name && <span className="font-mono text-[11px] text-s-text">{ap.name}</span>}
                     <span className="font-mono text-[10px] text-s-muted">{ap.mac}</span>
@@ -503,11 +501,13 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           draggable={false}
         />
 
-        {/* AP markers — drag an existing one to reposition it */}
+        {/* AP markers, coloured by status (Prompt 142, D2) — drag an existing one to reposition it */}
         {aps.map((ap) => {
           const isDragging = dragTarget?.type === "ap" && dragTarget.id === ap.id;
           const xPct = isDragging && dragPct ? dragPct.x : ap.x_pct;
           const yPct = isDragging && dragPct ? dragPct.y : ap.y_pct;
+          const status = apStatus(apHeartbeats, apHeartbeatsLoaded, ap.mac);
+          const label = `${ap.name} — ${status}`;
           return (
             <div
               key={ap.id}
@@ -525,13 +525,11 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 touchAction: "none",
               }}
               onPointerDown={handleMarkerPointerDown("ap", ap.id, ap.x_pct, ap.y_pct)}
-              onMouseEnter={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
-              onMouseMove={(e) => setHoveredMarker({ label: ap.name, x: e.clientX, y: e.clientY })}
+              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
+              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
               onMouseLeave={() => setHoveredMarker(null)}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="13"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
-              </svg>
+              <ApIcon size={22} style={{ color: apStatusColor(status) }} />
               <button
                 onClick={(e) => { e.stopPropagation(); handleDeleteAP(ap.id); }}
                 disabled={deletingId === ap.id}
@@ -601,15 +599,13 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
             </thead>
             <tbody>
               {aps.map((ap) => {
-                const status = apHeartbeats[ap.mac.toUpperCase()]?.status ?? "unknown";
+                const status = apStatus(apHeartbeats, apHeartbeatsLoaded, ap.mac);
                 return (
                 <tr key={ap.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <StatusDot status={status} />
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="15"/><circle cx="12" cy="12" r="2.2" fill="var(--accent)" stroke="none"/><path d="M7.5 9.2a4 4 0 0 0 0 5.6"/><path d="M5 7a7.5 7.5 0 0 0 0 10"/><path d="M16.5 9.2a4 4 0 0 1 0 5.6"/><path d="M19 7a7.5 7.5 0 0 1 0 10"/>
-                      </svg>
+                      {/* The icon's colour is the status (Prompt 142, D2); the word is in the next column */}
+                      <ApIcon size={12} style={{ color: apStatusColor(status) }} />
                       <span className="text-s-text font-medium">{ap.name}</span>
                       <span className="font-mono text-[10px] text-s-muted">{ap.mac}</span>
                     </div>
