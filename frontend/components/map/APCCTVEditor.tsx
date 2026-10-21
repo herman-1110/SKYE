@@ -5,7 +5,7 @@ import type { FloorRecord } from "@/types/floor";
 import {
   subscribeToAPs, createAP, deleteAP, updateAP, updateAPPosition,
   subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTV, updateCCTVPosition, discoverCameras,
-  type APRecord, type CCTVRecord,
+  type APRecord, type ApiError, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
 import { useAPHeartbeats, type APStatus } from "@/hooks/useAPHeartbeats";
@@ -68,7 +68,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   // that aren't on this floor — the camera twin of the AP list above. A node
   // with a probe field belongs to a camera registered somewhere (only
   // registered cameras get OpenAPI checks), so it's left out: tighter than
-  // the AP list, which shows other floors' APs until the create 409s.
+  // the AP list, which shows other floors' APs too (an inactive floor may
+  // share them, Prompt 142).
   // Listed while online, or found by a scan in the last 10 minutes.
   const placedCamMacs = new Set(cctvs.map((c) => (c.device_mac ?? c.mac ?? "").toUpperCase()).filter(Boolean));
   const nowS = Math.floor(Date.now() / 1000);
@@ -221,14 +222,12 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       setPendingPct(null); setApName(""); setApMac(""); setPlacementMode(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
-      if (msg.includes("409") || msg.toLowerCase().includes("already exists")) {
-        if (msg.toLowerCase().includes("another floor")) {
-          setMacError("This MAC is already registered on a different floor. Each AP must have a unique MAC across all floors.");
-        } else {
-          setMacError("An AP with this MAC already exists on this floor.");
-        }
-      } else if (msg.toLowerCase().includes("not calibrated")) {
+      if (msg.toLowerCase().includes("not calibrated")) {
         toast.error(msg);
+      } else if ((err as ApiError)?.status === 409 && msg) {
+        // The backend's sentence as it is: the MAC is already on this floor,
+        // or on another active floor (Prompt 142). Other floors may share it.
+        setMacError(msg);
       } else {
         toast.error("Failed to place AP");
       }

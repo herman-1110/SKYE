@@ -2,10 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useBuildings } from "@/hooks/useBuildings";
-import { useFloors } from "@/hooks/useFloors";
+import { useFirstBuildingWithActiveFloor, useFloors } from "@/hooks/useFloors";
 import { useDashboardStore } from "@/store/dashboardStore";
-import { activateFloor } from "@/services/floorService";
-import { toast } from "@/store/toastStore";
 import FloorMap from "@/components/map/FloorMap";
 import DeviceStatusPanel from "@/components/dashboard/DeviceStatusPanel";
 import SelectDropdown from "@/components/shared/SelectDropdown";
@@ -19,54 +17,37 @@ export default function FloorMapArea() {
   const isAdmin = isAdminRole(userRecord?.role);
   const { buildings, isLoading: buildingsLoading } = useBuildings();
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
-  const { floors, activeFloor, isLoading: floorsLoading } = useFloors(selectedBuildingId);
+  const { floors, activeFloors, isLoading: floorsLoading } = useFloors(selectedBuildingId);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
-  const [switching, setSwitching] = useState(false);
+  const firstActiveBuildingId = useFirstBuildingWithActiveFloor(buildings.map((b) => b.id));
   const positions = useDashboardStore((s) => s.positions);
+
+  // Several floors can be active at once (Prompt 142, D1.10): the dashboard
+  // shows one of the selected building's active floors, the chosen one while
+  // it stays active, else the first. Choosing only changes the view.
+  const displayedFloor = activeFloors.find((f) => f.id === selectedFloorId) ?? activeFloors[0] ?? null;
 
   const positionList = useMemo(() => {
     const all = Object.values(positions) as PositionRecord[];
-    const floorId = (floors.find((f) => f.id === selectedFloorId) ?? activeFloor)?.id;
+    const floorId = displayedFloor?.id;
     if (!floorId) return [];
     return all.filter((p) => p.floor_id === floorId);
-  }, [positions, selectedFloorId, floors, activeFloor]);
+  }, [positions, displayedFloor?.id]);
 
-  // Auto-select the first building + its active floor
+  // Auto-select the first building that has an active floor, or the first
+  // building if none has.
   useEffect(() => {
-    if (buildings.length > 0 && !selectedBuildingId) {
-      setSelectedBuildingId(buildings[0].id);
+    if (buildings.length > 0 && !selectedBuildingId && firstActiveBuildingId !== undefined) {
+      setSelectedBuildingId(firstActiveBuildingId ?? buildings[0].id);
     }
-  }, [buildings, selectedBuildingId]);
-
-  useEffect(() => {
-    if (activeFloor) {
-      setSelectedFloorId(activeFloor.id);
-    } else {
-      setSelectedFloorId(null);
-    }
-  }, [activeFloor]);
-
-  const displayedFloor = floors.find((f) => f.id === selectedFloorId && f.is_active) ?? activeFloor;
+  }, [buildings, selectedBuildingId, firstActiveBuildingId]);
 
   const handleBuildingChange = (id: string) => {
     setSelectedBuildingId(id);
     setSelectedFloorId(null);
   };
 
-  const handleFloorChange = async (floorId: string) => {
-    if (!selectedBuildingId || switching || floorId === selectedFloorId) return;
-    setSelectedFloorId(floorId);
-    setSwitching(true);
-    try {
-      await activateFloor(selectedBuildingId, floorId);
-    } catch {
-      toast.error("Failed to switch floor.");
-    } finally {
-      setSwitching(false);
-    }
-  };
-
-  const isLoading = buildingsLoading || floorsLoading;
+  const isLoading = buildingsLoading || floorsLoading || (buildings.length > 0 && !selectedBuildingId);
 
   if (isLoading) {
     return <div className="h-64 rounded-xl bg-s-surface border border-s-border skeleton" />;
@@ -91,7 +72,7 @@ export default function FloorMapArea() {
     );
   }
 
-  if (!isLoading && floors.length > 0 && !activeFloor) {
+  if (!isLoading && floors.length > 0 && activeFloors.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 rounded-xl bg-s-surface border border-dashed border-s-border text-center gap-4">
         <svg className="text-s-muted" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -126,20 +107,16 @@ export default function FloorMapArea() {
           />
         )}
 
-        {floors.length > 1 && (
-          <>
-            <SelectDropdown<FloorRecord>
-              label="Floor"
-              items={floors}
-              selectedId={selectedFloorId}
-              getId={(f) => f.id}
-              getLabel={(f) => `${f.name}${f.is_active ? " — ACTIVE" : ""}`}
-              onSelect={handleFloorChange}
-              disabled={switching}
-              placeholder="Select Floor"
-            />
-            {switching && <span className="h-3 w-3 rounded-full border-2 border-s-accent border-t-transparent animate-spin shrink-0" />}
-          </>
+        {activeFloors.length > 1 && (
+          <SelectDropdown<FloorRecord>
+            label="Floor"
+            items={activeFloors}
+            selectedId={displayedFloor?.id ?? null}
+            getId={(f) => f.id}
+            getLabel={(f) => f.name}
+            onSelect={setSelectedFloorId}
+            placeholder="Select Floor"
+          />
         )}
       </div>
 
@@ -147,7 +124,7 @@ export default function FloorMapArea() {
         <FloorMap
           positions={positionList}
           buildingId={selectedBuildingId}
-          activeFloor={displayedFloor ?? null}
+          activeFloor={displayedFloor}
         />
       </div>
 

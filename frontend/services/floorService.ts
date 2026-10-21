@@ -33,29 +33,48 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     // FastAPI error bodies are JSON — {"detail": "message"} — not the plain
     // message text. Extract it so callers showing err.message directly (e.g.
     // via toast) get a readable string instead of a raw JSON blob.
-    let detail = raw;
+    let message = raw;
+    let detail: ApiError["detail"];
     try {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+      if (parsed && typeof parsed.detail === "string") message = detail = parsed.detail;
       // FastAPI's own 422s carry a list of {msg} objects rather than a sentence.
       else if (parsed && Array.isArray(parsed.detail)) {
         const msgs = parsed.detail
           .map((d: { msg?: unknown }) => (typeof d?.msg === "string" ? d.msg : null))
           .filter(Boolean);
-        if (msgs.length) detail = msgs.join("; ");
+        if (msgs.length) message = msgs.join("; ");
+      }
+      // A dict detail carries data the caller needs, such as the floors an
+      // activation clashes with (Prompt 142): kept whole, its message used
+      // as the text.
+      else if (parsed && parsed.detail && typeof parsed.detail === "object") {
+        detail = parsed.detail;
+        if (typeof parsed.detail.message === "string") message = parsed.detail.message;
       }
     } catch {
       // Not JSON — use the raw text as-is.
     }
     // The HTTP status rides along for callers that react to it (Prompt 132:
     // live view tells "camera offline" apart from "relay not running").
-    throw Object.assign(new Error(detail), { status: res.status });
+    throw Object.assign(new Error(message), { status: res.status, detail });
   }
   return res.json();
 }
 
-/** An error thrown by these API helpers: the backend's sentence plus the HTTP status. */
-export type ApiError = Error & { status?: number };
+/** An error thrown by these API helpers: the backend's sentence plus the HTTP
+ *  status. detail is the body's own detail when it had one: a sentence, or an
+ *  object such as a refused activation's {message, conflicts} (Prompt 142).
+ *  Without it, the message is whatever came back (a proxy error, say). */
+export type ApiError = Error & { status?: number; detail?: string | Record<string, unknown> };
+
+/** The backend's own sentence for a failed call, if it sent one. */
+export function backendSentence(err: unknown): string | null {
+  const detail = (err as ApiError)?.detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail.message === "string") return detail.message;
+  return null;
+}
 
 export function subscribeToFloors(
   buildingId: string,
@@ -153,8 +172,27 @@ export const updateFloorScale = (
     scale_pixels_per_meter: scale,
   });
 
+// Several floors can be active at once, but an AP only on one of them
+// (Prompt 142): a 409 here carries the active floors this one clashes with —
+// read them with activationConflicts(err).
 export const activateFloor = (buildingId: string, floorId: string): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/activate`);
+
+/** One active floor that a refused activation clashes with, and the APs the two share. */
+export interface FloorConflict {
+  floor_id: string;
+  floor_name: string;
+  building_id: string;
+  building_name: string;
+  aps: { name: string; mac: string }[];
+}
+
+/** The clashing floors of a refused activation (409), or null for any other error. */
+export function activationConflicts(err: unknown): FloorConflict[] | null {
+  const e = err as ApiError;
+  const conflicts = e?.status === 409 && e.detail && typeof e.detail === "object" ? e.detail.conflicts : undefined;
+  return Array.isArray(conflicts) ? (conflicts as FloorConflict[]) : null;
+}
 
 export const deactivateFloor = (buildingId: string, floorId: string): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/deactivate`);

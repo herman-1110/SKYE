@@ -11,10 +11,12 @@ import {
 } from "@/services/buildingService";
 import {
   activateFloor,
+  activationConflicts,
   deactivateFloor,
   deleteFloor,
   renameFloor,
   uploadFloor,
+  type FloorConflict,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
 import {
@@ -165,6 +167,153 @@ function DeleteFloorModal({
           <button onClick={handleDelete} disabled={deleting} className="flex-1 py-2 rounded-lg bg-s-danger text-white font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
             {deleting && <span className="h-3 w-3 rounded-full border-2 border-white border-t-transparent animate-spin" />}
             {deleting ? "Deleting…" : "Delete Floor"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Deactivate Floor Modal ───────────────────────────────────────────────────
+// Asked before every deactivation (Prompt 142, D1.5): the floor's card menu
+// and the activation warning below both come here.
+function DeactivateFloorModal({
+  floorName,
+  onClose,
+  onConfirm,
+}: {
+  floorName: string;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const [working, setWorking] = useState(false);
+
+  const handleConfirm = async () => {
+    setWorking(true);
+    try { await onConfirm(); }
+    finally { setWorking(false); }
+  };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !working) onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose, working]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={(e) => { if (e.target === e.currentTarget && !working) onClose(); }}
+    >
+      <div className="w-full max-w-sm rounded-xl overflow-hidden" style={{ background: "var(--glass-bg)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--glass-border)", boxShadow: "var(--glass-shadow)" }}>
+        <div className="px-5 py-5">
+          <p className="text-sm font-semibold text-s-text">Deactivate &ldquo;{floorName}&rdquo;?</p>
+          <p className="text-xs text-s-muted mt-1.5 leading-relaxed">
+            Live tracking, alerts and patrols stop on {floorName} until it&apos;s active again.
+          </p>
+        </div>
+        <div className="flex gap-2 px-5 py-4 border-t border-s-border">
+          <button onClick={onClose} disabled={working} className="flex-1 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors disabled:opacity-40">
+            Cancel
+          </button>
+          <button onClick={handleConfirm} disabled={working} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
+            {working && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
+            {working ? "Deactivating…" : "Deactivate"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Activation Conflict Modal ────────────────────────────────────────────────
+// "Set as Active" refused (409): this floor shares APs with active floors, and
+// an AP can be on only one active floor (Prompt 142, D1.11). Each conflicting
+// floor can be deactivated from here; Activate tries again once all are off,
+// and the backend decides.
+function ActivationConflictModal({
+  floorName,
+  conflicts,
+  deactivated,
+  onDeactivate,
+  onActivate,
+  onClose,
+}: {
+  floorName: string;
+  conflicts: FloorConflict[];
+  deactivated: string[];
+  onDeactivate: (conflict: FloorConflict) => void;
+  onActivate: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [activating, setActivating] = useState(false);
+  const allOff = conflicts.every((c) => deactivated.includes(c.floor_id));
+
+  const handleActivate = async () => {
+    setActivating(true);
+    try { await onActivate(); }
+    finally { setActivating(false); }
+  };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !activating) onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose, activating]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={(e) => { if (e.target === e.currentTarget && !activating) onClose(); }}
+    >
+      <div className="w-full max-w-md rounded-xl overflow-hidden" style={{ background: "var(--glass-bg)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--glass-border)", boxShadow: "var(--glass-shadow)" }}>
+        <div className="px-5 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <p className="text-sm font-semibold text-s-text">Can&apos;t activate {floorName}</p>
+            <p className="text-xs text-s-muted mt-1 leading-relaxed">
+              It shares access points with {conflicts.length === 1 ? "an active floor" : "these active floors"}, and an AP can be on only one active floor at a time.
+            </p>
+          </div>
+          {conflicts.map((c) => {
+            const off = deactivated.includes(c.floor_id);
+            return (
+              <div key={c.floor_id} className="rounded-lg border border-s-border bg-s-elevated px-3 py-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-s-text truncate">{c.floor_name}</p>
+                    <p className="font-mono text-[10px] text-s-muted truncate">{c.building_name}</p>
+                  </div>
+                  {off ? (
+                    <span className="shrink-0 font-mono text-[10px] text-s-success tracking-widest uppercase">Deactivated</span>
+                  ) : (
+                    <button
+                      onClick={() => onDeactivate(c)}
+                      className="shrink-0 px-2.5 py-1 rounded-lg border border-s-border text-[11px] text-s-text hover:border-s-accent transition-colors"
+                    >
+                      Deactivate {c.floor_name}
+                    </button>
+                  )}
+                </div>
+                <ul className="space-y-0.5">
+                  {c.aps.map((ap) => (
+                    <li key={ap.mac} className="flex items-center gap-2 font-mono text-[10px] text-s-muted">
+                      <span className="h-1 w-1 rounded-full bg-s-muted shrink-0" />
+                      <span className="text-s-text">{ap.name}</span>
+                      <span>{ap.mac}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex gap-2 px-5 py-4 border-t border-s-border">
+          <button onClick={onClose} disabled={activating} className="flex-1 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors disabled:opacity-40">
+            Cancel
+          </button>
+          <button onClick={handleActivate} disabled={!allOff || activating} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
+            {activating && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
+            {activating ? "Activating…" : `Activate ${floorName}`}
           </button>
         </div>
       </div>
@@ -909,6 +1058,12 @@ export default function FloorPlansPage() {
   const [buildingMenuPos, setBuildingMenuPos] = useState({ top: 0, left: 0 });
   const [deletingBuildingModal, setDeletingBuildingModal] = useState<BuildingRecord | null>(null);
   const [renameBuildingTriggers, setRenameBuildingTriggers] = useState<Record<string, number>>({});
+  // A refused activation (Prompt 142, D1.11) and the floors deactivated from its warning so far.
+  const [activationConflict, setActivationConflict] = useState<
+    { floor: FloorRecord; conflicts: FloorConflict[]; deactivated: string[] } | null
+  >(null);
+  // The floor waiting for its deactivation to be confirmed (D1.5).
+  const [deactivating, setDeactivating] = useState<{ buildingId: string; floorId: string; floorName: string } | null>(null);
 
   // Auto-select first building
   useEffect(() => {
@@ -944,16 +1099,40 @@ export default function FloorPlansPage() {
     catch { toast.error("Rename failed."); }
   };
 
+  // Other active floors stay active. A floor that shares an AP with an active
+  // floor is refused with the list of them, shown in the warning (D1.11).
   const handleActivateFloor = async (floorId: string) => {
     if (!selectedBuildingId) return;
-    try { await activateFloor(selectedBuildingId, floorId); toast.success("Floor activated"); }
-    catch { toast.error("Activation failed."); }
+    const floor = floors.find((f) => f.id === floorId);
+    try {
+      await activateFloor(selectedBuildingId, floorId);
+      toast.success("Floor activated");
+      setActivationConflict(null);
+    } catch (err: unknown) {
+      const conflicts = activationConflicts(err);
+      if (conflicts && floor) setActivationConflict({ floor, conflicts, deactivated: [] });
+      else toast.error(err instanceof Error && err.message ? err.message : "Activation failed.");
+    }
   };
 
-  const handleDeactivateFloor = async (floorId: string) => {
-    if (!selectedBuildingId) return;
-    try { await deactivateFloor(selectedBuildingId, floorId); toast.success("Floor deactivated"); }
-    catch { toast.error("Deactivation failed."); }
+  const handleDeactivateFloor = (floorId: string) => {
+    const floor = floors.find((f) => f.id === floorId);
+    if (!selectedBuildingId || !floor) return;
+    setDeactivating({ buildingId: selectedBuildingId, floorId, floorName: floor.name });
+  };
+
+  const confirmDeactivation = async () => {
+    if (!deactivating) return;
+    const { buildingId, floorId, floorName } = deactivating;
+    try {
+      await deactivateFloor(buildingId, floorId);
+      toast.success(`${floorName} deactivated`);
+      setActivationConflict((prev) => prev && { ...prev, deactivated: [...prev.deactivated, floorId] });
+    } catch (err: unknown) {
+      toast.error(err instanceof Error && err.message ? err.message : "Deactivation failed.");
+    } finally {
+      setDeactivating(null);
+    }
   };
 
   const handleDeleteFloor = async (floor: FloorRecord) => {
@@ -1225,6 +1404,25 @@ export default function FloorPlansPage() {
           floor={calibratingFloor}
           onClose={() => setCalibratingFloor(null)}
           onCalibrated={() => setCalibratingFloor(null)}
+        />
+      )}
+
+      {activationConflict && (
+        <ActivationConflictModal
+          floorName={activationConflict.floor.name}
+          conflicts={activationConflict.conflicts}
+          deactivated={activationConflict.deactivated}
+          onDeactivate={(c) => setDeactivating({ buildingId: c.building_id, floorId: c.floor_id, floorName: c.floor_name })}
+          onActivate={() => handleActivateFloor(activationConflict.floor.id)}
+          onClose={() => setActivationConflict(null)}
+        />
+      )}
+
+      {deactivating && (
+        <DeactivateFloorModal
+          floorName={deactivating.floorName}
+          onClose={() => setDeactivating(null)}
+          onConfirm={confirmDeactivation}
         />
       )}
 
