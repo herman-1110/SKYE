@@ -77,16 +77,33 @@ class FloorRepository:
             return None
         return self._to_record(docs[0].to_dict())
 
+    def get_all_active(self) -> List[FloorRecord]:
+        """Every active floor in every building (Prompt 142: several can be
+        active at once). Same collection-group index as get_any_active()."""
+        docs = self._db().collection_group(self._FLOORS).where(filter=FieldFilter("is_active", "==", True)).stream()
+        return self._records(docs)
+
+    def get_every_floor(self) -> List[FloorRecord]:
+        """Every floor in every building: one unfiltered collection-group
+        read, which needs no index (used once per signal-loss sweep)."""
+        return self._records(self._db().collection_group(self._FLOORS).stream())
+
+    def _records(self, docs) -> List[FloorRecord]:
+        results = []
+        for doc in docs:
+            try:
+                results.append(self._to_record(doc.to_dict()))
+            except (KeyError, TypeError):
+                pass
+        return results
+
     def update_scale(self, building_id: str, floor_id: str, scale: float) -> None:
         self._col(building_id).document(floor_id).update({"scale_pixels_per_meter": scale})
 
     def set_active(self, building_id: str, floor_id: str) -> None:
-        db = self._db()
-        batch = db.batch()
-        for doc in self._col(building_id).stream():
-            batch.update(doc.reference, {"is_active": False})
-        batch.update(self._col(building_id).document(floor_id), {"is_active": True})
-        batch.commit()
+        """Activate this floor only. Other floors keep their state: several
+        floors can be active at once (Prompt 142)."""
+        self._col(building_id).document(floor_id).update({"is_active": True})
 
     def deactivate(self, building_id: str, floor_id: str) -> None:
         self._col(building_id).document(floor_id).update({"is_active": False})

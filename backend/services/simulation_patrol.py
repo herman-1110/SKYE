@@ -85,12 +85,15 @@ SIMULATED_BEACONS: List[Dict] = [
 ]
 
 # ── Runtime AP removal (called by floor_service on AP delete) ─────────────
-def remove_ap(mac: str) -> None:
+# By placement id, not MAC: the same AP can also be placed on another floor
+# (a backup map), and deleting that copy must leave this simulation's floor
+# alone (Prompt 142, D1.9).
+def remove_ap(ap_id: str) -> None:
     global _floor_aps
-    idx = next((i for i, ap in enumerate(_floor_aps) if ap["mac"] == mac), None)
+    idx = next((i for i, ap in enumerate(_floor_aps) if ap["id"] == ap_id), None)
     if idx is None:
         return
-    _floor_aps = [ap for ap in _floor_aps if ap["mac"] != mac]
+    _floor_aps = [ap for ap in _floor_aps if ap["id"] != ap_id]
     for beacon in SIMULATED_BEACONS:
         beacon["ap_order"] = [
             i if i < idx else i - 1

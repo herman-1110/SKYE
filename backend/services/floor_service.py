@@ -1,8 +1,11 @@
+import threading
 import uuid
 from typing import Any, Dict, List, Optional
 
+from models.ap import AccessPoint
 from models.floor import FloorRecord
 from repositories.ap_repository import ap_repository
+from repositories.building_repository import building_repository
 from repositories.cctv_repository import cctv_repository
 from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
@@ -10,6 +13,32 @@ from repositories.zone_repository import zone_repository
 from services.positioning_service import positioning_service
 from firebase_admin import storage
 from utils.timestamp_utils import utcnow_iso
+
+
+class FloorError(Exception):
+    """A floor or AP request that can't be done as asked: the route answers
+    with this status and message. conflicts rides along when an activation
+    is refused because of shared APs (Prompt 142, D1.3)."""
+
+    def __init__(self, status: int, message: str, conflicts: Optional[List[dict]] = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+        self.conflicts = conflicts
+
+
+# Several floors can be active at once, but an AP (by MAC) on at most one of
+# them (Prompt 142, D1.2). Activation and AP placement each check, then write,
+# under this lock, so two requests can't put one AP on two active floors
+# between them. There is one backend process, and the checks are queries,
+# which a Firestore transaction couldn't hold.
+_placement_lock = threading.Lock()
+
+
+def _invalidate_ap_cache() -> None:
+    # local import, as for the simulators and cctv_service below
+    from services.omada_ingest_service import omada_ingest_service
+    omada_ingest_service.invalidate_ap_cache()
 
 
 class FloorService:
@@ -50,6 +79,9 @@ class FloorService:
         floor_repository.update_scale(building_id, floor_id, scale)
         positioning_service.invalidate_scale_cache()
         self._recalculate_ap_coordinates(building_id, floor_id, scale)
+        # Every AP's metres just changed: the ingest mustn't keep using the
+        # old ones until its cache expires (Prompt 142).
+        _invalidate_ap_cache()
 
     def derive_ap_metres(self, building_id: str, floor_id: str, x_pct: float, y_pct: float) -> tuple[float, float]:
         """Re-derive real-world metre coordinates from x_pct/y_pct — same
@@ -81,12 +113,61 @@ class FloorService:
         print(f"[CALIBRATION] Recalculated coordinates for {len(aps)} AP(s) on floor '{floor.name}' → {scale} px/m")
 
     def set_active(self, building_id: str, floor_id: str) -> None:
-        floor_repository.set_active(building_id, floor_id)
+        """Activate a floor, leaving every other floor as it is: several can
+        be active at once (Prompt 142, D1.1). Refused with a 409 that lists
+        each other active floor holding one of this floor's APs (D1.3). A
+        floor with no APs can always be activated, calibrated or not."""
+        with _placement_lock:
+            floor = floor_repository.get_by_id(building_id, floor_id)
+            if floor is None:
+                raise FloorError(404, "Floor not found.")
+            if not floor.is_active:
+                conflicts = self._activation_conflicts(floor)
+                if conflicts:
+                    raise FloorError(409, self._activation_message(floor, conflicts), conflicts)
+                floor_repository.set_active(building_id, floor_id)
         positioning_service.invalidate_scale_cache()
+        _invalidate_ap_cache()
+
+    def _activation_conflicts(self, floor: FloorRecord) -> List[dict]:
+        """Every other active floor that holds one of this floor's APs (by
+        MAC), with the shared APs as they're named there."""
+        macs = {ap.mac.upper() for ap in ap_repository.get_all(floor.building_id, floor.id)}
+        if not macs:
+            return []
+        conflicts = []
+        building_names: Dict[str, str] = {}
+        for other in floor_repository.get_all_active():
+            if other.id == floor.id:
+                continue
+            shared = [ap for ap in ap_repository.get_all(other.building_id, other.id) if ap.mac.upper() in macs]
+            if not shared:
+                continue
+            if other.building_id not in building_names:
+                building = building_repository.get_by_id(other.building_id) or {}
+                building_names[other.building_id] = building.get("name") or other.building_id
+            conflicts.append({
+                "floor_id": other.id,
+                "floor_name": other.name,
+                "building_id": other.building_id,
+                "building_name": building_names[other.building_id],
+                "aps": [{"name": ap.name, "mac": ap.mac} for ap in sorted(shared, key=lambda a: a.mac)],
+            })
+        return sorted(conflicts, key=lambda c: (c["building_name"], c["floor_name"]))
+
+    @staticmethod
+    def _activation_message(floor: FloorRecord, conflicts: List[dict]) -> str:
+        if len(conflicts) == 1:
+            c = conflicts[0]
+            n = len(c["aps"])
+            return (f"Can't activate {floor.name}: it shares {n} AP{'' if n == 1 else 's'} with "
+                    f"{c['floor_name']} in {c['building_name']}, which is active.")
+        return f"Can't activate {floor.name}: it shares APs with {len(conflicts)} active floors."
 
     def deactivate(self, building_id: str, floor_id: str) -> None:
         floor_repository.deactivate(building_id, floor_id)
         positioning_service.invalidate_scale_cache()
+        _invalidate_ap_cache()
 
     def rename(self, building_id: str, floor_id: str, name: str) -> None:
         floor_repository.update(building_id, floor_id, {"name": name})
@@ -101,12 +182,16 @@ class FloorService:
         for zone in zones:
             zone_repository.delete(building_id, floor_id, zone.id)
 
-        # 2. Delete all APs — Firestore docs + RTDB heartbeats
+        # 2. Delete all APs — Firestore docs, then each MAC's RTDB heartbeat,
+        #    unless another floor still holds that AP (Prompt 142, D1.8)
         aps = ap_repository.get_all(building_id, floor_id)
         for ap in aps:
             ap_repository.delete(building_id, floor_id, ap.id)
-            if ap.mac:
-                position_repository.delete_ap_heartbeat(ap.mac)
+        for mac in sorted({ap.mac for ap in aps if ap.mac}):
+            if not ap_repository.get_by_mac_global(mac):
+                position_repository.delete_ap_heartbeat(mac)
+        if aps:
+            _invalidate_ap_cache()
 
         # 3. Delete all CCTVs — Firestore docs + RTDB heartbeats
         cctvs = cctv_repository.get_all(building_id, floor_id)
@@ -131,6 +216,56 @@ class FloorService:
         # 5. Delete floor document
         floor_repository.delete(building_id, floor_id)
 
+    def create_ap(
+        self, building_id: str, floor_id: str, name: str, mac: str, x_pct: float, y_pct: float,
+    ) -> AccessPoint:
+        """Place an AP (mac upper-case, colon form). One placement per floor.
+        Other floors may hold the same MAC, a backup map for example, but an
+        active floor may not if another active floor already does (Prompt
+        142, D1.4). x_m/y_m come from the floor's scale (derive_ap_metres)."""
+        with _placement_lock:
+            matches = ap_repository.get_by_mac_global(mac)
+            if any(m.floor_id == floor_id for m in matches):
+                raise FloorError(409, f"AP with MAC {mac} already exists on this floor")
+            floor = floor_repository.get_by_id(building_id, floor_id)
+            if floor is not None and floor.is_active:
+                for m in matches:
+                    other = floor_repository.get_by_id(m.building_id, m.floor_id)
+                    if other is not None and other.is_active:
+                        building = building_repository.get_by_id(other.building_id) or {}
+                        raise FloorError(409, (
+                            f"AP {mac} is already on {other.name} in {building.get('name') or other.building_id}, "
+                            f"which is active: deactivate that floor first, or place this AP on an inactive floor."))
+            try:
+                x_m, y_m = self.derive_ap_metres(building_id, floor_id, x_pct, y_pct)
+            except ValueError as e:
+                # 409, not 400: the request itself is well-formed — the floor is
+                # just in the wrong state (uncalibrated) to place an AP on right now.
+                raise FloorError(409, str(e))
+            ap = AccessPoint(
+                id=str(uuid.uuid4()),
+                floor_id=floor_id,
+                building_id=building_id,
+                name=name,
+                mac=mac,
+                x_pct=x_pct,
+                y_pct=y_pct,
+                created_at=utcnow_iso(),
+                x_m=x_m,
+                y_m=y_m,
+            )
+            ap_repository.save(building_id, floor_id, ap)
+        _invalidate_ap_cache()
+        return ap
+
+    def move_ap(self, building_id: str, floor_id: str, ap_id: str, x_pct: float, y_pct: float) -> None:
+        """The marker was dragged. x_m/y_m are re-derived from the floor's
+        current scale, as at placement. Raises ValueError on an uncalibrated
+        floor (the route answers 409)."""
+        x_m, y_m = self.derive_ap_metres(building_id, floor_id, x_pct, y_pct)
+        ap_repository.update_position(building_id, floor_id, ap_id, x_pct, y_pct, x_m, y_m)
+        _invalidate_ap_cache()
+
     def delete_ap(self, building_id: str, floor_id: str, ap_id: str) -> None:
         # Take the AP out of the patrol route first, with an update that
         # touches only patrol_route (Prompt 135, COR-08). This used to run
@@ -144,11 +279,18 @@ class FloorService:
 
         mac = ap_repository.delete(building_id, floor_id, ap_id)
         if mac:
-            position_repository.delete_ap_heartbeat(mac)
+            # Another floor may hold the same AP (Prompt 142): its heartbeat
+            # stays until the last placement goes (D1.8). Checked after the
+            # delete, so this placement no longer counts.
+            if not ap_repository.get_by_mac_global(mac):
+                position_repository.delete_ap_heartbeat(mac)
             from services.simulation_patrol import remove_ap as patrol_remove_ap
             from services.simulation_events import remove_ap as events_remove_ap
-            patrol_remove_ap(mac)
-            events_remove_ap(mac)
+            # By placement id, not MAC: deleting a backup copy mustn't take
+            # the AP out of a simulation running on the active floor (D1.9).
+            patrol_remove_ap(ap_id)
+            events_remove_ap(ap_id)
+            _invalidate_ap_cache()
 
         # Cameras that covered this checkpoint now cover nothing (Prompt 131 T2).
         from services.cctv_service import cctv_service

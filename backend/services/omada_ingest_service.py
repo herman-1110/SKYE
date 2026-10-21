@@ -11,6 +11,7 @@ Beacon-centric out: one OmadaTelemetryPayload per beacon, listing all APs that h
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -95,16 +96,25 @@ class OmadaIngestService:
     def __init__(self) -> None:
         # beacon MAC (colon-less) → buffer of per-AP readings
         self._buffers: Dict[str, _BeaconBuffer] = {}
-        # Floor is resolved per-AP (which floor is THIS AP actually placed on),
-        # not from a single global "active floor" — two floors can be active in
-        # two different buildings at once, and this must not conflate them.
+        # Floor is resolved per-AP (which active floor is THIS AP placed on),
+        # not from a single global "active floor" — several floors can be
+        # active at once (Prompt 142), and this must not conflate them.
         #   floor_id -> {ap_mac (colons, upper): (x_m, y_m)}
         self._ap_coords: Dict[str, Dict[str, tuple[float, float]]] = {}
         #   floor_id -> time.monotonic() this floor's AP set was last loaded
         self._ap_cache_loaded_at: Dict[str, float] = {}
         #   ap_mac (colons, upper) -> (floor_id, building_id) it currently resolves to
         self._ap_floor_of: Dict[str, tuple[str, str]] = {}
+        #   floor_id -> (is_active, time.monotonic() it was read). An AP resolves
+        #   to its placement on an active floor (Prompt 142, D1.6); same TTL.
+        self._floor_active: Dict[str, tuple[bool, float]] = {}
         self._AP_CACHE_TTL_S = 30.0
+        # invalidate_ap_cache() bumps the generation; a refresh that read
+        # Firestore before the bump drops its answer. The lock guards the
+        # bump and the cache writes only, never a Firestore read, so a
+        # request thread calling invalidate_ap_cache() never waits on ingest.
+        self._ap_cache_generation = 0
+        self._ap_cache_lock = threading.Lock()
         # beacon key (uuid:major:minor) -> time.monotonic() of last positioning emit
         self._last_emit: Dict[str, float] = {}
         # iBeacon identity cache (hot path) — mirrors the AP cache above
@@ -145,22 +155,41 @@ class OmadaIngestService:
     # ── AP coordinate cache ─────────────────────────────────────────────────────
 
     def _refresh_ap_cache(self, ap_mac: str) -> None:
-        """Resolve which floor `ap_mac` is actually placed on (via a global,
-        cross-building lookup by MAC — not "whichever floor happens to be
-        active"), then load that whole floor's AP set in one shot so peers on
-        the same floor benefit from this same refresh."""
+        """Resolve which floor `ap_mac` is placed on (via a global,
+        cross-building lookup by MAC), then load that whole floor's AP set in
+        one shot so peers on the same floor benefit from this same refresh.
+
+        The same AP may be placed on several floors (a backup map, say), but
+        on at most one active floor (Prompt 142, D1.6): placements on
+        inactive floors are ignored, and an AP with none on an active floor
+        stays unresolved, exactly like an AP placed nowhere. A refresh that
+        invalidate_ap_cache() overtook is retried once."""
+        for _ in range(2):
+            if self._try_refresh_ap_cache(ap_mac):
+                return
+
+    def _try_refresh_ap_cache(self, ap_mac: str) -> bool:
+        """One resolve. False if invalidate_ap_cache() ran while it was
+        reading Firestore: the answer may predate the change, so it's dropped."""
         mac_key = ap_mac.upper()
-        matches = ap_repository.get_by_mac_global(ap_mac)
+        generation = self._ap_cache_generation
+        matches = [a for a in ap_repository.get_by_mac_global(ap_mac)
+                   if self._floor_is_active(a.building_id, a.floor_id, generation)]
         if not matches:
-            # AP is online but not placed on any floor. Leave it unresolved —
-            # the caller falls back to the online_unregistered response.
-            self._ap_floor_of.pop(mac_key, None)
-            return
+            # AP is online but not placed on any active floor. Leave it
+            # unresolved — the caller falls back to the online_unregistered response.
+            with self._ap_cache_lock:
+                if generation != self._ap_cache_generation:
+                    return False
+                self._ap_floor_of.pop(mac_key, None)
+            return True
         if len(matches) > 1:
+            # Activation and placement refuse this (floor_service); kept for
+            # data written around them, e.g. by hand in the Firestore console.
             matches = sorted(matches, key=lambda a: a.floor_id)
             competing = sorted({a.floor_id for a in matches})
             print(
-                f"[OMADA] WARNING: AP {ap_mac} is placed on multiple floors "
+                f"[OMADA] WARNING: AP {ap_mac} is placed on more than one active floor "
                 f"{competing} — using {matches[0].floor_id} deterministically"
             )
         resolved = matches[0]
@@ -180,15 +209,44 @@ class OmadaIngestService:
                 f"coordinates — re-save the floor scale to re-derive them."
             )
 
-        self._ap_coords[floor_id] = {a.mac.upper(): (a.x_m, a.y_m) for a in aps}
-        self._ap_cache_loaded_at[floor_id] = time.monotonic()
-        for a in aps:
-            self._ap_floor_of[a.mac.upper()] = (floor_id, building_id)
+        with self._ap_cache_lock:
+            if generation != self._ap_cache_generation:
+                return False
+            self._ap_coords[floor_id] = {a.mac.upper(): (a.x_m, a.y_m) for a in aps}
+            self._ap_cache_loaded_at[floor_id] = time.monotonic()
+            for a in aps:
+                self._ap_floor_of[a.mac.upper()] = (floor_id, building_id)
+        return True
+
+    def _floor_is_active(self, building_id: str, floor_id: str, generation: int) -> bool:
+        """At most one floor read per placement per refresh, cached for the
+        AP cache's TTL (Prompt 142). invalidate_ap_cache() drops the cache."""
+        cached = self._floor_active.get(floor_id)
+        if cached is not None and time.monotonic() - cached[1] <= self._AP_CACHE_TTL_S:
+            return cached[0]
+        floor = floor_repository.get_by_id(building_id, floor_id)
+        active = bool(floor is not None and floor.is_active)
+        with self._ap_cache_lock:
+            if generation == self._ap_cache_generation:
+                self._floor_active[floor_id] = (active, time.monotonic())
+        return active
+
+    def invalidate_ap_cache(self) -> None:
+        """Forget every AP resolution and floor state now, instead of waiting
+        out the 30 s TTL. floor_service calls it after a floor is activated,
+        deactivated or deleted, an AP is placed, moved or deleted, or a scale
+        changes (Prompt 142, D1.6). Not under pipeline_lock: it's called on
+        request threads, which mustn't queue behind ingest."""
+        with self._ap_cache_lock:
+            self._ap_cache_generation += 1
+            self._ap_floor_of.clear()
+            self._ap_cache_loaded_at.clear()
+            self._floor_active.clear()
 
     def _get_ap_coords(self, ap_mac_colons: str) -> Optional[tuple[float, float, str, str]]:
         """Returns (x_m, y_m, floor_id, building_id) for this AP, resolved from
-        whichever floor it's actually placed on. None if the AP is online but
-        not placed anywhere — callers must not fall back to any other floor."""
+        its placement on an active floor. None if the AP is online but not
+        placed on any active floor — callers must not fall back to any other floor."""
         mac_key = ap_mac_colons.upper()
 
         resolution = self._ap_floor_of.get(mac_key)
@@ -437,7 +495,7 @@ class OmadaIngestService:
             return {
                 "status": "online_unregistered",
                 "ap": ap_mac_colons,
-                "reason": "AP online but not placed on any floor — heartbeat written",
+                "reason": "AP online but not placed on any active floor — heartbeat written",
             }
         ap_x, ap_y, ap_floor_id, ap_building_id = ap_coords
 

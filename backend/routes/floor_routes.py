@@ -1,12 +1,10 @@
 import re
-import uuid
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from middleware.auth_middleware import require_admin, require_admin_strict, require_auth, require_auth_strict
-from models.ap import AccessPoint
 from models.user import UserRecord
 from repositories.ap_repository import ap_repository
 from repositories.cctv_repository import cctv_repository
@@ -16,10 +14,9 @@ from services import live_view_service
 from services.camera_detection_buffer import WINDOW_S as DETECTION_WINDOW_S, detection_buffer
 from services.camera_health_service import camera_health_service
 from services.cctv_service import CameraError, cctv_service
-from services.floor_service import floor_service
+from services.floor_service import FloorError, floor_service
 from services.live_view_service import LiveViewError
 from utils.limiter import limiter
-from utils.timestamp_utils import utcnow_iso
 
 
 _MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
@@ -132,7 +129,15 @@ def activate_floor(
     floor_id: str,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    floor_service.set_active(building_id, floor_id)
+    """Other active floors stay active (Prompt 142). 409 when another active
+    floor holds one of this floor's APs: the detail is {"message": one
+    sentence, "conflicts": [{floor_id, floor_name, building_id,
+    building_name, aps: [{name, mac}]}]}. 404 for an unknown floor."""
+    try:
+        floor_service.set_active(building_id, floor_id)
+    except FloorError as e:
+        detail = {"message": e.message, "conflicts": e.conflicts} if e.conflicts else e.message
+        raise HTTPException(status_code=e.status, detail=detail)
     return {"status": "ok"}
 
 
@@ -197,39 +202,13 @@ def create_ap(
     body: APCreateRequest,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    global_matches = ap_repository.get_by_mac_global(body.mac)
-    if global_matches:
-        match = global_matches[0]
-        if match.floor_id == floor_id:
-            raise HTTPException(
-                status_code=409,
-                detail=f"AP with MAC {body.mac} already exists on this floor"
-            )
-        else:
-            raise HTTPException(
-                status_code=409,
-                detail=f"AP with MAC {body.mac} is already registered on another floor (floor_id: {match.floor_id}). Each AP MAC must be globally unique."
-            )
+    """409, with one sentence: the MAC is already on this floor, or this floor
+    is active and another active floor holds the MAC, or the floor isn't
+    calibrated. Inactive floors may share APs with other floors (Prompt 142)."""
     try:
-        x_m, y_m = floor_service.derive_ap_metres(building_id, floor_id, body.x_pct, body.y_pct)
-    except ValueError as e:
-        # 409, not 400: the request itself is well-formed — the floor is just
-        # in the wrong state (uncalibrated) to place an AP on right now.
-        raise HTTPException(status_code=409, detail=str(e))
-
-    ap = AccessPoint(
-        id=str(uuid.uuid4()),
-        floor_id=floor_id,
-        building_id=building_id,
-        name=body.name,
-        mac=body.mac,
-        x_pct=body.x_pct,
-        y_pct=body.y_pct,
-        created_at=utcnow_iso(),
-        x_m=x_m,
-        y_m=y_m,
-    )
-    ap_repository.save(building_id, floor_id, ap)
+        ap = floor_service.create_ap(building_id, floor_id, body.name, body.mac, body.x_pct, body.y_pct)
+    except FloorError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
     return ap.__dict__
 
 
@@ -269,10 +248,9 @@ def update_ap_position(
     too (rather than trusting whatever the client last computed) means this
     endpoint can't reintroduce a zeroed-coordinate AP either."""
     try:
-        x_m, y_m = floor_service.derive_ap_metres(building_id, floor_id, body.x_pct, body.y_pct)
+        floor_service.move_ap(building_id, floor_id, ap_id, body.x_pct, body.y_pct)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    ap_repository.update_position(building_id, floor_id, ap_id, body.x_pct, body.y_pct, x_m, y_m)
     return {"status": "ok"}
 
 

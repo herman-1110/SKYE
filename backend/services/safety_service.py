@@ -11,6 +11,7 @@ from models.position import PositionRecord
 from models.safety_settings import SafetySettings
 from repositories.alert_repository import alert_repository
 from repositories.ap_repository import ap_repository
+from repositories.floor_repository import floor_repository
 from repositories.position_repository import position_repository
 from repositories.safety_settings_repository import safety_settings_repository
 from utils.mac_utils import ap_mac_colons
@@ -83,7 +84,8 @@ class _SweepRead:
     candidates: List[PositionRecord]    # non-forklifts whose record is stale but not dead
     # /ap_heartbeats by "AA:BB:..." MAC; None if it couldn't be read (REL-01)
     heartbeats: Optional[Dict[str, dict]] = None
-    # placed APs' MACs by (building_id, floor_id); None if they couldn't be read
+    # MACs of placed APs, by (building_id, floor_id), leaving out inactive
+    # floors (Prompt 142); None if they couldn't be read
     placed: Optional[Dict[tuple, List[str]]] = None
     # /alerts, read only when there was something to decide (COR-06); None
     # if not read or unreadable
@@ -401,6 +403,10 @@ class SafetyService:
         an earlier process raised for the same episode and nobody has
         resolved (COR-06).
 
+        Inactive floors raise nothing (Prompt 142, D1.7): a record on one is
+        skipped, and APs placed on one don't count as placed. A record with an
+        empty floor_id, or one whose floor can't be found, is still checked.
+
         Called from a background sweep, not per-telemetry-packet, in a worker
         thread. The reads happen outside positioning_service.pipeline_lock;
         the decision and the save inside it (Prompt 136, CON-03), so the sweep
@@ -417,6 +423,16 @@ class SafetyService:
         raw_all = position_repository.get_all()
         candidates: List[PositionRecord] = []
 
+        # Which floors are inactive (Prompt 142, D1.7): records on them are
+        # skipped, and APs placed on them don't count as placed. Only a floor
+        # known to be inactive is: one that can't be found (deleted, or the
+        # read failed) counts as before 142, so the sweep fails open.
+        inactive_floors: Set[str] = set()
+        try:
+            inactive_floors = {f.id for f in floor_repository.get_every_floor() if not f.is_active}
+        except Exception as e:
+            print(f"[SAFETY] WARNING: signal-loss sweep couldn't read the floors: {e}")
+
         for key, v in raw_all.items():
             if not isinstance(v, dict):
                 continue
@@ -427,6 +443,8 @@ class SafetyService:
                 continue
 
             if record.person_type == "forklift":
+                continue
+            if record.floor_id in inactive_floors:
                 continue
 
             pid = record.person_id
@@ -470,6 +488,8 @@ class SafetyService:
         try:
             placed = {}
             for a in ap_repository.get_all_placed():
+                if a.floor_id in inactive_floors:
+                    continue
                 placed.setdefault((a.building_id, a.floor_id), []).append(ap_mac_colons(a.mac))
         except Exception as e:
             placed = None
