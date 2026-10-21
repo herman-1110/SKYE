@@ -236,8 +236,7 @@ class FloorService:
         for ap in aps:
             ap_repository.delete(building_id, floor_id, ap.id)
         for mac in sorted({ap.mac for ap in aps if ap.mac}):
-            if not ap_repository.get_by_mac_global(mac):
-                position_repository.delete_ap_heartbeat(mac)
+            self._drop_ap_heartbeat_if_unused(mac)
         if aps:
             _invalidate_ap_cache()
 
@@ -315,7 +314,18 @@ class FloorService:
         _invalidate_ap_cache()
 
     def delete_ap(self, building_id: str, floor_id: str, ap_id: str) -> None:
-        # Take the AP out of the patrol route first, with an update that
+        """Remove one AP placement, in this order (Prompt 142, D4):
+          1. take it out of the patrol route;
+          2. unlink the cameras that cover it;
+          3. delete the AP document;
+          4. clean up after it: the simulators (D1.9), its heartbeat (D1.8)
+             and the ingest's AP cache.
+        A failure in 1-3 raises, so the route answers 500 with the AP still
+        there. Step 4 runs once the AP is gone: a failure there is logged with
+        the AP id and the delete still succeeds, since answering 500 for an AP
+        that was removed is the false "Failed to remove AP" (item 9). Deleting
+        an id that's already gone succeeds too."""
+        # 1. Take the AP out of the patrol route first, with an update that
         # touches only patrol_route (Prompt 135, COR-08). This used to run
         # last, through update_patrol_config() with four of its five
         # arguments, so deleting an AP that was on a route raised TypeError -
@@ -325,24 +335,44 @@ class FloorService:
             floor_repository.update_patrol_route(
                 building_id, floor_id, [pid for pid in floor.patrol_route if pid != ap_id])
 
-        mac = ap_repository.delete(building_id, floor_id, ap_id)
-        if mac:
-            # Another floor may hold the same AP (Prompt 142): its heartbeat
-            # stays until the last placement goes (D1.8). Checked after the
-            # delete, so this placement no longer counts.
-            if not ap_repository.get_by_mac_global(mac):
-                position_repository.delete_ap_heartbeat(mac)
-            from services.simulation_patrol import remove_ap as patrol_remove_ap
-            from services.simulation_events import remove_ap as events_remove_ap
-            # By placement id, not MAC: deleting a backup copy mustn't take
-            # the AP out of a simulation running on the active floor (D1.9).
-            patrol_remove_ap(ap_id)
-            events_remove_ap(ap_id)
-            _invalidate_ap_cache()
-
-        # Cameras that covered this checkpoint now cover nothing (Prompt 131 T2).
+        # 2. Cameras that covered this checkpoint now cover nothing (Prompt 131 T2).
         from services.cctv_service import cctv_service
         cctv_service.unlink_ap(building_id, floor_id, ap_id)
+
+        # 3.
+        mac = ap_repository.delete(building_id, floor_id, ap_id)
+        if not mac:
+            return
+
+        # 4. Each clean-up on its own: one failing doesn't skip the others. The
+        # simulators go first: a simulation's tick rewrites the heartbeats of
+        # the APs it still holds.
+        for what, clean_up in (
+            ("simulator", lambda: self._remove_from_simulators(ap_id)),
+            ("heartbeat", lambda: self._drop_ap_heartbeat_if_unused(mac)),
+            ("ingest cache", _invalidate_ap_cache),
+        ):
+            try:
+                clean_up()
+            except Exception as e:
+                print(f"[AP] WARNING: AP {ap_id} ({mac}) was deleted, but its {what} clean-up failed: {e}")
+
+    @staticmethod
+    def _drop_ap_heartbeat_if_unused(mac: str) -> None:
+        """Another floor may hold the same AP (Prompt 142): its heartbeat stays
+        until the last placement goes (D1.8). Call after the delete, so the
+        placement being removed no longer counts."""
+        if not ap_repository.get_by_mac_global(mac):
+            position_repository.delete_ap_heartbeat(mac)
+
+    @staticmethod
+    def _remove_from_simulators(ap_id: str) -> None:
+        # By placement id, not MAC: deleting a backup copy mustn't take the AP
+        # out of a simulation running on the active floor (Prompt 142, D1.9).
+        from services.simulation_patrol import remove_ap as patrol_remove_ap
+        from services.simulation_events import remove_ap as events_remove_ap
+        patrol_remove_ap(ap_id)
+        events_remove_ap(ap_id)
 
 
 floor_service = FloorService()
