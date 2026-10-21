@@ -1,3 +1,12 @@
+/** The last calibration: its two points (fractions of the image) and the
+ *  real distance between them (Prompt 142, D3). */
+export interface FloorCalibration {
+  a: { x_pct: number; y_pct: number };
+  b: { x_pct: number; y_pct: number };
+  distance_m: number;
+  calibrated_at: string;
+}
+
 export interface FloorRecord {
   id: string;
   building_id: string;
@@ -19,4 +28,7 @@ export interface FloorRecord {
   // crosses on every floor response so the frontend has one source of truth
   // instead of a hardcoded copy (Prompt 117).
   patrol_proximity_radius_m?: number;
+  // For Recalibrate to start from (Prompt 142). Absent or null on a floor
+  // calibrated before that, or after a scale saved without its points.
+  calibration?: FloorCalibration | null;
 }

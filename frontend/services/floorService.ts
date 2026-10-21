@@ -10,7 +10,7 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, fsdb, storage } from "@/config/firebase";
-import type { FloorRecord } from "@/types/floor";
+import type { FloorCalibration, FloorRecord } from "@/types/floor";
 import type { PatrolLogRecord } from "@/types/patrolLog";
 
 async function token(): Promise<string> {
@@ -163,13 +163,18 @@ export async function uploadFloor(
   });
 }
 
+// calibration: the two points and the distance that gave this scale, kept on
+// the floor for the next Recalibrate (Prompt 142, D3). Leaving it out clears
+// the stored one. A bad one comes back as a 422 with one sentence.
 export const updateFloorScale = (
   buildingId: string,
   floorId: string,
   scale: number,
+  calibration?: Omit<FloorCalibration, "calibrated_at">,
 ): Promise<void> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/scale`, {
     scale_pixels_per_meter: scale,
+    ...(calibration ? { calibration } : {}),
   });
 
 // Several floors can be active at once, but an AP only on one of them

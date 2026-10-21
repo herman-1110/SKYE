@@ -1,13 +1,21 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { updateFloorScale } from "@/services/floorService";
+import { backendSentence, updateFloorScale } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
 import type { FloorRecord } from "@/types/floor";
 
 // Points stored as fractions (0.0–1.0) of the natural image dimensions.
 // Independent of how the canvas is displayed — zoom/pan/resize safe.
 interface Point { px: number; py: number; }
+
+// The floor's last calibration, if it has a usable one (Prompt 142, D3):
+// Recalibrate then opens on it, at step 3.
+function storedCalibration(floor: FloorRecord): { a: Point; b: Point; distance: string } | null {
+  const c = floor.calibration;
+  if (!c?.a || !c?.b || typeof c.distance_m !== "number") return null;
+  return { a: { px: c.a.x_pct, py: c.a.y_pct }, b: { px: c.b.x_pct, py: c.b.y_pct }, distance: String(c.distance_m) };
+}
 
 interface Props {
   buildingId: string;
@@ -17,11 +25,15 @@ interface Props {
 }
 
 export default function CalibrationTool({ buildingId, floor, onClose, onCalibrated }: Props) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [pointA, setPointA] = useState<Point | null>(null);
-  const [pointB, setPointB] = useState<Point | null>(null);
+  const [stored] = useState(() => storedCalibration(floor));
+  const [step, setStep] = useState<1 | 2 | 3>(stored ? 3 : 1);
+  const [pointA, setPointA] = useState<Point | null>(stored?.a ?? null);
+  const [pointB, setPointB] = useState<Point | null>(stored?.b ?? null);
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
-  const [realDistance, setRealDistance] = useState("");
+  const [realDistance, setRealDistance] = useState(stored?.distance ?? "");
+  // The distance the floor's current scale gives for A–B, filled in for a
+  // floor with a scale but no stored points (Prompt 142, D3).
+  const [suggestedDistance, setSuggestedDistance] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   // CSS-pixel bounds of the rendered image inside the canvas (objectFit: contain adds letterbox).
@@ -171,7 +183,20 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
     const pt = toFraction(e);
     if (!pt) return;
     if (step === 1) { setPointA(pt); setStep(2); }
-    else            { setPointB(pt); setStep(3); setCursorPos(null); }
+    else {
+      setPointB(pt); setStep(3); setCursorPos(null);
+      // A floor with a scale but no stored points (every floor calibrated
+      // before Prompt 142): start from the distance that scale gives for
+      // A–B, so saving it unchanged keeps the scale as it is.
+      const img = imgRef.current;
+      const current = floor.scale_pixels_per_meter;
+      if (pointA && img && current && !realDistance) {
+        const px = Math.hypot((pt.px - pointA.px) * img.naturalWidth, (pt.py - pointA.py) * img.naturalHeight);
+        const suggested = String(Math.round((px / current) * 100) / 100);
+        setRealDistance(suggested);
+        setSuggestedDistance(suggested);
+      }
+    }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -181,7 +206,7 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
 
   const handleRedo = () => {
     // Only reset calibration points — does NOT touch floor.url or imgLoaded
-    setStep(1); setPointA(null); setPointB(null); setCursorPos(null); setRealDistance("");
+    setStep(1); setPointA(null); setPointB(null); setCursorPos(null); setRealDistance(""); setSuggestedDistance(null);
   };
 
   // Natural-pixel distance — independent of display scale, used for px/m calculation
@@ -200,16 +225,22 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
       : null;
 
   const handleSave = async () => {
-    if (!calculatedScale || calculatedScale <= 0) return;
+    if (!calculatedScale || calculatedScale <= 0 || !pointA || !pointB) return;
     setSaving(true);
     try {
       const rounded = Math.round(calculatedScale * 100) / 100;
-      await updateFloorScale(buildingId, floor.id, rounded);
+      // The points and the distance go with the scale, so the next
+      // Recalibrate opens on them (Prompt 142, D3).
+      await updateFloorScale(buildingId, floor.id, rounded, {
+        a: { x_pct: pointA.px, y_pct: pointA.py },
+        b: { x_pct: pointB.px, y_pct: pointB.py },
+        distance_m: parsedDist,
+      });
       toast.success(`Floor calibrated: ${calculatedScale.toFixed(1)} px/m`);
       onCalibrated?.(calculatedScale);
       onClose();
-    } catch {
-      toast.error("Calibration save failed. Please try again.");
+    } catch (err: unknown) {
+      toast.error(backendSentence(err) ?? "Calibration save failed. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -501,6 +532,11 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
               {floor.name}
             </p>
             <h3 className="text-sm font-semibold text-s-text">Floor Calibration</h3>
+            <p className="font-mono text-[10px] text-s-muted mt-1">
+              {floor.scale_pixels_per_meter
+                ? `Current scale: ${floor.scale_pixels_per_meter.toFixed(2)} px/m`
+                : "Not calibrated yet"}
+            </p>
             <p className="text-xs text-s-muted mt-1 leading-relaxed">{stepLabel}</p>
           </div>
 
@@ -542,8 +578,8 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
-                    min="1"
-                    step="1"
+                    min="0"
+                    step="any"
                     placeholder="e.g. 10"
                     value={realDistance}
                     onChange={(e) => setRealDistance(e.target.value)}
@@ -557,6 +593,9 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
                   />
                   <span className="font-mono text-[11px] text-s-muted">m</span>
                 </div>
+                {suggestedDistance !== null && realDistance === suggestedDistance && (
+                  <p className="font-mono text-[10px] text-s-muted mt-1">from the current calibration</p>
+                )}
               </div>
 
               <div>
@@ -587,7 +626,7 @@ export default function CalibrationTool({ buildingId, floor, onClose, onCalibrat
             {step === 3 && (
               <button
                 onClick={handleSave}
-                disabled={saving || !calculatedScale || parsedDist <= 0}
+                disabled={saving || !calculatedScale || parsedDist <= 0 || parsedDist > 10_000}
                 className="py-2.5 px-4 rounded-lg font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5"
                 style={{ background: "#f59e0b", color: "#000" }}
               >
