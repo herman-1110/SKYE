@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import type { FloorRecord } from "@/types/floor";
 import {
   subscribeToAPs, createAP, deleteAP, updateAP, updateAPPosition,
-  subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTV, updateCCTVPosition, discoverCameras,
+  subscribeToCCTVs, createCCTV, deleteCCTV, updateCCTV, updateCCTVPosition, discoverCameras, backendSentence,
   type APRecord, type ApiError, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
@@ -106,6 +106,12 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     const unsubCCTVs = subscribeToCCTVs(buildingId, floor.id, setCctvs);
     return () => { unsubAPs(); unsubCCTVs(); };
   }, [buildingId, floor.id]);
+
+  // The latest Firestore lists, for the remove safeguard below.
+  const apsRef = useRef<APRecord[]>([]);
+  const cctvsRef = useRef<CCTVRecord[]>([]);
+  useEffect(() => { apsRef.current = aps; }, [aps]);
+  useEffect(() => { cctvsRef.current = cctvs; }, [cctvs]);
 
   const handleMarkerPointerDown =
     (type: "ap" | "cctv", id: string, xPct: number, yPct: number) => (e: React.PointerEvent) => {
@@ -284,11 +290,27 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     finally { setSaving(false); }
   };
 
+  // A remove call can fail although the item is gone: a proxy error while
+  // the backend finished the delete, say. So a failure waits up to 3 s for
+  // the item to leave the Firestore list, and reports what happened
+  // (Prompt 142, D4).
+  const leavesList = async (stillListed: () => boolean): Promise<boolean> => {
+    const until = Date.now() + 3_000;
+    while (stillListed()) {
+      if (Date.now() >= until) return false;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return true;
+  };
+
   const handleDeleteAP = async (id: string) => {
     setDeletingId(id);
     setHoveredMarker(null);
     try { await deleteAP(buildingId, floor.id, id); toast.success("AP removed"); }
-    catch { toast.error("Failed to remove AP"); }
+    catch (err: unknown) {
+      if (await leavesList(() => apsRef.current.some((a) => a.id === id))) toast.success("AP removed");
+      else toast.error(backendSentence(err) ?? "Couldn't remove the AP");
+    }
     finally { setDeletingId(null); }
   };
 
@@ -296,7 +318,10 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setDeletingId(id);
     setHoveredMarker(null);
     try { await deleteCCTV(buildingId, floor.id, id); toast.success("CCTV removed"); }
-    catch { toast.error("Failed to remove CCTV"); }
+    catch (err: unknown) {
+      if (await leavesList(() => cctvsRef.current.some((c) => c.id === id))) toast.success("CCTV removed");
+      else toast.error(backendSentence(err) ?? "Couldn't remove the camera");
+    }
     finally { setDeletingId(null); }
   };
 
