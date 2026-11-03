@@ -134,7 +134,10 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
   const cctvStatuses = useCCTVHeartbeats();
   const scale = activeFloor?.scale_pixels_per_meter ?? null;
+  const hasFloor = !!activeFloor;
 
+  // outerRef's div is only rendered once there's a floor (see the early return
+  // below), so start observing when the first one arrives, not at mount.
   useEffect(() => {
     if (!outerRef.current) return;
     const obs = new ResizeObserver(([entry]) => {
@@ -143,7 +146,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
     });
     obs.observe(outerRef.current);
     return () => obs.disconnect();
-  }, []);
+  }, [hasFloor]);
 
   useEffect(() => {
     if (!buildingId || !activeFloor) { setAps([]); setCctvs([]); return; }
