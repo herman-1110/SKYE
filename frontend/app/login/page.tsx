@@ -31,7 +31,7 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { user, userRecord, isLoading: authLoading } = useAuth();
+  const { user, userRecord, isLoading: authLoading, recheck } = useAuth();
 
   useEffect(() => {
     if (authLoading || !user || !userRecord) return;
@@ -48,9 +48,17 @@ function LoginForm() {
     setError(null);
     try {
       await signIn(email, password);
-      // nav handled by the reactive useAuth effect
     } catch {
       setError("Invalid credentials. Contact your administrator.");
+      setLoading(false);
+      return;
+    }
+    // Check the account now rather than waiting for an auth event, which
+    // never comes when this account was already signed in. With a record,
+    // the effect above navigates; otherwise say why and stop the spinner.
+    const problem = await recheck();
+    if (problem) {
+      setError(problem);
       setLoading(false);
     }
   };
@@ -60,9 +68,16 @@ function LoginForm() {
     setError(null);
     try {
       await signInWithGoogle();
-      // nav handled by the reactive useAuth effect
     } catch {
       setError("Google sign-in failed. Please try again.");
+      setGoogleLoading(false);
+      return;
+    }
+    // On a first Google sign-in the record is created by /api/auth/google,
+    // after the auth event has already read it as missing: read it again.
+    const problem = await recheck();
+    if (problem) {
+      setError(problem);
       setGoogleLoading(false);
     }
   };

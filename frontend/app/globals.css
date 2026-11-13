@@ -189,6 +189,23 @@ body {
   animation: fadeIn 120ms ease-out both;
 }
 
+/* ─── AUTHENTICATING loader: slow-load hint ──────────────────────────────── */
+/* Hidden until the loader has been up for 25 s. Pure CSS on purpose: it must
+   also appear when the page's JavaScript never started (see the load
+   watchdog in app/layout.tsx). */
+@keyframes skye-slow-hint-in {
+  to {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+.skye-slow-hint {
+  opacity: 0;
+  visibility: hidden;
+  animation: skye-slow-hint-in 300ms ease-out 25s forwards;
+}
+
 /* ─── Toast spring entrance ──────────────────────────────────────────────── */
 @keyframes toast-in {
   0% {

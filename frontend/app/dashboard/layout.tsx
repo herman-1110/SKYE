@@ -4,11 +4,12 @@ import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePositions } from "@/hooks/usePositions";
 import { useAlerts } from "@/hooks/useAlerts";
+import { signOut } from "@/services/authService";
 import Navbar from "@/components/layout/Navbar";
 import Sidebar from "@/components/layout/Sidebar";
 import ToastContainer from "@/components/shared/ToastContainer";
 import CriticalAlertBanner from "@/components/shared/CriticalAlertBanner";
-import { FullScreenLoader } from "@/components/shared/LoadingSpinner";
+import { FullScreenError, FullScreenLoader } from "@/components/shared/LoadingSpinner";
 
 function DataSubscriptions() {
   usePositions();
@@ -17,7 +18,7 @@ function DataSubscriptions() {
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, userRecord, isLoading } = useAuth();
+  const { user, userRecord, isLoading, recordError } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -38,6 +39,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // Only block on initial load — tab navigation never triggers this again
   if (isLoading && !hasLoadedOnce.current) return <FullScreenLoader />;
+  // The account couldn't be checked: say why instead of opening the
+  // dashboard without knowing the account's status.
+  if (user && recordError) {
+    return (
+      <FullScreenError
+        message={recordError}
+        onRetry={() => window.location.reload()}
+        onSignOut={() => {
+          void signOut(); // the effect above then goes to /login
+        }}
+      />
+    );
+  }
   if (!user) return null;
   if (userRecord && (userRecord.status === "pending" || userRecord.status === "suspended")) return null;
 
