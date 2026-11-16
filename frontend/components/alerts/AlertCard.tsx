@@ -15,6 +15,12 @@ const CRITICAL = new Set(["man_down", "collision"]);
 // checks themselves are paused (positioning_offline)
 const WARNING = new Set(["possible_man_down", "positioning_offline"]);
 
+// An ISO time in the viewer's own time zone; the raw string if it won't parse.
+function localTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
 export default function AlertCard({ alert, selected, onClick, onDelete, deletingId }: Props) {
   const critical = CRITICAL.has(alert.alert_type) && !alert.resolved;
   const warning = WARNING.has(alert.alert_type) && !alert.resolved;
@@ -58,6 +64,11 @@ export default function AlertCard({ alert, selected, onClick, onDelete, deleting
       )}
       <p className="text-xs text-s-muted">{alert.zone}</p>
       <p className="font-mono text-[10px] text-s-mono mt-1">{alert.timestamp}</p>
+      {alert.acknowledged_at && (
+        <p className="text-[10px] text-s-muted mt-0.5">
+          Acknowledged by {alert.acknowledged_by || "admin"} · {localTime(alert.acknowledged_at)}
+        </p>
+      )}
 
       {alert.resolved && onDelete && (
         <div className="mt-2 flex justify-end">

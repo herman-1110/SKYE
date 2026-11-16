@@ -1,5 +1,12 @@
 "use client";
+import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useCriticalQueue } from "@/hooks/useAlerts";
+import { acknowledgeAlert } from "@/services/alertService";
 import { useCriticalAlertStore } from "@/store/criticalAlertStore";
+import { toast } from "@/store/toastStore";
+import type { AlertRecord } from "@/types/alert";
+import { isAdminRole } from "@/types/user";
 
 const ALERT_LABELS: Record<string, string> = {
   man_down:  "MAN DOWN",
@@ -56,17 +63,84 @@ function XIcon() {
   );
 }
 
+function reasonOf(err: unknown): string {
+  return err instanceof Error && err.message ? err.message : "Something went wrong.";
+}
+
 export default function CriticalAlertBanner() {
-  const queue = useCriticalAlertStore((s) => s.queue);
-  const dismissCritical = useCriticalAlertStore((s) => s.dismissCritical);
+  const queue = useCriticalQueue();
+  const { userRecord } = useAuth();
+  const isAdmin = isAdminRole(userRecord?.role);
+  const pendingIds = useCriticalAlertStore((s) => s.pendingIds);
+  const hide = useCriticalAlertStore((s) => s.hide);
+  const setPending = useCriticalAlertStore((s) => s.setPending);
+  const [dismissingAll, setDismissingAll] = useState(false);
 
   if (queue.length === 0) return null;
 
+  // Admins and the owner: acknowledge it for everyone (D2.2). Throws on
+  // failure, and the alert stays.
+  async function acknowledge(alert: AlertRecord): Promise<void> {
+    setPending(alert.alert_id, true);
+    try {
+      await acknowledgeAlert(alert.alert_id);
+      hide(alert.alert_id); // the live data says so in every tab a moment later
+    } finally {
+      setPending(alert.alert_id, false);
+    }
+  }
+
+  async function dismiss(alert: AlertRecord) {
+    if (!isAdmin) {
+      hide(alert.alert_id); // this tab only, until a reload (D2.3)
+      return;
+    }
+    try {
+      await acknowledge(alert);
+    } catch (err) {
+      toast.error(`Couldn't dismiss the alert for everyone: ${reasonOf(err)}`);
+    }
+  }
+
+  // D2.5: each shown alert in turn; one toast if any failed.
+  async function dismissAll() {
+    const shown = queue.filter((a) => !pendingIds.has(a.alert_id));
+    setDismissingAll(true);
+    let failed = 0;
+    let reason = "";
+    for (const alert of shown) {
+      try {
+        await acknowledge(alert);
+      } catch (err) {
+        failed += 1;
+        reason = reasonOf(err);
+      }
+    }
+    setDismissingAll(false);
+    if (failed > 0) {
+      toast.error(`${failed} of ${shown.length} alerts couldn't be dismissed for everyone: ${reason}`);
+    }
+  }
+
   return (
     <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 w-full max-w-lg px-4 pointer-events-none">
+      {/* At the top, so it stays on screen when a backlog runs past the bottom */}
+      {isAdmin && queue.length >= 2 && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => void dismissAll()}
+            disabled={dismissingAll}
+            className="pointer-events-auto px-3 py-1 rounded-md text-[11px] font-mono border border-s-border bg-s-surface text-s-text hover:bg-s-elevated transition-colors disabled:opacity-50"
+            title="Close every pop-up below for everyone. The alerts stay active until someone gives feedback."
+          >
+            {dismissingAll ? "Dismissing…" : `Dismiss all (${queue.length})`}
+          </button>
+        </div>
+      )}
       {queue.map((alert) => {
         const amber = AMBER_TYPES.has(alert.alert_type);
         const tone = amber ? "text-amber-400" : "text-red-400";
+        const pending = pendingIds.has(alert.alert_id);
         return (
           <div
             key={alert.alert_id}
@@ -121,9 +195,11 @@ export default function CriticalAlertBanner() {
 
             {/* Dismiss */}
             <button
-              onClick={() => dismissCritical(alert.alert_id)}
-              className={`shrink-0 text-s-muted ${amber ? "hover:text-amber-400" : "hover:text-red-400"} transition-colors mt-0.5`}
-              aria-label="Dismiss critical alert"
+              onClick={() => void dismiss(alert)}
+              disabled={pending}
+              className={`shrink-0 text-s-muted ${amber ? "hover:text-amber-400" : "hover:text-red-400"} transition-colors mt-0.5 disabled:opacity-40`}
+              title={isAdmin ? "Dismiss for everyone" : "Only an admin can dismiss this for everyone"}
+              aria-label={isAdmin ? "Dismiss this alert for everyone" : "Hide this alert in this tab"}
             >
               <XIcon />
             </button>

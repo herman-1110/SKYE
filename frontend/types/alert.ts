@@ -22,4 +22,14 @@ export interface AlertRecord {
   // patrol_violation: "missed_checkpoint" | "short_dwell" | "no_patrol"
   // absent on alerts predating this field, and on collision/ghost_patrol/positioning_offline
   cause?: "stillness" | "signal_loss" | "missed_checkpoint" | "short_dwell" | "no_patrol";
+  // Stillness man_down and possible_man_down from Prompt 145 on: the floor
+  // and the episode's anchor (metres) when the alert was raised
+  floor_id?: string;
+  anchor_x?: number;
+  anchor_y?: number;
+  // Set once, when an admin closes the pop-up for everyone (Prompt 145).
+  // Acknowledged isn't resolved: the alert stays active until feedback.
+  acknowledged_at?: string;     // ISO 8601, UTC
+  acknowledged_by?: string;     // the admin's display name, or "admin"
+  acknowledged_by_uid?: string;
 }
