@@ -13,12 +13,11 @@ export type CCTVStatus = "online" | "offline" | "unknown";
  *  simulator's nodes only carry mac, last_seen and device_name. */
 export interface CCTVHeartbeat {
   mac: string;
-  status: CCTVStatus;
+  status: CCTVStatus;           // this node alone, which may have no last_seen yet. A placed camera's status is cctvStatus()
   lastSeen: number | null;      // unix s — last successful TCP connect to the camera
   lastEventAt: number | null;   // unix s — last accepted alarm push
   deviceName: string | null;
-  probe: string | null;         // "ok" | "auth_error" | "no_credentials" | "unreachable" | "error"; null on simulator nodes
-  probeOkAt: number | null;     // unix s — last time probe was "ok"; null until the first one
+  probe: string | null;         // "ok" | "auth_error" | "no_credentials" | "unreachable" | "error"; null on simulator nodes. Not part of status: CameraPanel shows it, and APCCTVEditor uses it to leave registered cameras out of its list
   alarmConfig: string | null;   // "mismatch" | "unknown"; null until checked
   // Prompt 131b — camera discovery
   ip: string | null;            // where discovery (or an alarm push) last found it
@@ -29,28 +28,27 @@ export interface CCTVHeartbeat {
 
 type RawNode = Partial<{
   mac: string; last_seen: number; last_event_at: number; device_name: string;
-  probe: string; probe_ok_at: number; alarm_config: string;
+  probe: string; alarm_config: string;
   ip: string; discovered_via: string; discovered_at: number; ip_mismatch: string;
 }>;
 
 const num = (v: unknown) => (typeof v === "number" ? v : null);
 const str = (v: unknown) => (typeof v === "string" ? v : null);
 
-/** "unknown" when there's no heartbeat or the backend's health check has never
- *  succeeded for this camera; otherwise online/offline by last_seen. Nodes with
- *  no probe field at all (the simulator's) use the plain last_seen rule. */
-export function cctvStatusOf(hb: Omit<CCTVHeartbeat, "status"> | undefined, nowMs: number): CCTVStatus {
-  if (!hb) return "unknown";
-  if (hb.probe !== null && hb.probeOkAt === null) return "unknown";
+/** One node's status, by last_seen alone, as the backend's live-view check does:
+ *  "unknown" with no last_seen yet, otherwise online/offline. The OpenAPI probe
+ *  doesn't decide it, because that check needs the camera's password. */
+function cctvStatusOf(hb: Omit<CCTVHeartbeat, "status">, nowMs: number): CCTVStatus {
   if (hb.lastSeen === null) return "unknown";
   return nowMs - hb.lastSeen * 1000 < ONLINE_THRESHOLD_MS ? "online" : "offline";
 }
 
-/** Heartbeats keyed by upper-case colon MAC ("98:BA:5F:8B:10:03"). A camera
- *  with no entry here has no heartbeat: treat it as "unknown". */
-export function useCCTVHeartbeats(): Record<string, CCTVHeartbeat> {
+/** Every /cctv_heartbeats node by upper-case colon MAC ("98:BA:5F:8B:10:03"),
+ *  with its status, and whether the first snapshot has arrived yet. */
+export function useCCTVHeartbeats(): { heartbeats: Record<string, CCTVHeartbeat>; loaded: boolean } {
   const rawRef = useRef<Record<string, Omit<CCTVHeartbeat, "status">>>({});
   const [heartbeats, setHeartbeats] = useState<Record<string, CCTVHeartbeat>>({});
+  const [loaded, setLoaded] = useState(false);
 
   const recompute = () => {
     const now = Date.now();
@@ -77,7 +75,6 @@ export function useCCTVHeartbeats(): Record<string, CCTVHeartbeat> {
           lastEventAt: num(entry.last_event_at),
           deviceName: str(entry.device_name),
           probe: str(entry.probe),
-          probeOkAt: num(entry.probe_ok_at),
           alarmConfig: str(entry.alarm_config),
           ip: str(entry.ip),
           discoveredVia: str(entry.discovered_via),
@@ -87,6 +84,7 @@ export function useCCTVHeartbeats(): Record<string, CCTVHeartbeat> {
       }
       rawRef.current = raw;
       recompute();
+      setLoaded(true);
     });
 
     const interval = setInterval(recompute, 1_000);
@@ -97,5 +95,15 @@ export function useCCTVHeartbeats(): Record<string, CCTVHeartbeat> {
     };
   }, []);
 
-  return heartbeats;
+  return { heartbeats, loaded };
+}
+
+/** One rule for every camera icon and status, the same as apStatus (Prompt 142,
+ *  D2): online while its heartbeat is under 10 s old, offline when older or
+ *  missing, and "unknown" (grey) only until the first snapshot has arrived, so a
+ *  page load never flashes red, or for a camera with no MAC, which can't have a
+ *  heartbeat. */
+export function cctvStatus(heartbeats: Record<string, CCTVHeartbeat>, loaded: boolean, mac: string | undefined): CCTVStatus {
+  if (!loaded || !mac) return "unknown";
+  return heartbeats[mac.toUpperCase()]?.status === "online" ? "online" : "offline";
 }

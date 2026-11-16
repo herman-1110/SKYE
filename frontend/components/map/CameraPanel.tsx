@@ -9,20 +9,20 @@ import {
 } from "@/services/floorService";
 import type { CCTVHeartbeat, CCTVStatus } from "@/hooks/useCCTVHeartbeats";
 import CameraLiveView from "./CameraLiveView";
+import { cctvStatusColor } from "./CctvIcon";
 
 // Prompt 131 T9: opened by clicking a camera marker on the floor map. Status
-// comes from the /cctv_heartbeats subscription (useCCTVHeartbeats, passed in);
+// comes from the /cctv_heartbeats subscription (cctvStatus, passed in);
 // recent events come from the backend's in-memory 15-minute buffer. Prompt 132
 // added the live video at the top (CameraLiveView).
 
 const POLL_MS = 3_000;
 const EVENTS_SHOWN = 200;        // rows rendered in the scrolling events list
-const LIVE_ONLINE_MS = 10_000;   // as useCCTVHeartbeats' ONLINE_THRESHOLD_MS and the backend's live-view check
 
 const PROBE_TEXT: Record<string, string> = {
   ok: "Camera API reachable and the login works",
   auth_error: "Camera login failed. Fix VIGI_CAMERA_PASSWORD in backend/.env; saving the file allows one new attempt",
-  no_credentials: "No camera password set (VIGI_CAMERA_PASSWORD), so health checks are off",
+  no_credentials: "No camera password set (VIGI_CAMERA_PASSWORD), so the camera's login and settings aren't checked",
   unreachable: "Camera API not reachable",
   error: "Camera API answered with an error",
 };
@@ -48,12 +48,6 @@ function alarmSetup(heartbeat: CCTVHeartbeat | undefined, nowMs: number): { text
   }
   return { text: `No alarm received yet. If people have been in view, ${CHECK_ALARM_SERVER}` };
 }
-
-const STATUS_COLOR: Record<CCTVStatus, string> = {
-  online: "var(--success, #22c55e)",
-  offline: "var(--danger, #ef4444)",
-  unknown: "var(--text-secondary, #6b7280)",
-};
 
 function ago(unixS: number | null | undefined, nowMs: number): string {
   if (!unixS) return "never";
@@ -88,15 +82,15 @@ interface Props {
   cctv: CCTVRecord;
   aps: APRecord[];
   heartbeat: CCTVHeartbeat | undefined;
+  status: CCTVStatus;   // the marker's own status (cctvStatus), so the two can't disagree
   onClose: () => void;
 }
 
-export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose }: Props) {
+export default function CameraPanel({ buildingId, cctv, aps, heartbeat, status, onClose }: Props) {
   const [data, setData] = useState<CameraDetections | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const status: CCTVStatus = heartbeat?.status ?? "unknown";
   const lastEventAt = heartbeat?.lastEventAt ?? null;
   const checkpoint = cctv.checkpoint_ap_id ? aps.find((a) => a.id === cctv.checkpoint_ap_id) : undefined;
 
@@ -128,9 +122,6 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Live view needs the camera's RTSP port reachable - the backend's own check.
-  // Not `status`, which also stays "unknown" until the first OpenAPI probe.
-  const reachable = !!heartbeat?.lastSeen && nowMs - heartbeat.lastSeen * 1000 < LIVE_ONLINE_MS;
   const startedRecently = data?.process_started_at
     ? nowMs - Date.parse(data.process_started_at) < (data.window_s ?? 900) * 1000
     : false;
@@ -146,7 +137,7 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
         aria-label={`Camera ${cctv.name}`}
       >
         <div className="flex items-center gap-2 px-5 py-4 border-b border-s-border">
-          <span style={{ width: 9, height: 9, borderRadius: "50%", background: STATUS_COLOR[status], flexShrink: 0 }} />
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: cctvStatusColor(status), flexShrink: 0 }} />
           <h3 className="text-sm font-semibold text-s-text truncate">{cctv.name}</h3>
           <span className="font-mono text-[10px] tracking-widest uppercase text-s-muted">{status}</span>
           <button onClick={onClose} className="ml-auto text-s-muted hover:text-s-text transition-colors" aria-label="Close">
@@ -154,14 +145,15 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
           </button>
         </div>
 
-        {/* Live video (Prompt 132): admins only; closes with the panel */}
+        {/* Live video (Prompt 132): admins only; closes with the panel. "online" is
+            the backend's own live-view check too: last_seen under 10 s old */}
         <div className="px-5 pt-4">
-          <CameraLiveView buildingId={buildingId} cctv={cctv} online={reachable} />
+          <CameraLiveView buildingId={buildingId} cctv={cctv} online={status === "online"} />
         </div>
 
         <div className="px-5 py-3">
           <Row label="Status">
-            {status === "online" ? "Online" : status === "offline" ? "Offline" : "Unknown (not verified yet)"}
+            {status === "online" ? "Online" : status === "offline" ? "Offline" : "Unknown"}
           </Row>
           <Row label="Last seen">{ago(heartbeat?.lastSeen, nowMs)}</Row>
           <Row label="Last event">
@@ -169,6 +161,7 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, onClose 
           </Row>
           <Row label="Health check">
             {heartbeat?.probe ? (PROBE_TEXT[heartbeat.probe] ?? heartbeat.probe) : "Not checked yet"}
+            {heartbeat?.probe === "unreachable" && status === "online" && " (Status only checks the video port)"}
           </Row>
           <Row label="Alarm setup">
             {(() => {

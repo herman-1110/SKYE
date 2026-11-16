@@ -8,27 +8,14 @@ import {
   type APRecord, type ApiError, type CCTVRecord,
 } from "@/services/floorService";
 import { toast } from "@/store/toastStore";
-import { apStatus, useAPHeartbeats, type APStatus } from "@/hooks/useAPHeartbeats";
-import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
+import { apStatus, useAPHeartbeats } from "@/hooks/useAPHeartbeats";
+import { cctvStatus, useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import MacAddressInput from "@/components/shared/MacAddressInput";
 import ApIcon, { apStatusColor } from "./ApIcon";
-import CctvIcon, { CctvMarker } from "./CctvIcon";
+import CctvIcon, { CctvMarker, cctvStatusColor } from "./CctvIcon";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
 
 const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-
-function StatusDot({ status }: { status: APStatus }) {
-  const color =
-    status === "online"  ? "var(--success, #22c55e)" :
-    status === "offline" ? "var(--danger,  #ef4444)" :
-                           "var(--text-secondary)";
-  return (
-    <span
-      style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }}
-      title={status}
-    />
-  );
-}
 
 type PlacementMode = "ap" | "cctv" | null;
 
@@ -58,7 +45,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [editingCctvId, setEditingCctvId] = useState<string | null>(null);
   const [editingApId, setEditingApId] = useState<string | null>(null);
   const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
-  const cctvHeartbeats = useCCTVHeartbeats();
+  const { heartbeats: cctvHeartbeats, loaded: cctvHeartbeatsLoaded } = useCCTVHeartbeats();
 
   const placedMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
   const unregisteredOnlineAPs = Object.values(apHeartbeats)
@@ -397,7 +384,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "cctv" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
-          <CctvIcon size={14} style={{ color: "var(--danger)" }} />
+          <CctvIcon size={14} />
           {placementMode === "cctv" ? "Cancel" : "Add CCTV"}
         </button>
         {placementMode && (
@@ -493,8 +480,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                     className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-s-elevated border border-s-border hover:border-s-accent transition-colors text-left group"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <StatusDot status={hb.status} />
-                      <CctvIcon size={14} style={{ color: "var(--danger)" }} />
+                      {/* Accent, not a status colour, as in the AP list (Prompt 142, D2): these aren't placed here yet.
+                          The word below is the node's own, so a camera found a moment ago says unknown, not offline */}
+                      <CctvIcon size={14} style={{ color: "var(--accent)" }} />
                       <div className="flex flex-col leading-tight min-w-0">
                         <span className="font-mono text-[11px] text-s-text truncate">{hb.deviceName ?? "VIGI camera"}</span>
                         <span className="font-mono text-[10px] text-s-muted">{hb.ip ?? "IP unknown"} · {hb.mac} · {hb.status}</span>
@@ -565,11 +553,14 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           );
         })}
 
-        {/* CCTV markers — drag an existing one to reposition it */}
+        {/* CCTV markers, coloured by status like the APs (Prompt 142, D2) — drag an existing one to reposition it */}
         {cctvs.map((cctv) => {
           const isDragging = dragTarget?.type === "cctv" && dragTarget.id === cctv.id;
           const xPct = isDragging && dragPct ? dragPct.x : cctv.x_pct;
           const yPct = isDragging && dragPct ? dragPct.y : cctv.y_pct;
+          const mac = (cctv.device_mac ?? cctv.mac)?.toUpperCase();
+          const status = cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, mac);
+          const label = mac ? `${cctv.name} — ${status}` : cctv.name;
           return (
             <div
               key={cctv.id}
@@ -587,11 +578,11 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 touchAction: "none",
               }}
               onPointerDown={handleMarkerPointerDown("cctv", cctv.id, cctv.x_pct, cctv.y_pct)}
-              onMouseEnter={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
-              onMouseMove={(e) => setHoveredMarker({ label: cctv.name, x: e.clientX, y: e.clientY })}
+              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
+              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
               onMouseLeave={() => setHoveredMarker(null)}
             >
-              <CctvMarker />
+              <CctvMarker color={cctvStatusColor(status)} />
               <button
                 onClick={(e) => { e.stopPropagation(); handleDeleteCCTV(cctv.id); }}
                 disabled={deletingId === cctv.id}
@@ -649,27 +640,27 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
               })}
               {cctvs.map((cctv) => {
                 const mac = (cctv.device_mac ?? cctv.mac)?.toUpperCase();
-                const status = mac ? (cctvHeartbeats[mac]?.status ?? "unknown") : "unknown";
+                const status = cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, mac);
                 const checkpoint = cctv.checkpoint_ap_id ? aps.find((a) => a.id === cctv.checkpoint_ap_id) : undefined;
                 return (
                 <tr key={cctv.id} className="border-b border-s-border/50 last:border-0 hover:bg-s-elevated transition-colors">
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <StatusDot status={status} />
-                      <CctvIcon size={14} style={{ color: "var(--danger)" }} />
+                      {/* The icon's colour is the status, as on the AP rows (Prompt 142, D2); the word is in the next column */}
+                      <CctvIcon size={14} style={{ color: cctvStatusColor(status) }} />
                       <span className="text-s-text font-medium">{cctv.name}</span>
                       <span className="font-mono text-[10px] text-s-muted">{mac ?? "no MAC"}</span>
                       {cctv.ip && <span className="font-mono text-[10px] text-s-muted">{cctv.ip}</span>}
                     </div>
                     {checkpoint && (
-                      <div className="font-mono text-[10px] text-s-muted mt-0.5 pl-4">covers {checkpoint.name}</div>
+                      <div className="font-mono text-[10px] text-s-muted mt-0.5 pl-[22px]">covers {checkpoint.name}</div>
                     )}
                     {(() => {
                       // Prompt 131b: discovery found this camera at another IP.
                       const moved = mac ? cctvHeartbeats[mac]?.ipMismatch : null;
                       if (!moved || moved === cctv.ip) return null;
                       return (
-                        <div className="flex items-center gap-2 mt-1 pl-4 flex-wrap">
+                        <div className="flex items-center gap-2 mt-1 pl-[22px] flex-wrap">
                           <span className="font-mono text-[10px]" style={{ color: "var(--warning, #f59e0b)" }}>
                             ⚠ Found at {moved}, but alarms are only accepted from {cctv.ip ?? "its registered IP"}
                           </span>

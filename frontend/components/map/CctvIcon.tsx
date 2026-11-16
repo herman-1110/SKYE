@@ -1,9 +1,11 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
+import type { CCTVStatus } from "@/hooks/useCCTVHeartbeats";
+import { apStatusColor } from "./ApIcon";
 
 // The one CCTV glyph, used wherever a camera is drawn: a bullet camera tilted
 // down on a wall bracket, on the same 24x24 grid as the AP icon and kept
 // inside it. Stroke and the LED dot follow currentColor, so callers set the
-// colour with `color` (or a text-* class).
+// colour with `color`: cctvStatusColor() for a placed camera.
 export default function CctvIcon({ size = 14, className, style }: {
   size?: number;
   className?: string;
@@ -23,25 +25,28 @@ export default function CctvIcon({ size = 14, className, style }: {
   );
 }
 
+/** The same colours as the AP icons: green online, red offline, grey unknown (see cctvStatus). */
+export function cctvStatusColor(status: CCTVStatus): string {
+  return apStatusColor(status);
+}
+
 // A camera on a floor plan: the glyph in a round chip with a coloured ring, so
-// it stays readable on any floor-plan image. `badge` sits bottom-right (the
-// status dot on the dashboard map).
-export function CctvMarker({ color = "var(--danger)", size = 26, badge }: {
-  color?: string;
+// it stays readable on any floor-plan image. `color` is the status, so it has
+// no default.
+export function CctvMarker({ color, size = 26 }: {
+  color: string;
   size?: number;
-  badge?: ReactNode;
 }) {
   return (
     <span
       style={{
-        position: "relative", width: size, height: size, borderRadius: "50%",
+        width: size, height: size, borderRadius: "50%",
         display: "flex", alignItems: "center", justifyContent: "center",
         background: "var(--bg-surface)", border: `1.5px solid ${color}`, color,
         boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
       }}
     >
       <CctvIcon size={Math.round(size * 0.65)} />
-      {badge}
     </span>
   );
 }

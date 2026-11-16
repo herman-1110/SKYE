@@ -5,13 +5,13 @@ import type { PositionRecord } from "@/types/position";
 import type { FloorRecord } from "@/types/floor";
 import { useZones } from "@/hooks/useZones";
 import { apStatus, useAPHeartbeats } from "@/hooks/useAPHeartbeats";
-import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
+import { cctvStatus, useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import { useDashboardStore } from "@/store/dashboardStore";
 import WorkerMarker from "./WorkerMarker";
 import PatrolRouteOverlay from "./PatrolRouteOverlay";
 import CameraPanel from "./CameraPanel";
 import ApIcon, { apStatusColor } from "./ApIcon";
-import { CctvMarker } from "./CctvIcon";
+import { CctvMarker, cctvStatusColor } from "./CctvIcon";
 import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
 interface Props {
@@ -132,7 +132,7 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
   const workerSvgRef = useRef<SVGSVGElement>(null);
   const { zones } = useZones(buildingId, activeFloor?.id ?? null);
   const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
-  const cctvStatuses = useCCTVHeartbeats();
+  const { heartbeats: cctvHeartbeats, loaded: cctvHeartbeatsLoaded } = useCCTVHeartbeats();
   const scale = activeFloor?.scale_pixels_per_meter ?? null;
   const hasFloor = !!activeFloor;
 
@@ -327,11 +327,10 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
             );
           })}
 
-          {/* CCTV markers — click opens the camera panel (Prompt 131) */}
+          {/* CCTV markers, coloured by status like the APs (Prompt 142, D2) — click opens the camera panel (Prompt 131) */}
           {cctvs.map((cctv) => {
             const mac = (cctv.device_mac ?? cctv.mac)?.toUpperCase();
-            const status = mac ? (cctvStatuses[mac]?.status ?? "unknown") : null;
-            const dotColor = status === "online" ? "#22c55e" : status === "offline" ? "#ef4444" : status === "unknown" ? "#6b7280" : null;
+            const status = cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, mac);
             const label = mac ? `${cctv.name} — ${mac} — ${status}` : cctv.name;
             return (
               <div
@@ -343,9 +342,9 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
                 onMouseLeave={() => setHoveredMarker(null)}
                 onClick={(e) => { e.stopPropagation(); setHoveredMarker(null); setOpenCameraId(cctv.id); }}
                 role="button"
-                aria-label={`Open camera ${cctv.name}`}
+                aria-label={`Open camera ${cctv.name}, ${status}`}
               >
-                <CctvMarker badge={dotColor ? <span style={{ position: "absolute", bottom: -2, right: -2, width: 7, height: 7, borderRadius: "50%", background: dotColor, border: "1.5px solid var(--bg-base, #111)", display: "block" }} /> : undefined} />
+                <CctvMarker color={cctvStatusColor(status)} />
               </div>
             );
           })}
@@ -437,7 +436,8 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
           buildingId={buildingId}
           cctv={cam}
           aps={aps}
-          heartbeat={mac ? cctvStatuses[mac] : undefined}
+          heartbeat={mac ? cctvHeartbeats[mac] : undefined}
+          status={cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, mac)}
           onClose={() => setOpenCameraId(null)}
         />
       );

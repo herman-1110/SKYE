@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { apStatus, useAPHeartbeats } from "@/hooks/useAPHeartbeats";
-import { useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
+import { cctvStatus, useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
 
 interface Props {
@@ -13,7 +13,7 @@ export default function DeviceStatusPanel({ buildingId, floorId }: Props) {
   const [aps, setAps] = useState<APRecord[]>([]);
   const [cctvs, setCctvs] = useState<CCTVRecord[]>([]);
   const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
-  const cctvStatuses = useCCTVHeartbeats();
+  const { heartbeats: cctvHeartbeats, loaded: cctvHeartbeatsLoaded } = useCCTVHeartbeats();
 
   useEffect(() => {
     if (!buildingId || !floorId) { setAps([]); setCctvs([]); return; }
@@ -54,17 +54,17 @@ export default function DeviceStatusPanel({ buildingId, floorId }: Props) {
           <span className="device-status-label">CAMERAS</span>
           {cctvs.map((cctv) => {
             const mac = (cctv.device_mac ?? cctv.mac)?.toUpperCase();
-            // No heartbeat, or a health check that has never succeeded, reads as
-            // "unknown" (useCCTVHeartbeats, Prompt 131), never as "offline".
-            const status = mac ? (cctvStatuses[mac]?.status ?? "unknown") : null;
-            const badgeClass = status ?? "unknown";
+            // The same rule as every camera icon, taken from the APs (Prompt 142, D2):
+            // grey only until the first heartbeat snapshot or with no MAC, then no
+            // heartbeat reads as offline.
+            const status = cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, mac);
             const badgeText = !mac ? "No MAC" : status === "online" ? "Online" : status === "offline" ? "Offline" : "Unknown";
             return (
               <div key={cctv.id} className="device-status-row">
-                <span className={`device-status-dot ${badgeClass}`} />
+                <span className={`device-status-dot ${status}`} />
                 <span className="device-status-name">{cctv.name}</span>
                 <span className="device-status-mac">{mac ?? "—"}</span>
-                <span className={`device-status-badge ${badgeClass}`}>{badgeText}</span>
+                <span className={`device-status-badge ${status}`}>{badgeText}</span>
               </div>
             );
           })}

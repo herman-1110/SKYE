@@ -25,7 +25,8 @@ export default function ApIcon({ size = 14, className, style }: {
   );
 }
 
-/** Green online, red offline, grey until the first heartbeat snapshot (see apStatus). */
+/** Green online, red offline, grey until the first heartbeat snapshot (see apStatus).
+ *  Camera icons use these colours too, through cctvStatusColor. */
 export function apStatusColor(status: APStatus): string {
   return status === "online" ? "var(--success, #22c55e)"
     : status === "offline" ? "var(--danger, #ef4444)"
