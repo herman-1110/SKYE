@@ -25,6 +25,13 @@ class AlertRecord:
     # pass cause silently mislabel itself as a stillness man_down instead of
     # visibly carrying nothing. Every site must now pass cause explicitly.
     cause: Optional[str] = None
+    # Stillness man_down and possible_man_down only (Prompt 145, D3): the
+    # person's floor and the episode's anchor, in metres, when the alert was
+    # raised, so that a restarted backend can tell the same episode from a new
+    # one. None on every other alert, and on stillness alerts raised before 145.
+    floor_id: Optional[str] = None
+    anchor_x: Optional[float] = None
+    anchor_y: Optional[float] = None
     # Set once, by POST /alerts/{id}/acknowledge (Prompt 145, D1): an admin
     # closed the alert's pop-up for everyone. Acknowledged isn't resolved:
     # only feedback resolves an alert. None until then, and on every alert

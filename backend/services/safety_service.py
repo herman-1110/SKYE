@@ -41,6 +41,12 @@ _stale_alerted: Set[str] = set()
 # that goes dark and comes back still within epsilon of the same anchor is the
 # same episode and doesn't alert again. Per-process, in-memory, like the rest.
 _still_alerted: Set[str] = set()
+# person_ids this process has seen move since it started (Prompt 145, D3.3).
+# Until someone is in here, their stillness is their first episode since the
+# start, and a stillness raise first checks /alerts for the same episode
+# raised by an earlier process (_alerted_before_restart). Added only where
+# movement clears the latches, never where an anchor is merely seeded.
+_seen_moving: Set[str] = set()
 # person_id (or /positions key) -> monotonic time its unreadable timestamp was
 # last logged by check_man_down_stale() (Prompt 135, COR-01): once an hour each.
 _bad_timestamp_logged: Dict[str, float] = {}
@@ -133,6 +139,29 @@ def _unresolved_since(alerts: Optional[List[dict]], since_unix: float, alert_typ
                 return True
         except Exception:
             continue
+    return False
+
+
+def _is_coord(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _same_stillness_episode(alerts: List[dict], alert_type: str, person_id: str, floor_id: str,
+                            x: float, y: float) -> bool:
+    """True if alerts holds an unresolved stillness alert of this type for this
+    person on this floor, anchored within MAN_DOWN_MOVEMENT_EPSILON_M of (x, y):
+    the same episode, already alerted (Prompt 145, D3.2). Acknowledged alerts
+    count. One without an anchor (raised before 145) never matches."""
+    for a in alerts:
+        if (not isinstance(a, dict) or a.get("alert_type") != alert_type or a.get("resolved")
+                or a.get("cause") != "stillness" or (a.get("person_id") or "") != person_id
+                or (a.get("floor_id") or "") != (floor_id or "")):
+            continue
+        ax, ay = a.get("anchor_x"), a.get("anchor_y")
+        if not (_is_coord(ax) and _is_coord(ay)):
+            continue
+        if math.hypot(x - ax, y - ay) < settings.MAN_DOWN_MOVEMENT_EPSILON_M:
+            return True
     return False
 
 
@@ -284,9 +313,10 @@ class SafetyService:
         if moved >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
             _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
+            _seen_moving.add(pid)
             return None
 
-        return self._stillness_alert(current, cfg, now, since_iso)
+        return self._stillness_alert(current, cfg, now, since_iso, anchor_x, anchor_y)
 
     def _check_approximate(self, current: PositionRecord, cfg: SafetySettings, now: str) -> Optional[AlertRecord]:
         """An approximate reading: extend or restart the person's approximate
@@ -299,6 +329,7 @@ class SafetyService:
             # A different strongest AP, in practice. This also ends an
             # upgrade's confirmation (_check_upgrade).
             run = None
+            _seen_moving.add(pid)
         if run is None:
             _approx_runs[pid] = _ApproxRun(current.x, current.y, now)
             return None
@@ -309,6 +340,12 @@ class SafetyService:
         if run.alerted or seconds_between(run.started_at, now) < cfg.man_down_minutes * 60:
             return None
 
+        # After a restart the latch is gone: the same run may already be
+        # alerted (Prompt 145, D3). The run's anchor is the spot.
+        if self._alerted_before_restart("possible_man_down", current, run.x, run.y):
+            run.alerted = True
+            return None
+
         record = AlertRecord(
             alert_id=str(uuid.uuid4()),
             alert_type="possible_man_down",
@@ -317,6 +354,9 @@ class SafetyService:
             timestamp=now,
             approximate=True,
             cause="stillness",
+            floor_id=current.floor_id,
+            anchor_x=run.x,
+            anchor_y=run.y,
         )
         alert_repository.save(record)
         run.alerted = True
@@ -344,21 +384,51 @@ class SafetyService:
         if math.hypot(current.x - anchor_x, current.y - anchor_y) >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
             _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
+            _seen_moving.add(pid)
             del _approx_runs[pid]
             return None
         if seconds_between(run.confirming_since, now) < settings.MAN_DOWN_UPGRADE_CONFIRM_S:
             return None
 
-        record = self._stillness_alert(current, cfg, now, since_iso)
-        if record is not None:
+        record = self._stillness_alert(current, cfg, now, since_iso, anchor_x, anchor_y)
+        # Raised, or found already raised before a restart (the latch is set
+        # either way, Prompt 145): the run ends.
+        if record is not None or pid in _still_alerted:
             del _approx_runs[pid]
         return record
 
+    def _alerted_before_restart(self, alert_type: str, current: PositionRecord, x: float, y: float) -> bool:
+        """Prompt 145, D3: before a stillness alert is raised for someone this
+        process hasn't seen move, read /alerts once. An unresolved alert of the
+        same type for the same episode (same person and floor, an anchor within
+        epsilon of (x, y)) was raised by an earlier process: don't raise it
+        again. Once they've moved, alerting is as before 145. Runs under
+        pipeline_lock, like the rest of check_man_down(). Fails open: if /alerts
+        can't be read, the alert is raised."""
+        pid = current.person_id
+        if pid in _seen_moving:
+            return False
+        started = time.perf_counter()
+        try:
+            alerts = [a for a in (alert_repository.get_all() or {}).values() if isinstance(a, dict)]
+        except Exception as e:
+            print(f"[SAFETY] WARNING: the restart check couldn't read /alerts, so {pid}'s {alert_type} "
+                  f"is raised: {e}")
+            return False
+        ms = (time.perf_counter() - started) * 1000
+        same = _same_stillness_episode(alerts, alert_type, pid, current.floor_id, x, y)
+        print(f"[SAFETY] restart check for {pid}'s {alert_type}: read /alerts "
+              f"({len(alerts)} alert{'' if len(alerts) == 1 else 's'}) in {ms:.0f} ms; "
+              + ("already raised for this spot, not raised again" if same else "nothing earlier for this spot"))
+        return same
+
     def _stillness_alert(
         self, current: PositionRecord, cfg: SafetySettings, now: str, since_iso: str,
+        anchor_x: float, anchor_y: float,
     ) -> Optional[AlertRecord]:
         """The red stillness man_down for an exact fix within epsilon of the
-        exact anchor, if its clock has run past man_down_minutes."""
+        exact anchor (anchor_x, anchor_y), if its clock has run past
+        man_down_minutes."""
         pid = current.person_id
         # Within epsilon: still. Has the clock run past the threshold?
         if seconds_between(since_iso, now) < cfg.man_down_minutes * 60:
@@ -374,6 +444,12 @@ class SafetyService:
         if last_ts and seconds_between(last_ts, now) < 30:
             return None
 
+        # After a restart the latch is gone: the same episode may already be
+        # alerted (Prompt 145, D3).
+        if self._alerted_before_restart("man_down", current, anchor_x, anchor_y):
+            _still_alerted.add(pid)
+            return None
+
         record = AlertRecord(
             alert_id=str(uuid.uuid4()),
             alert_type="man_down",
@@ -382,6 +458,9 @@ class SafetyService:
             timestamp=now,
             approximate=current.is_approximate,
             cause="stillness",
+            floor_id=current.floor_id,
+            anchor_x=anchor_x,
+            anchor_y=anchor_y,
         )
         alert_repository.save(record)
         _last_man_down[pid] = record.timestamp
