@@ -26,6 +26,16 @@ class AlertRepository:
         """Patch resolved=True on an existing alert without overwriting other fields."""
         db.reference(f"{self._PATH}/{alert_id}").update({"resolved": True})
 
+    def acknowledge(self, alert_id: str, acknowledged_at: str, acknowledged_by: str,
+                    acknowledged_by_uid: str) -> None:
+        """Patch the three acknowledgement fields onto an existing alert without
+        overwriting other fields, as mark_resolved() does (Prompt 145, D1)."""
+        db.reference(f"{self._PATH}/{alert_id}").update({
+            "acknowledged_at": acknowledged_at,
+            "acknowledged_by": acknowledged_by,
+            "acknowledged_by_uid": acknowledged_by_uid,
+        })
+
     def delete(self, alert_id: str) -> None:
         """Permanently remove /alerts/{alert_id} from Realtime Database."""
         db.reference(f"{self._PATH}/{alert_id}").delete()

@@ -25,3 +25,10 @@ class AlertRecord:
     # pass cause silently mislabel itself as a stillness man_down instead of
     # visibly carrying nothing. Every site must now pass cause explicitly.
     cause: Optional[str] = None
+    # Set once, by POST /alerts/{id}/acknowledge (Prompt 145, D1): an admin
+    # closed the alert's pop-up for everyone. Acknowledged isn't resolved:
+    # only feedback resolves an alert. None until then, and on every alert
+    # raised before 145.
+    acknowledged_at: Optional[str] = None       # ISO 8601, UTC
+    acknowledged_by: Optional[str] = None       # the admin's display name, or "admin"
+    acknowledged_by_uid: Optional[str] = None

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from middleware.auth_middleware import require_admin, require_auth
 from models.user import UserRecord
@@ -23,6 +23,20 @@ def post_feedback(
     """Record operator feedback for an alert. All authenticated users."""
     alert_service.submit_feedback(alert_id, body.feedback, body.reason)
     return {"status": "ok"}
+
+
+@router.post("/{alert_id}/acknowledge")
+def acknowledge_alert(
+    alert_id: str,
+    caller: UserRecord = Depends(require_admin),
+) -> dict:
+    """Close an alert's pop-up for everyone (Prompt 145, D1). Admins and the
+    owner. A second call changes nothing and returns the first one's values.
+    The alert stays unresolved until someone gives feedback."""
+    ack = alert_service.acknowledge(alert_id, caller)
+    if ack is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"alert_id": alert_id, **ack}
 
 
 @router.delete("/{alert_id}")
