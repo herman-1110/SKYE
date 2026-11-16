@@ -5,7 +5,9 @@ A "restart" clears every piece of in-memory state check_man_down() keeps;
 /alerts (the fake RTDB) survives, as it does on real Firebase. Each case
 raises its alert through the real code first, so the alert carries whatever
 the code stores, then restarts and feeds the same person again.
-man_down_minutes is 1; the clock is safety_service.utcnow_iso.
+man_down_minutes is 1, and the AP-change hold is set to 30 s
+(MAN_DOWN_AP_CHANGE_HOLD_S), the hold checks 14-18 were written for; the clock
+is safety_service.utcnow_iso.
 
    1  new stillness alerts carry floor_id and their anchor: the exact anchor
       for a red man_down, the run's anchor (the AP) for a possible_man_down
@@ -38,13 +40,19 @@ man_down_minutes is 1; the clock is safety_service.utcnow_iso.
       fixes at the red alert's spot): no new red, one read
   17  a real move after the restart: the alert's AP for 40 s, then the other
       AP: a new amber there, 60 s after its first reading, with no read
+  18  three APs (Herman, 17 Nov). Before the restart: AP1, then still between
+      AP2 and AP3, which alternate (the amber at AP2). After it: one stray
+      reading at AP1, then AP3 and AP2 alternating, then AP3 alone. No new
+      amber, since the new run, timed from the first reading away from AP1,
+      has every AP read since then as its spots; not movement; one read
    0  the fakes: nothing unimplemented, no tripwire
 
 On the base (9f28798) every restart repeats the alert and nothing reads
-/alerts: checks 1, 2, 3, 9, 10, 11, 12 and 13-16 fail; 4-8 and 17, which
+/alerts: checks 1, 2, 3, 9, 10, 11, 12, 13-16 and 18 fail; 4-8 and 17, which
 expect a new alert, pass there too. On 794261a (145's first build, where a
 change of strongest AP counted as movement at once and the match had no age
-limit), checks 13-16 fail.
+limit), checks 13-16 and 18 fail. On a886862, where a third AP restarted the
+30 s, check 18 fails.
 
 usage (Git Bash, repo root):
   "$py" -B tools/harness/f145_stillness_restart_inprocess.py --backend-dir "$exp/backend"
@@ -69,6 +77,7 @@ JITTER = (5.3, 5.1)       # 0.32 m from SPOT: the same spot, read again
 FAR = (12.0, 5.0)         # 7 m away: past the 2 m epsilon
 AP1 = (2.0, 2.0)          # an approximate reading's x/y is the strongest AP's own
 AP2 = (14.0, 2.0)         # the other AP, 12 m away
+AP3 = (8.0, 14.0)         # a third, over 12 m from both
 UPGRADE = [(2.5, 2.5), (2.6, 2.5), (2.5, 2.6)]
 OTHER_FLOOR = "test-f145-other-floor"
 results = []
@@ -101,6 +110,7 @@ def main() -> int:
         "VIGI_DISCOVERY_INTERVAL_S": "0",
         "GO2RTC_CONFIG_PATH": os.path.join(run_dir, "go2rtc.yaml"),
         "HARNESS_SEED_STALE": "0",
+        "MAN_DOWN_AP_CHANGE_HOLD_S": "30",
     })
     sys.path.insert(0, backend_dir)
     os.chdir(backend_dir)
@@ -185,6 +195,12 @@ def main() -> int:
                 t += step
             xy, i = (other if xy == first else first), i + 1
         return out
+
+    def alternate(pid, t0, t1, a, b, step=5):
+        """Approximate readings every step s from t0 to t1, the strongest AP
+        a, b, a, ...: neither the strongest for long by itself."""
+        return [e for e in (at(t, pid, a if (t - t0) // step % 2 == 0 else b, approx=True)
+                            for t in range(t0, t1 + 1, step)) if e]
 
     def moving(pid):
         return pid in getattr(ss, "_seen_moving", set())   # none before 145
@@ -390,6 +406,29 @@ def main() -> int:
           p17_after == [(1105, "possible_man_down")] and kinds(P17) == ["possible_man_down", "possible_man_down"]
           and reads["n"] == 0,
           f"after={p17_after} saved={kinds(P17)} reads={reads['n']}")
+
+    # 18: three APs across a restart. Before it: AP1 from 0 to 50, then AP2
+    # and AP3 alternating from 55, AP2 first; the change counts at 85 (AP2's
+    # reading), timed from 55, and the amber comes at AP2 at 115. After it:
+    # one stray reading at AP1 at 1000, then AP3 and AP2 alternating from
+    # 1002, so the change counts at 1032 at AP3, timed from 1002, and isn't
+    # movement (the AP1 run lasted 2 s); then AP3 alone. The run comes due at
+    # 1062 with AP2 among its spots, though AP2 hasn't been read since 1027.
+    P18 = "test-f145-three-aps"
+    p18_before = still(P18, 0, 50, AP1, approx=True) + alternate(P18, 55, 175, AP2, AP3)
+    p18_alert = stored(P18)[0] if stored(P18) else {}
+    restart()
+    p18_after = [e for e in [at(1000, P18, AP1, approx=True)] if e] + alternate(P18, 1002, 1032, AP3, AP2) \
+        + still(P18, 1037, 1137, AP3, approx=True, step=5)
+    r18 = ss._approx_runs.get(P18)
+    run18 = (r18.x, r18.y, list(getattr(r18, "spots", None) or []), r18.alerted) if r18 else None
+    check(18, "three APs: still between AP2 and AP3 before the restart (the amber at AP2); a stray AP1 reading "
+          "after it, AP3 and AP2, then AP3 alone: no new amber, not movement, one read",
+          p18_before == [(115, "possible_man_down")] and anchor(p18_alert) == (FLOOR, AP2[0], AP2[1])
+          and p18_after == [] and kinds(P18) == ["possible_man_down"] and reads["n"] == 1
+          and run18 == (AP3[0], AP3[1], [AP3, AP2], True) and not moving(P18),
+          f"before={p18_before} alert={anchor(p18_alert)} after={p18_after} saved={kinds(P18)} "
+          f"reads={reads['n']} run={run18} moving={moving(P18)}")
 
     loud = [p for p in ("UNIMPLEMENTED.txt", "TRIPWIRE_HIT.txt") if os.path.exists(os.path.join(run_dir, p))]
     check(0, "fakes: nothing unimplemented, no tripwire", not loud, f"{loud}")

@@ -17,16 +17,27 @@ three-AP fixes can upgrade to a red man_down.
      the run; the man_down still comes 30 s after the first exact fix
   7  the strongest AP keeps flipping, never for 30 s: one run, one
      possible_man_down at the run's own AP, and it isn't movement
-  8  a third AP restarts the 30 s
+  8  a third AP doesn't restart the 30 s (Herman, 17 Nov): after AP1, AP2 and
+     AP3 alternate, neither the strongest for 30 s by itself; the change counts
+     30 s after the first reading away from AP1, at the latest reading's AP,
+     timed from that first reading and with both APs as its spots, and its one
+     possible_man_down comes 60 s after that first reading
   9  a change during an upgrade's confirmation ends it only once the new AP has
      held 30 s; an exact fix in between doesn't restart the 30 s
+ 10  the AP-change hold's default is 120 s
+ 11  at a 120 s hold, with man_down_minutes 1 as in the live check: a move to
+     the other AP counts 120 s after its first reading there, and the new run,
+     timed from that reading, is already due, so its possible_man_down comes on
+     the same reading
 
 man_down_minutes is patched to 1, the clock is driven by patching
-safety_service.utcnow_iso; epsilon, the confirmation time and the AP-change
-hold are the defaults (2.0 m, 30 s, 30 s). Approximate x/y is the strongest
-AP's coordinate, as the proximity fallback writes it. On 2975863 every check
-fails. On 794261a, where a change of strongest AP started a new run at once,
-checks 5, 7, 8 and 9 fail.
+safety_service.utcnow_iso; epsilon and the confirmation time are the defaults
+(2.0 m, 30 s), and the AP-change hold is set to 30 s (MAN_DOWN_AP_CHANGE_HOLD_S),
+the hold these checks were written for, except in 11. Approximate x/y is the
+strongest AP's coordinate, as the proximity fallback writes it. On 2975863
+every check fails. On 794261a, where a change of strongest AP started a new run
+at once, checks 5, 7, 8, 9, 10 and 11 fail. On a886862, where a third AP
+restarted the 30 s and the hold's default was 30 s, checks 8 and 10 fail.
 
 usage (Git Bash, repo root):
   "$py" -B tools/harness/cor03_coverage_edge_inprocess.py --backend-dir "$exp/backend"
@@ -78,6 +89,7 @@ def main() -> int:
         "VIGI_DISCOVERY_INTERVAL_S": "0",
         "GO2RTC_CONFIG_PATH": os.path.join(run_dir, "go2rtc.yaml"),
         "HARNESS_SEED_STALE": "0",
+        "MAN_DOWN_AP_CHANGE_HOLD_S": "30",
     })
     sys.path.insert(0, backend_dir)
     os.chdir(backend_dir)
@@ -124,6 +136,15 @@ def main() -> int:
         r = getattr(ss, "_approx_runs", {}).get(pid)   # none before 136
         moving = pid in getattr(ss, "_seen_moving", set())
         return (r.x, r.y, r.started_at, r.confirming_since, moving) if r else None
+
+    def spots_of(pid):
+        r = getattr(ss, "_approx_runs", {}).get(pid)
+        return list(getattr(r, "spots", None) or []) if r else None   # none before a886862
+
+    def anchors(pid):
+        return [(a.get("anchor_x"), a.get("anchor_y"))
+                for a in sorted((a for a in alert_repository.get_all().values() if a.get("person_id") == pid),
+                                key=lambda a: a["timestamp"])]
 
     # 1: exact anchor, then approximate stillness at the coverage edge
     A = "test-cor03-edge"
@@ -195,19 +216,25 @@ def main() -> int:
                if a.get("person_id") == K] == [AP1],
           f"fired={fired(ev)} run={run_of(K)} saved={saved(K)}")
 
-    # 8: a third AP restarts the 30 s: AP2 from 55 to 65, then AP3 from 75,
-    # held 29 s at 104 and 30 s at 105
+    # 8: a third AP doesn't restart the 30 s. After AP1, AP2 and AP3 alternate
+    # every 5 s from 55: away from AP1 for 29 s at 84 (AP2's reading) and 30 s
+    # at 85 (AP3's), when a new run starts at AP3, timed from 55. Then AP3's
+    # readings are its own and AP2's a pending change each time; the amber
+    # comes at 115, AP3's reading 60 s after 55.
     T3 = "test-cor03-third"
-    ev = [approx(t, T3, AP1) for t in range(0, 51, 10)] + [approx(t, T3, AP2) for t in (55, 65)]
-    ev += [approx(t, T3, AP3) for t in (75, 85, 95, 104)]
-    at104 = run_of(T3)
-    ev.append(approx(105, T3, AP3))
-    at105 = run_of(T3)
-    ev += [approx(t, T3, AP3) for t in range(115, 136, 10)]
-    check(8, "a third AP restarts the 30 s: the change to it counts 30 s after its own first reading",
-          at104 == (AP1[0], AP1[1], iso(0), None, False) and at105 == (AP3[0], AP3[1], iso(75), None, True)
-          and fired(ev) == [(135, "possible_man_down", True)],
-          f"run at 104={at104} at 105={at105} fired={fired(ev)}")
+    ev = [approx(t, T3, AP1) for t in range(0, 51, 10)]
+    ev += [approx(t, T3, xy) for t, xy in ((55, AP2), (60, AP3), (65, AP2), (70, AP3), (75, AP2), (80, AP3),
+                                           (84, AP2))]
+    at84 = run_of(T3)
+    ev.append(approx(85, T3, AP3))
+    at85, spots85 = run_of(T3), spots_of(T3)
+    ev += [approx(t, T3, AP2 if t // 5 % 2 == 0 else AP3) for t in range(90, 176, 5)]
+    check(8, "a third AP doesn't restart the 30 s: with AP2 and AP3 alternating after AP1, the change counts "
+          "30 s after the first reading away, at the latest AP, timed from that reading, both APs its spots; "
+          "one amber 60 s after it",
+          at84 == (AP1[0], AP1[1], iso(0), None, False) and at85 == (AP3[0], AP3[1], iso(55), None, True)
+          and spots85 == [AP3, AP2] and fired(ev) == [(115, "possible_man_down", True)] and anchors(T3) == [AP3],
+          f"run at 84={at84} at 85={at85} spots at 85={spots85} fired={fired(ev)} anchors={anchors(T3)}")
 
     # 9: a change during an upgrade's confirmation: the amber at 60, the first
     # exact fix at 70, AP2 from 75 (held 29 s at 104, 30 s at 105), one exact
@@ -224,6 +251,41 @@ def main() -> int:
           at104 == (AP1[0], AP1[1], iso(0), iso(70), False) and at105 == (AP2[0], AP2[1], iso(75), None, True)
           and fired(ev) == [(60, "possible_man_down", True)],
           f"run at 104={at104} at 105={at105} fired={fired(ev)}")
+
+    # 10: the hold's default, read with MAN_DOWN_AP_CHANGE_HOLD_S unset
+    import config.settings as cs
+    held = os.environ.pop("MAN_DOWN_AP_CHANGE_HOLD_S", None)
+    try:
+        default_hold = getattr(cs._load(), "MAN_DOWN_AP_CHANGE_HOLD_S", None)
+    except Exception as e:
+        default_hold = f"{type(e).__name__}: {e}"
+    finally:
+        if held is not None:
+            os.environ["MAN_DOWN_AP_CHANGE_HOLD_S"] = held
+    check(10, "the AP-change hold's default is 120 s", default_hold == 120.0, f"default={default_hold}")
+
+    # 11: at a 120 s hold. AP1 from 0, its amber at 60; AP2 from 155, away
+    # from AP1 for 119 s at 274 and 120 s at 275, when the new run starts at
+    # AP2, timed from 155 and so already due
+    settings = cs.settings
+    hold_before = getattr(settings, "MAN_DOWN_AP_CHANGE_HOLD_S", None)
+    object.__setattr__(settings, "MAN_DOWN_AP_CHANGE_HOLD_S", 120.0)
+    try:
+        L = "test-cor03-hold-120"
+        ev = [approx(t, L, AP1) for t in range(0, 151, 10)] + [approx(t, L, AP2) for t in range(155, 266, 10)]
+        ev.append(approx(274, L, AP2))
+        at274 = run_of(L)
+        ev.append(approx(275, L, AP2))
+        at275 = run_of(L)
+        ev += [approx(t, L, AP2) for t in range(285, 346, 10)]
+    finally:
+        object.__setattr__(settings, "MAN_DOWN_AP_CHANGE_HOLD_S", hold_before)
+    check(11, "at a 120 s hold: a move to the other AP counts 120 s after its first reading there, and the "
+          "new run's amber comes on that same reading",
+          fired(ev) == [(60, "possible_man_down", True), (275, "possible_man_down", True)]
+          and at274 == (AP1[0], AP1[1], iso(0), None, False) and at275 == (AP2[0], AP2[1], iso(155), None, True)
+          and anchors(L) == [AP1, AP2],
+          f"fired={fired(ev)} run at 274={at274} at 275={at275} anchors={anchors(L)}")
 
     loud = [p for p in ("UNIMPLEMENTED.txt", "TRIPWIRE_HIT.txt") if os.path.exists(os.path.join(run_dir, p))]
     check(0, "fakes: nothing unimplemented, no tripwire", not loud, f"{loud}")

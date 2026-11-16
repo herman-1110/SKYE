@@ -61,29 +61,33 @@ _collision_bad_timestamp_logged: Dict[str, float] = {}
 class _ApproxRun:
     """One person's current approximate run (Prompt 136, COR-03): consecutive
     approximate (one- or two-AP) readings, whose x/y is the strongest AP's own
-    coordinate. Its anchor is the run's first reading. An exact fix ends a run
+    coordinate. Its anchor is the AP it started at. An exact fix ends a run
     that hasn't alerted, and confirms or cancels one that has.
 
     The strongest AP can flip between neighbours every few seconds without the
     beacon moving, so a reading MAN_DOWN_MOVEMENT_EPSILON_M or more from the
-    anchor (a different strongest AP) is only a pending change (Prompt 145,
-    Herman's decision (c), 16 Nov). A reading back at the anchor cancels it,
-    and one at a third AP replaces it; exact fixes leave it as it is. Once the
-    new AP has been the strongest for MAN_DOWN_AP_CHANGE_HOLD_S, a new run
-    starts there, timed from its first reading. That counts as movement only
-    if this run had itself lasted that long before the change began: right
-    after a start, the first reading often comes from whichever AP reported
-    first."""
+    anchor (a different strongest AP) only starts a pending change (Prompt 145,
+    Herman's decision (c), 16 Nov). A reading back at the anchor cancels it.
+    Readings at other APs, however many, and exact fixes leave it as it is: a
+    third AP doesn't restart it (Herman, 17 Nov). Once MAN_DOWN_AP_CHANGE_HOLD_S
+    has passed since the first reading away from the anchor, a new run starts
+    at the latest reading's AP, timed from that first reading away. That
+    counts as movement only if this run had itself lasted that long before the
+    change began: right after a start, the first reading often comes from
+    whichever AP reported first."""
     x: float
     y: float
     started_at: str                          # ISO 8601: the run's own clock
     alerted: bool = False                    # its one possible_man_down has fired
     confirming_since: Optional[str] = None   # first exact fix after that alert
-    # The pending change: the other AP's x, y and the time of its first reading.
-    moving_to: Optional[Tuple[float, float, str]] = None
+    # The pending change: the time of the first reading away from the anchor,
+    # and every AP read as the strongest since then.
+    away_since: Optional[str] = None
+    away_spots: List[Tuple[float, float]] = field(default_factory=list)
     # Every AP this run has had as the strongest, its anchor first. The restart
     # check matches an earlier alert at any of them (Prompt 145): which of two
-    # flipping APs a run starts at is chance.
+    # flipping APs a run starts at is chance. A run started by a change also
+    # has every AP read since that change began, the time it's timed from.
     spots: List[Tuple[float, float]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -165,6 +169,12 @@ def _unresolved_since(alerts: Optional[List[dict]], since_unix: float, alert_typ
 
 def _is_coord(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _note_spot(spots: List[Tuple[float, float]], x: float, y: float) -> None:
+    """Add (x, y) to spots unless one already there is within epsilon of it."""
+    if all(math.hypot(x - sx, y - sy) >= settings.MAN_DOWN_MOVEMENT_EPSILON_M for sx, sy in spots):
+        spots.append((x, y))
 
 
 def _same_stillness_episode(alerts: List[dict], alert_type: str, person_id: str, floor_id: str,
@@ -349,7 +359,7 @@ class SafetyService:
 
     def _check_approximate(self, current: PositionRecord, cfg: SafetySettings, now: str) -> Optional[AlertRecord]:
         """An approximate reading: extend the person's approximate run, or
-        start a new one once a different strongest AP has held (see
+        start a new one once a change of strongest AP has held (see
         _ApproxRun), and raise the run's one possible_man_down once it has
         lasted man_down_minutes (Prompt 136, COR-03). Neither reads nor writes
         _last_man_down: the amber alert is a separate signal from the red one."""
@@ -360,24 +370,27 @@ class SafetyService:
             return None
         eps = settings.MAN_DOWN_MOVEMENT_EPSILON_M
         if math.hypot(current.x - run.x, current.y - run.y) < eps:
-            run.moving_to = None    # back at the run's AP: the change didn't hold
+            # Back at the run's AP: the change didn't hold.
+            run.away_since, run.away_spots = None, []
         else:
             # A different strongest AP (Prompt 145, decision (c)).
-            pending = run.moving_to
-            if pending is None or math.hypot(current.x - pending[0], current.y - pending[1]) >= eps:
-                run.moving_to = (current.x, current.y, now)
-                if all(math.hypot(current.x - sx, current.y - sy) >= eps for sx, sy in run.spots):
-                    run.spots.append((current.x, current.y))
+            _note_spot(run.spots, current.x, current.y)
+            if run.away_since is None:
+                run.away_since, run.away_spots = now, [(current.x, current.y)]
                 return None
-            if seconds_between(pending[2], now) < settings.MAN_DOWN_AP_CHANGE_HOLD_S:
+            _note_spot(run.away_spots, current.x, current.y)
+            if seconds_between(run.away_since, now) < settings.MAN_DOWN_AP_CHANGE_HOLD_S:
                 # Not held yet, and nothing is raised from a reading away
                 # from the run's AP.
                 return None
-            # Held: a new run at the new AP, timed from its first reading.
-            # This also ends an upgrade's confirmation (_check_upgrade).
-            if seconds_between(run.started_at, pending[2]) >= settings.MAN_DOWN_AP_CHANGE_HOLD_S:
+            # Held: a new run at this reading's AP, timed from the first
+            # reading away, its spots every AP read since then. This also
+            # ends an upgrade's confirmation (_check_upgrade).
+            if seconds_between(run.started_at, run.away_since) >= settings.MAN_DOWN_AP_CHANGE_HOLD_S:
                 _seen_moving.add(pid)
-            run = _approx_runs[pid] = _ApproxRun(pending[0], pending[1], pending[2])
+            here = (current.x, current.y)
+            spots = [here] + [s for s in run.away_spots if math.hypot(s[0] - here[0], s[1] - here[1]) >= eps]
+            run = _approx_runs[pid] = _ApproxRun(current.x, current.y, run.away_since, spots=spots)
         if run.confirming_since is not None:
             # Confirming an upgrade: an approximate reading at the run's
             # anchor changes nothing.

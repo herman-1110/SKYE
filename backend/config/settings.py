@@ -167,12 +167,15 @@ def _load() -> Settings:
         MAN_DOWN_UPGRADE_CONFIRM_S=float(os.environ.get("MAN_DOWN_UPGRADE_CONFIRM_S", "30")),
         # With only one or two APs hearing someone, their position is the
         # strongest AP's own coordinate, and the strongest AP can flip between
-        # neighbours every few seconds without the beacon moving. A different
+        # neighbours every few seconds without the beacon moving. A change of
         # strongest AP counts as movement, and starts a new approximate run,
-        # only once it has stayed the strongest this long (seconds) (Prompt 145,
-        # Herman's decision (c), 16 Nov). Uncalibrated, like
-        # MAN_DOWN_MOVEMENT_EPSILON_M.
-        MAN_DOWN_AP_CHANGE_HOLD_S=float(os.environ.get("MAN_DOWN_AP_CHANGE_HOLD_S", "30")),
+        # only once no reading has come from the run's own AP for this long
+        # (seconds), timed from the first reading away from it, whichever other
+        # APs are the strongest meanwhile (Prompt 145, Herman's decision (c),
+        # 16 Nov). 120 since 17 Nov: in a replay of 16 Nov, a beacon left on a
+        # desk was counted as moving up to once an hour at 30 s, and never at
+        # 120 s. Uncalibrated, like MAN_DOWN_MOVEMENT_EPSILON_M.
+        MAN_DOWN_AP_CHANGE_HOLD_S=float(os.environ.get("MAN_DOWN_AP_CHANGE_HOLD_S", "120")),
         # After a restart, an unresolved stillness alert for the same person
         # and spot means the episode was already alerted (Prompt 145, D3), but
         # only if it was raised within this many hours: an old one left
