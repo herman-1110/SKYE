@@ -25,11 +25,26 @@ man_down_minutes is 1; the clock is safety_service.utcnow_iso.
   12  /alerts reads after the restart: one per alert that came due (two for an
       amber and its red), none once the person had moved, and none again
       after a match or a raise
+  13  the age limit (MAN_DOWN_RESTART_MATCH_H, 12): an alert 12 h 2 min old
+      when the stillness comes due again doesn't count (a new alert), one
+      11 h 56 min old does (none), and one whose timestamp has no time zone
+      doesn't (a new alert)
+  14  flipping between two APs across the restart, never for 30 s, the first
+      reading after it at the other AP: no new amber (the match takes any AP
+      the run has had as the strongest), not movement, one read
+  15  a far AP first after the restart (one reading), then the alert's AP: no
+      new amber, not movement, one read
+  16  the same before exact fixes (one reading at each of two APs, then exact
+      fixes at the red alert's spot): no new red, one read
+  17  a real move after the restart: the alert's AP for 40 s, then the other
+      AP: a new amber there, 60 s after its first reading, with no read
    0  the fakes: nothing unimplemented, no tripwire
 
 On the base (9f28798) every restart repeats the alert and nothing reads
-/alerts: checks 1, 2, 3, 9, 10, 11 and 12 fail; 4-8, which expect a new
-alert, pass there too.
+/alerts: checks 1, 2, 3, 9, 10, 11, 12 and 13-16 fail; 4-8 and 17, which
+expect a new alert, pass there too. On 794261a (145's first build, where a
+change of strongest AP counted as movement at once and the match had no age
+limit), checks 13-16 fail.
 
 usage (Git Bash, repo root):
   "$py" -B tools/harness/f145_stillness_restart_inprocess.py --backend-dir "$exp/backend"
@@ -53,6 +68,7 @@ SPOT = (5.0, 5.0)
 JITTER = (5.3, 5.1)       # 0.32 m from SPOT: the same spot, read again
 FAR = (12.0, 5.0)         # 7 m away: past the 2 m epsilon
 AP1 = (2.0, 2.0)          # an approximate reading's x/y is the strongest AP's own
+AP2 = (14.0, 2.0)         # the other AP, 12 m away
 UPGRADE = [(2.5, 2.5), (2.6, 2.5), (2.5, 2.6)]
 OTHER_FLOOR = "test-f145-other-floor"
 results = []
@@ -154,6 +170,24 @@ def main() -> int:
 
     def upgrade(pid, t0):
         return [e for e in (at(t0 + dt, pid, xy) for dt, xy in zip((0, 15, 31), UPGRADE)) if e]
+
+    def flip(pid, t0, t1, first, other, stays=(1, 4, 1, 5, 2, 3), step=5):
+        """Approximate readings every step s from t0 to t1, the strongest AP
+        alternating between first and other, each stay that many readings:
+        never 30 s."""
+        out, t, xy, i = [], t0, first, 0
+        while t <= t1:
+            for _ in range(stays[i % len(stays)]):
+                if t <= t1:
+                    e = at(t, pid, xy, approx=True)
+                    if e:
+                        out.append(e)
+                t += step
+            xy, i = (other if xy == first else first), i + 1
+        return out
+
+    def moving(pid):
+        return pid in getattr(ss, "_seen_moving", set())   # none before 145
 
     n_reads = {}
 
@@ -288,6 +322,74 @@ def main() -> int:
     if reads["ms"]:
         print(f"[INFO] the fake's /alerts read: {len(reads['ms'])} reads, max {max(reads['ms']):.2f} ms, "
               f"/alerts holding {reads['size']} alerts at the last one (in-process, not the real RTDB)", flush=True)
+
+    # 13: the age limit. Each red is raised at 60; after the restart the
+    # stillness comes due again at T + 60, when the alert is T s old.
+    P11, P12, P13 = "test-f145-older-12h", "test-f145-within-12h", "test-f145-naive-ts"
+    aged = {}
+    for pid, t_after in ((P11, 43320), (P12, 42960)):   # 12 h 2 min, 11 h 56 min
+        red_before(pid)
+        restart()
+        aged[pid] = (still(pid, t_after, t_after + 100, JITTER), reads["n"])
+    red_before(P13)
+    db.reference(f"/alerts/{stored(P13)[0]['alert_id']}").update({"timestamp": "2026-11-16T02:01:00"})
+    restart()
+    aged[P13] = (still(P13, 1000, 1100, JITTER), reads["n"])
+    check(13, "the age limit: 12 h 2 min old -> a new alert; 11 h 56 min -> none; a timestamp without a "
+          "time zone -> a new alert; one read each",
+          aged == {P11: ([(43380, "man_down")], 1), P12: ([], 1), P13: ([(1060, "man_down")], 1)}
+          and [len(kinds(p)) for p in (P11, P12, P13)] == [2, 1, 2],
+          f"{aged} saved={[kinds(p) for p in (P11, P12, P13)]}")
+
+    # 14: flipping between AP1 and AP2 across the restart. After it the first
+    # reading is AP2's, so the run is AP2's and AP1 is where it flips to.
+    P14 = "test-f145-flip"
+    p14_before = flip(P14, 0, 120, AP1, AP2)
+    p14_alert = stored(P14)[0] if stored(P14) else {}
+    restart()
+    p14_after = flip(P14, 1000, 1200, AP2, AP1)
+    run14 = ss._approx_runs.get(P14)
+    run14 = (run14.x, run14.y, run14.alerted) if run14 else None
+    check(14, "flipping between two APs, the first reading after the restart at the other AP: no new amber, "
+          "not movement, one read",
+          p14_before == [(60, "possible_man_down")] and anchor(p14_alert) == (FLOOR, AP1[0], AP1[1])
+          and p14_after == [] and kinds(P14) == ["possible_man_down"] and reads["n"] == 1
+          and run14 == (AP2[0], AP2[1], True) and not moving(P14),
+          f"before={p14_before} alert={anchor(p14_alert)} after={p14_after} saved={kinds(P14)} "
+          f"reads={reads['n']} run={run14} moving={moving(P14)}")
+
+    # 15: a far AP first: the first reading after the restart is AP2's (one AP
+    # in the first flush), then AP1's, where the amber was raised
+    P15 = "test-f145-far-first"
+    amber_before(P15)
+    restart()
+    p15_after = [e for e in [at(1000, P15, AP2, approx=True)] if e] + still(P15, 1002, 1102, AP1, approx=True)
+    check(15, "a far AP first after the restart, then the alert's AP: no new amber, not movement, one read",
+          p15_after == [] and kinds(P15) == ["possible_man_down"] and reads["n"] == 1 and not moving(P15),
+          f"after={p15_after} saved={kinds(P15)} reads={reads['n']} moving={moving(P15)}")
+
+    # 16: the same before exact fixes: one approximate reading at each of two
+    # APs, then exact fixes at the red alert's spot
+    P16 = "test-f145-far-first-red"
+    red_before(P16)
+    restart()
+    p16_after = [e for e in (at(1000, P16, AP2, approx=True), at(1001, P16, AP1, approx=True)) if e] \
+        + still(P16, 1002, 1102, JITTER)
+    check(16, "the same before exact fixes (two APs, then the red alert's spot): no new red, one read",
+          p16_after == [] and kinds(P16) == ["man_down"] and reads["n"] == 1,
+          f"after={p16_after} saved={kinds(P16)} reads={reads['n']}")
+
+    # 17: a real move after the restart: AP1, the alert's, for 40 s, then AP2,
+    # held 30 s at 1075
+    P17 = "test-f145-real-move"
+    amber_before(P17)
+    restart()
+    p17_after = still(P17, 1000, 1040, AP1, approx=True) + still(P17, 1045, 1145, AP2, approx=True)
+    check(17, "a real move after the restart (AP1 for 40 s, then AP2): a new amber at AP2, 60 s after its "
+          "first reading, with no read",
+          p17_after == [(1105, "possible_man_down")] and kinds(P17) == ["possible_man_down", "possible_man_down"]
+          and reads["n"] == 0,
+          f"after={p17_after} saved={kinds(P17)} reads={reads['n']}")
 
     loud = [p for p in ("UNIMPLEMENTED.txt", "TRIPWIRE_HIT.txt") if os.path.exists(os.path.join(run_dir, p))]
     check(0, "fakes: nothing unimplemented, no tripwire", not loud, f"{loud}")

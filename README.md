@@ -530,6 +530,8 @@ All of them live in `backend/.env` and are read in `backend/config/settings.py`;
 | `MAN_DOWN_STALE_SECONDS` | `120.0` | Seconds without a position update before a signal-loss man-down |
 | `MAN_DOWN_STALE_MAX_AGE_S` | `3600.0` | Older position records are treated as dead, not as an incident |
 | `MAN_DOWN_UPGRADE_CONFIRM_S` | `30` | Seconds of three-AP stillness that turn an amber possible man-down into a red man-down |
+| `MAN_DOWN_AP_CHANGE_HOLD_S` | `30` | With one or two APs: seconds a different strongest AP must stay the strongest before it counts as movement |
+| `MAN_DOWN_RESTART_MATCH_H` | `12` | After a restart, an unresolved stillness alert raised within this many hours for the same person and spot isn't raised again |
 | `AP_SILENT_AFTER_S` | `10` | Seconds after an AP's last report before it counts as silent |
 | `AP_ALIVE_GRACE_S` | `30` | Seconds an AP must have been reporting again, after a silence, before it counts as alive |
 | `COLLISION_DISTANCE_M` | `2.0` | Distance (m) between a worker and a forklift that raises a collision alert * |

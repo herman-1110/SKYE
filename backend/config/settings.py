@@ -30,6 +30,8 @@ class Settings:
     MAN_DOWN_STALE_SECONDS: float
     MAN_DOWN_STALE_MAX_AGE_S: float
     MAN_DOWN_UPGRADE_CONFIRM_S: float
+    MAN_DOWN_AP_CHANGE_HOLD_S: float
+    MAN_DOWN_RESTART_MATCH_H: float
     AP_SILENT_AFTER_S: float
     AP_ALIVE_GRACE_S: float
     COLLISION_DISTANCE_M: float
@@ -163,6 +165,19 @@ def _load() -> Settings:
         # upgraded to a red man_down (Prompt 136, COR-03). One exact fix alone
         # isn't trusted to confirm the person is still where they lay.
         MAN_DOWN_UPGRADE_CONFIRM_S=float(os.environ.get("MAN_DOWN_UPGRADE_CONFIRM_S", "30")),
+        # With only one or two APs hearing someone, their position is the
+        # strongest AP's own coordinate, and the strongest AP can flip between
+        # neighbours every few seconds without the beacon moving. A different
+        # strongest AP counts as movement, and starts a new approximate run,
+        # only once it has stayed the strongest this long (seconds) (Prompt 145,
+        # Herman's decision (c), 16 Nov). Uncalibrated, like
+        # MAN_DOWN_MOVEMENT_EPSILON_M.
+        MAN_DOWN_AP_CHANGE_HOLD_S=float(os.environ.get("MAN_DOWN_AP_CHANGE_HOLD_S", "30")),
+        # After a restart, an unresolved stillness alert for the same person
+        # and spot means the episode was already alerted (Prompt 145, D3), but
+        # only if it was raised within this many hours: an old one left
+        # unresolved at someone's usual spot mustn't hide a new episode there.
+        MAN_DOWN_RESTART_MATCH_H=float(os.environ.get("MAN_DOWN_RESTART_MATCH_H", "12")),
         # An AP whose last report is older than this (seconds) is silent
         # (Prompt 136, REL-01). The signal-loss sweep holds a person's alert
         # while none of the APs that last heard them is reporting, and raises
