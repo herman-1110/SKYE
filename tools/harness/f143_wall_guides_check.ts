@@ -21,6 +21,11 @@
 //  14  the room's width and height in metres, from the floor's px/m
 //  15  the width is the X a device on the far side wall reads; the height, its Y on the far end wall
 //
+// And for the default cone of a camera with no facing saved (Herman, 18 Nov):
+//  16  it points from the camera towards the middle of the map, in pixels, in whole degrees
+//  17  a camera at the middle points straight up (0), not down
+//  18  its first save sends the field of view it was drawn with (90); a saved one is kept
+//
 // Run with Node, which strips the types itself (Node 23.6 or later; this PC has 24):
 //   node tools/harness/f143_wall_guides_check.ts
 // (from PowerShell on this PC: Node isn't on Git Bash's PATH). Exit 1 on a failure.
@@ -32,8 +37,8 @@ import {
 } from "../../frontend/utils/wallGuides.ts";
 import type { EndWall, Frac, ImageSize, SideWall, WallGuides, WallRect } from "../../frontend/utils/wallGuides.ts";
 import {
-  compassWord, conePath, facingBetween, facingFromVector, facingLabel, facingVector, normaliseFacing,
-  parseFacing, parseFov, roundFacing,
+  compassWord, conePath, defaultFacing, facingBetween, facingFromVector, facingLabel, facingSaveFields, facingVector,
+  normaliseFacing, parseFacing, parseFov, roundFacing,
 } from "../../frontend/utils/cameraFacing.ts";
 
 const results: { check: number; name: string; ok: boolean }[] = [];
@@ -321,6 +326,51 @@ const FLOORS: { name: string; size: ImageSize; ppm: number; rect: WallRect }[] =
   const bad = cases.filter((c) => c.got !== c.want);
   check(15, "the width is the X a device on the far side wall reads, the height its Y on the far end wall (identical)",
     bad.length === 0, bad.length ? `differ: ${bad.map((c) => c.name).join("; ")}` : `${cases.length} of ${cases.length} identical`);
+}
+
+// 16. Towards the middle from each side of the harness floor (1000 x 800), and from two
+// corners of the 597 x 450 floor. From the top left corner the middle is 500 px right and
+// 400 px down on the harness floor, about 128.66°, so 129; on the 597 x 450 floor 298.5 px
+// right and 225 px down, about 127.01°, so 127 (135° in fractions on both).
+{
+  const cases: [string, Frac, ImageSize, number][] = [
+    ["left of the middle", { x: 0.25, y: 0.5 }, HARNESS, 90],
+    ["above it", { x: 0.5, y: 0.1 }, HARNESS, 180],
+    ["right of it", { x: 0.9, y: 0.5 }, HARNESS, 270],
+    ["below it", { x: 0.5, y: 0.95 }, HARNESS, 0],
+    ["top left, 1000 x 800", { x: 0, y: 0 }, HARNESS, 129],
+    ["top left, 597 x 450", { x: 0, y: 0 }, REAL, 127],
+    ["bottom right, 597 x 450", { x: 1, y: 1 }, REAL, 307],
+  ];
+  const got = cases.map(([name, cam, size, want]) => ({ name, got: defaultFacing(cam, size), want }));
+  const bad = got.filter((g) => g.got !== g.want || !Number.isInteger(g.got));
+  check(16, "a camera with no facing points at the middle of the map, in the image's pixels, in whole degrees", bad.length === 0,
+    got.map((g) => `${g.name} ${g.got}`).join("; "));
+}
+
+// 17. At the middle there is no direction, so straight up; facingBetween() alone gives 180
+// there (atan2(0, -0)). Within half an image pixel counts as the middle; a pixel off doesn't.
+{
+  const atMiddle = defaultFacing({ x: 0.5, y: 0.5 }, REAL);
+  const raw = facingBetween({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }, REAL);
+  const nearly = defaultFacing({ x: 0.5 + 0.3 / 597, y: 0.5 - 0.3 / 450 }, REAL);   // 0.3 px right and 0.3 px up: 0.42 px away
+  const pixelLeft = defaultFacing({ x: 0.5 - 1 / 597, y: 0.5 }, REAL);             // 1 px left of the middle: points right
+  check(17, "a camera at the middle points straight up (0), not down; under half a pixel away counts as the middle",
+    Object.is(atMiddle, 0) && raw === 180 && nearly === 0 && pixelLeft === 90,
+    `at the middle ${atMiddle} (facingBetween alone ${raw}); 0.42 px away ${nearly}; 1 px left ${pixelLeft}`);
+}
+
+// 18. What saving sends: with no field of view saved, the facing and the 90 the default cone
+// was drawn with; with one saved, the facing alone, so the backend keeps it.
+{
+  const first = facingSaveFields(null, 134);
+  const older = facingSaveFields(undefined, 0);
+  const kept = facingSaveFields(60, 200);
+  check(18, "a first facing is saved with the field of view it was drawn with (90); a saved field of view is kept",
+    JSON.stringify(first) === JSON.stringify({ facing_deg: 134, fov_deg: 90 })
+      && JSON.stringify(older) === JSON.stringify({ facing_deg: 0, fov_deg: 90 })
+      && JSON.stringify(kept) === JSON.stringify({ facing_deg: 200 }) && !("fov_deg" in kept),
+    `none saved ${JSON.stringify(first)}; 60 saved ${JSON.stringify(kept)}`);
 }
 
 const failed = results.filter((r) => !r.ok).length;

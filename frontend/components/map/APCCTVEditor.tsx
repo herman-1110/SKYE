@@ -19,7 +19,7 @@ import {
 } from "./WallGuides";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
 import { distancesM, formatMetres, guideImageSize, parseMetres, pointAtDistances, type Frac, type ImageSize } from "@/utils/wallGuides";
-import { parseFacing, parseFov } from "@/utils/cameraFacing";
+import { DEFAULT_FOV_DEG, defaultFacing, facingSaveFields, parseFacing, parseFov } from "@/utils/cameraFacing";
 
 const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
@@ -103,9 +103,11 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const metresAt = (p: Frac) => (walls && guideSize && pxPerM ? distancesM(walls, p, guideSize, pxPerM) : null);
 
   // Turning a camera by the handle at its cone's tip saves facing_deg through
-  // the update route (Prompt 143, D2.3).
+  // the update route (Prompt 143, D2.3); a camera's first facing goes with the
+  // field of view its default cone was drawn with (Herman, 18 Nov).
   const rotation = useConeRotation(imgRef, async (id, deg) => {
-    try { await updateCCTV(buildingId, floor.id, id, { facing_deg: deg }); }
+    const cam = cctvs.find((c) => c.id === id);
+    try { await updateCCTV(buildingId, floor.id, id, facingSaveFields(cam?.fov_deg, deg)); }
     catch (err: unknown) { toast.error(backendSentence(err) ?? "Couldn't turn the camera"); }
   });
   useEffect(() => { if (!pendingPct) setTyped(null); }, [pendingPct]);
@@ -377,13 +379,17 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     if (!fov.ok && facing.value !== null) { setCctvDirectionError("Field of view: degrees from 10 to 360, or empty for 90"); return; }
     setCctvMacError(""); setCctvIpError(""); setCctvFormError(""); setCctvDirectionError("");
     setSaving(true);
+    // A camera's first facing, with Field of view left empty, keeps the field
+    // of view its default cone was drawn with (Herman, 18 Nov).
+    const editing = editingCctvId ? cctvs.find((c) => c.id === editingCctvId) : undefined;
+    const drawnFov = editing && editing.facing_deg == null ? editing.fov_deg ?? DEFAULT_FOV_DEG : null;
     const fields = {
       name: cctvName.trim() || "CCTV",
       mac: cctvMac,
       ip: cctvIp.trim(),
       checkpoint_ap_id: cctvCheckpoint || null,
       // Facing empty: not set, which clears both on an edit. The field of view goes only with a facing (D2).
-      ...(facing.value === null ? { facing_deg: null } : { facing_deg: facing.value, fov_deg: fov.ok ? fov.value : null }),
+      ...(facing.value === null ? { facing_deg: null } : { facing_deg: facing.value, fov_deg: (fov.ok ? fov.value : null) ?? drawnFov }),
     };
     try {
       if (editingCctvId) {
@@ -744,17 +750,23 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           );
         })}
 
-        {/* Which way each camera faces, with a handle at the cone's tip to turn it (Prompt 143, D2.3) */}
+        {/* Which way each camera faces, with a handle at the cone's tip to turn it (Prompt 143, D2.3).
+            A camera with no facing saved shows a faint, dashed default cone towards the middle of the
+            map, with the same handle; it's saved only when the handle is released or Facing is saved
+            in Edit camera (Herman, 18 Nov). The dashboard map draws no cone for it. */}
         {cctvs.map((cctv) => {
-          const facing = rotation.shownFacing(cctv.id) ?? cctv.facing_deg;
-          if (facing == null) return null;
           const at = (dragTarget?.type === "cctv" && dragTarget.id === cctv.id && dragPct) || { x: cctv.x_pct, y: cctv.y_pct };
+          const turning = rotation.shownFacing(cctv.id);
+          const unset = cctv.facing_deg == null;
+          const size = naturalSize ?? guideSize;
+          const facing = turning ?? cctv.facing_deg ?? (size ? defaultFacing(at, size) : null);
+          if (facing == null) return null;
           const status = cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, (cctv.device_mac ?? cctv.mac)?.toUpperCase());
           const canTurn = !placementMode && !wallSetup.step && !dragTarget;
           return (
             <CameraCone key={`cone-${cctv.id}`} xPct={at.x} yPct={at.y} facingDeg={facing} fovDeg={cctv.fov_deg}
-              color={cctvStatusColor(status)}
-              onHandlePointerDown={canTurn ? (e) => rotation.begin(e, cctv.id, at, facing) : undefined} />
+              color={cctvStatusColor(status)} notSet={unset && turning === null}
+              onHandlePointerDown={canTurn ? (e) => rotation.begin(e, cctv.id, at, facing, unset) : undefined} />
           );
         })}
 

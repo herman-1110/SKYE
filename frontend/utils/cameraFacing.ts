@@ -41,6 +41,28 @@ export function roundFacing(deg: number): number {
   return normaliseFacing(Math.round(normaliseFacing(deg)));
 }
 
+/** Closer than this to the middle of the map, in image pixels, a camera has
+ *  no direction to point in. */
+export const AT_MIDDLE_PX = 0.5;
+
+/** The facing a camera with no saved facing is drawn with in Manage Devices
+ *  (Herman, 18 Nov): from the camera towards the middle of the map, worked out
+ *  in the image's pixels, in whole degrees like the rotate handle, so saving
+ *  it as drawn saves exactly this. A camera at the middle points straight up;
+ *  facingBetween() alone would give 180 there, since atan2(0, -0) is 180°. */
+export function defaultFacing(cam: { x: number; y: number }, size: { w: number; h: number }): number {
+  const middle = { x: 0.5, y: 0.5 };
+  if (Math.hypot((middle.x - cam.x) * size.w, (middle.y - cam.y) * size.h) < AT_MIDDLE_PX) return 0;
+  return roundFacing(facingBetween(cam, middle, size));
+}
+
+/** What saving a facing sends (Herman, 18 Nov): the facing and, when the
+ *  camera has no field of view saved, the one its cone was drawn with (90),
+ *  so what's saved matches what was drawn. A saved field of view is kept. */
+export function facingSaveFields(savedFov: number | null | undefined, facingDeg: number): { facing_deg: number; fov_deg?: number } {
+  return savedFov == null ? { facing_deg: facingDeg, fov_deg: DEFAULT_FOV_DEG } : { facing_deg: facingDeg };
+}
+
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
 /** The nearest of the 8 compass words, with up as N: 135 is "SE". */

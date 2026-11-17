@@ -7,7 +7,9 @@ import {
 // Which way a camera faces (Prompt 143, D2): a translucent cone under its
 // marker, on the dashboard map and in Manage Devices. It shows a direction,
 // not coverage, so its length is fixed on screen at about three markers
-// whatever the image's size (D2.4). The maths is in utils/cameraFacing.ts.
+// whatever the image's size (D2.4). In Manage Devices only, a camera with no
+// facing saved gets a faint, dashed default cone that can be turned the same
+// way (Herman, 18 Nov). The maths is in utils/cameraFacing.ts.
 
 /** The cone's length on screen: about three 26 px camera markers. */
 export const CONE_LENGTH_PX = 78;
@@ -15,13 +17,16 @@ const HANDLE_R = 7;
 const PAD = HANDLE_R + 3;   // room in the box for the handle at the tip
 
 /** The cone for one camera at (xPct, yPct), fractions of the image. With
- *  onHandlePointerDown it has a rotate handle at its tip (Manage Devices). */
-export default function CameraCone({ xPct, yPct, facingDeg, fovDeg, color, onHandlePointerDown }: {
+ *  onHandlePointerDown it has a rotate handle at its tip (Manage Devices).
+ *  notSet draws it faint and dashed: the default cone Manage Devices shows
+ *  for a camera with no saved facing (Herman, 18 Nov). */
+export default function CameraCone({ xPct, yPct, facingDeg, fovDeg, color, notSet = false, onHandlePointerDown }: {
   xPct: number;
   yPct: number;
   facingDeg: number;
   fovDeg?: number | null;
   color: string;
+  notSet?: boolean;
   onHandlePointerDown?: (e: React.PointerEvent<SVGCircleElement>) => void;
 }) {
   const r = CONE_LENGTH_PX;
@@ -36,8 +41,8 @@ export default function CameraCone({ xPct, yPct, facingDeg, fovDeg, color, onHan
     >
       {/* A box of fixed pixels around the camera: the image's own pixels scale evenly with it, so the angle drawn is the angle stored */}
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", overflow: "visible" }} aria-hidden="true">
-        <path d={conePath(c, c, r, facingDeg, fovDeg ?? DEFAULT_FOV_DEG)} fill={color} fillOpacity={0.16}
-          stroke={color} strokeOpacity={0.6} strokeWidth={1.5} strokeLinejoin="round" />
+        <path d={conePath(c, c, r, facingDeg, fovDeg ?? DEFAULT_FOV_DEG)} fill={color} fillOpacity={notSet ? 0.05 : 0.16}
+          stroke={color} strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray={notSet ? "4 3" : undefined} strokeLinejoin="round" />
         {onHandlePointerDown && (
           <circle cx={c + tip.x * r} cy={c + tip.y * r} r={HANDLE_R} fill="var(--bg-surface)" stroke={color} strokeWidth={2}
             style={{ pointerEvents: "auto", cursor: "grab", touchAction: "none" }} onPointerDown={onHandlePointerDown}>
@@ -90,19 +95,22 @@ export function CameraDirectionFields({ facing, fov, error, onFacing, onFov }: {
  *  worked out from the camera to the cursor in the image's pixels as drawn
  *  (imgRef), in whole degrees. Releasing saves it with save(); until that
  *  resolves the new angle stays drawn, so the cone doesn't jump back. Esc,
- *  or a cancelled pointer, puts it back and saves nothing. shownFacing(id)
- *  is the angle to draw while a turn is under way, else null. */
+ *  or a cancelled pointer, puts it back and saves nothing. On a saved cone a
+ *  release without a turn saves nothing; on a default one (unset: the camera
+ *  has no facing saved, Herman, 18 Nov) the first release saves the angle
+ *  shown, even the default itself. shownFacing(id) is the angle to draw while
+ *  a turn is under way, else null. */
 export function useConeRotation(imgRef: RefObject<HTMLImageElement | null>, save: (id: string, facingDeg: number) => Promise<void>) {
   const [shown, setShown] = useState<{ id: string; deg: number } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const drag = useRef<{ id: string; cam: { x: number; y: number }; start: number; deg: number } | null>(null);
+  const drag = useRef<{ id: string; cam: { x: number; y: number }; start: number; deg: number; unset: boolean } | null>(null);
   const saveRef = useRef(save);
   saveRef.current = save;
 
-  const begin = (e: React.PointerEvent, id: string, cam: { x: number; y: number }, facingDeg: number) => {
+  const begin = (e: React.PointerEvent, id: string, cam: { x: number; y: number }, facingDeg: number, unset = false) => {
     e.preventDefault();
     e.stopPropagation();
-    drag.current = { id, cam, start: facingDeg, deg: facingDeg };
+    drag.current = { id, cam, start: facingDeg, deg: facingDeg, unset };
     setShown({ id, deg: facingDeg });
     setDragging(true);
   };
@@ -127,7 +135,7 @@ export function useConeRotation(imgRef: RefObject<HTMLImageElement | null>, save
       const d = drag.current;
       drag.current = null;
       setDragging(false);
-      if (!d || d.deg === d.start) { setShown(null); return; }
+      if (!d || (!d.unset && d.deg === d.start)) { setShown(null); return; }
       saveRef.current(d.id, d.deg).finally(() => setShown(null));
     };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") putBack(); };
