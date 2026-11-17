@@ -24,6 +24,11 @@ class CCTV:
     ip: Optional[str] = None                 # alarms are only accepted from this address
     checkpoint_ap_id: Optional[str] = None   # an AP on the same floor, or None
     timezone: Optional[str] = None           # e.g. "UTC+08:00", read from the camera at registration
+    # Which way the camera faces on the floor plan (Prompt 143, D2): degrees
+    # clockwise from up, 0 <= facing_deg < 360, and its field of view, 10-360.
+    # Both None until set; cctv_service sets and clears them together.
+    facing_deg: Optional[float] = None
+    fov_deg: Optional[float] = None
 
     @property
     def camera_key(self) -> Optional[str]:

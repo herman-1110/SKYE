@@ -60,15 +60,23 @@ class CCTVCreateRequest(BaseModel):
     checkpoint_ap_id: Optional[str] = None
     channel: Optional[int] = None        # hidden in the UI; 1 for a direct camera
     source_type: Optional[str] = None    # hidden in the UI; "ipc"
+    # Prompt 143, D2: degrees clockwise from up on the floor plan (0 to under
+    # 360), and the field of view (10-360, 90 when left out). Range-checked
+    # in cctv_service, like the fields above.
+    facing_deg: Optional[float] = None
+    fov_deg: Optional[float] = None
 
 
 class CCTVUpdateRequest(BaseModel):
-    """Only the fields sent are changed; send null to clear ip or checkpoint_ap_id."""
+    """Only the fields sent are changed; send null to clear ip or checkpoint_ap_id.
+    facing_deg null clears the facing and the field of view together."""
     name: Optional[str] = None
     mac: Optional[str] = None
     ip: Optional[str] = None
     checkpoint_ap_id: Optional[str] = None
     channel: Optional[int] = None
+    facing_deg: Optional[float] = None
+    fov_deg: Optional[float] = None
 
 
 class PositionUpdateRequest(BaseModel):
@@ -296,6 +304,7 @@ def create_cctv(
             building_id, floor_id,
             name=body.name, x_pct=body.x_pct, y_pct=body.y_pct, mac=body.mac, ip=body.ip,
             checkpoint_ap_id=body.checkpoint_ap_id, channel=body.channel, source_type=body.source_type,
+            facing_deg=body.facing_deg, fov_deg=body.fov_deg,
         )
     except CameraError as e:
         raise HTTPException(status_code=e.status, detail=e.message)
@@ -313,8 +322,9 @@ def update_cctv(
     background_tasks: BackgroundTasks,
     admin: UserRecord = Depends(require_admin),
 ) -> dict:
-    """Edit name, mac, ip, checkpoint_ap_id or channel (Prompt 131 T2). Changing
-    ip re-reads the camera's time zone once."""
+    """Edit name, mac, ip, checkpoint_ap_id or channel (Prompt 131 T2), or
+    facing_deg and fov_deg (Prompt 143, D2). Changing ip re-reads the camera's
+    time zone once."""
     changes = body.model_dump(exclude_unset=True)
     try:
         cctv = cctv_service.update(building_id, floor_id, cctv_id, changes)

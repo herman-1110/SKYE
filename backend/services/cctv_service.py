@@ -11,7 +11,10 @@ service adds the rules around it:
 - deleting a camera removes its /cctv_heartbeats node unless another camera
   still reports through the same device;
 - every create, edit and delete rewrites go2rtc's live-view config if it
-  changed (Prompt 132, services/live_view_service.py).
+  changed (Prompt 132, services/live_view_service.py);
+- facing_deg and fov_deg, the way the camera faces on the floor plan, are
+  set and cleared together: a facing without a field of view gets 90, and
+  facing_deg null clears both (Prompt 143, D2). They change nothing else.
 
 Errors are CameraError(status, plain-English message) so the dashboard can
 show them as they are. A short-lived cache of all cameras serves the alarm
@@ -20,6 +23,7 @@ endpoint and the health loops without a Firestore read per push.
 import dataclasses
 import ipaddress
 import logging
+import math
 import re
 import threading
 import time
@@ -40,6 +44,7 @@ from utils.timestamp_utils import utcnow_iso
 log = logging.getLogger(__name__)
 
 SOURCE_TYPES = ("ipc", "nvr")
+DEFAULT_FOV_DEG = 90.0          # a facing set without a field of view (Prompt 143, D2)
 _TZ_FORMAT = re.compile(r"^UTC[+-]\d{2}:\d{2}$")
 _REGISTRATION_TIMEOUT_S = 3.0   # an admin is waiting on this request
 
@@ -110,6 +115,42 @@ class CCTVService:
         return channel
 
     @staticmethod
+    def _degrees(value) -> float:
+        """value as a float, or NaN when it isn't a number (a bool isn't one)."""
+        if isinstance(value, bool):
+            return math.nan
+        try:
+            return float(value) + 0.0      # + 0.0 turns -0.0 into 0.0
+        except (TypeError, ValueError):
+            return math.nan
+
+    @classmethod
+    def _clean_facing(cls, value) -> Optional[float]:
+        if value is None:
+            return None
+        deg = cls._degrees(value)
+        if not (math.isfinite(deg) and 0 <= deg < 360):
+            raise CameraError(422, "Invalid facing: use degrees from 0 to under 360, clockwise from the top of the floor plan.")
+        return deg
+
+    @classmethod
+    def _clean_fov(cls, value) -> Optional[float]:
+        if value is None:
+            return None
+        deg = cls._degrees(value)
+        if not (math.isfinite(deg) and 10 <= deg <= 360):
+            raise CameraError(422, "Invalid field of view: use degrees from 10 to 360.")
+        return deg
+
+    @staticmethod
+    def _direction(facing: Optional[float], fov: Optional[float]) -> tuple:
+        """(facing_deg, fov_deg) as stored: no facing means no field of view,
+        and a facing without one gets the default (Prompt 143, D2)."""
+        if facing is None:
+            return None, None
+        return facing, (DEFAULT_FOV_DEG if fov is None else fov)
+
+    @staticmethod
     def _clean_checkpoint(building_id: str, floor_id: str, ap_id) -> Optional[str]:
         if ap_id is None or (isinstance(ap_id, str) and not ap_id.strip()):
             return None
@@ -156,11 +197,13 @@ class CCTVService:
 
     # ── writes ───────────────────────────────────────────────────────────────
     def create(self, building_id: str, floor_id: str, *, name: str, x_pct: float, y_pct: float,
-               mac=None, ip=None, checkpoint_ap_id=None, channel=None, source_type=None) -> CCTV:
+               mac=None, ip=None, checkpoint_ap_id=None, channel=None, source_type=None,
+               facing_deg=None, fov_deg=None) -> CCTV:
         source_type = (source_type or "ipc").strip().lower()
         if source_type not in SOURCE_TYPES:
             raise CameraError(422, "Invalid source type: use ipc (or nvr, later).")
         mac = self._clean_mac(mac)
+        facing, fov = self._direction(self._clean_facing(facing_deg), self._clean_fov(fov_deg))
         cam = CCTV(
             id=str(uuid.uuid4()),
             floor_id=floor_id,
@@ -175,6 +218,8 @@ class CCTVService:
             channel=self._clean_channel(channel),
             ip=self._clean_ip(ip),
             checkpoint_ap_id=self._clean_checkpoint(building_id, floor_id, checkpoint_ap_id),
+            facing_deg=facing,
+            fov_deg=fov,
         )
         with self._write_lock:
             self._check_unique(cam.device_mac, cam.channel)
@@ -203,8 +248,13 @@ class CCTVService:
             new.ip = self._clean_ip(changes["ip"])
         if "checkpoint_ap_id" in changes:
             new.checkpoint_ap_id = self._clean_checkpoint(building_id, floor_id, changes["checkpoint_ap_id"])
+        if "facing_deg" in changes or "fov_deg" in changes:
+            # Only what was sent changes; facing_deg null clears both (Prompt 143, D2).
+            facing = self._clean_facing(changes["facing_deg"]) if "facing_deg" in changes else old.facing_deg
+            fov = self._clean_fov(changes["fov_deg"]) if "fov_deg" in changes else old.fov_deg
+            new.facing_deg, new.fov_deg = self._direction(facing, fov)
 
-        fields = ("name", "mac", "device_mac", "channel", "ip", "checkpoint_ap_id")
+        fields = ("name", "mac", "device_mac", "channel", "ip", "checkpoint_ap_id", "facing_deg", "fov_deg")
         with self._write_lock:
             if (new.device_mac, new.channel) != (old.device_mac, old.channel):
                 self._check_unique(new.device_mac, new.channel, exclude_id=old.id)
