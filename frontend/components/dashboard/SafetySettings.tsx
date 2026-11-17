@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   getSafetySettings,
   updateSafetySettings,
@@ -14,23 +14,36 @@ const MAX_COLLISION = 10;
 
 export default function SafetySettings() {
   const [initial, setInitial] = useState<SafetySettings | null>(null);
-  const [manDownMinutes, setManDownMinutes] = useState<number>(5);
-  const [collisionDistance, setCollisionDistance] = useState<number>(2.0);
-  const [loading, setLoading] = useState(true);
+  // No numbers until the live values have loaded (Prompt 143, D5): NaN shows
+  // as an empty box. The page used to start at 5 and 2.0 and keep them when
+  // the load failed, with Save on, so a click could overwrite the real values.
+  const [manDownMinutes, setManDownMinutes] = useState<number>(NaN);
+  const [collisionDistance, setCollisionDistance] = useState<number>(NaN);
+  const [loadState, setLoadState] = useState<"loading" | "loaded" | "failed">("loading");
   const [saving, setSaving] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Only two numbers count as loaded; a failed request or anything else
+  // leaves the form empty with Save off, and offers Retry.
+  const load = useCallback(() => {
+    setLoadState("loading");
     getSafetySettings()
       .then((s) => {
+        if (!Number.isFinite(s?.man_down_minutes) || !Number.isFinite(s?.collision_distance_m)) {
+          throw new Error("The settings came back without both values");
+        }
         setInitial(s);
         setManDownMinutes(s.man_down_minutes);
         setCollisionDistance(s.collision_distance_m);
         setLastUpdated(s.updated_at ?? null);
+        setLoadState("loaded");
       })
-      .catch(() => toast.error("Failed to load safety settings"))
-      .finally(() => setLoading(false));
+      .catch(() => setLoadState("failed"));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const loaded = loadState === "loaded" && initial !== null;
 
   const manDownInvalid =
     !Number.isInteger(manDownMinutes) ||
@@ -44,7 +57,8 @@ export default function SafetySettings() {
     initial !== null &&
     initial.man_down_minutes === manDownMinutes &&
     initial.collision_distance_m === collisionDistance;
-  const canSave = !loading && !saving && !manDownInvalid && !collisionInvalid && !unchanged;
+  // Save needs the real values loaded and one of them changed (D5.4).
+  const canSave = loaded && !saving && !manDownInvalid && !collisionInvalid && !unchanged;
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -79,12 +93,23 @@ export default function SafetySettings() {
         </span>
       </div>
 
-      {loading ? (
+      {loadState === "loading" ? (
         <p className="font-mono text-[10px] text-s-muted text-center py-4 tracking-widest">
           Loading settings…
         </p>
       ) : (
         <div className="bento-card p-5 space-y-5">
+          {loadState === "failed" && (
+            <div className="flex items-center gap-3 rounded-lg px-3 py-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)" }}>
+              <p className="flex-1 text-xs" style={{ color: "var(--danger, #ef4444)" }}>
+                Couldn&apos;t load the current settings. Nothing can be saved until they load.
+              </p>
+              <button onClick={load} className="shrink-0 px-3 py-1.5 rounded-lg border border-s-border text-xs font-mono text-s-text hover:border-s-accent transition-colors">
+                Retry
+              </button>
+            </div>
+          )}
+
           <div className="space-y-2">
             <label className="font-mono text-[10px] text-s-muted tracking-widest uppercase">
               Man-down stillness timer (minutes) <span className="text-s-danger">*</span>
@@ -94,9 +119,10 @@ export default function SafetySettings() {
               min={MIN_MAN_DOWN}
               max={MAX_MAN_DOWN}
               step={1}
-              value={Number.isFinite(manDownMinutes) ? manDownMinutes : ""}
+              value={loaded && Number.isFinite(manDownMinutes) ? manDownMinutes : ""}
               onChange={(e) => setManDownMinutes(parseInt(e.target.value, 10))}
-              className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm font-mono text-s-text focus:outline-none focus:border-s-accent transition-colors"
+              disabled={!loaded}
+              className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm font-mono text-s-text focus:outline-none focus:border-s-accent transition-colors disabled:opacity-40"
             />
             <p className="font-mono text-[10px] text-s-muted leading-relaxed">
               How long a worker or guard must remain stationary before a man-down alert fires.
@@ -113,9 +139,10 @@ export default function SafetySettings() {
               min={MIN_COLLISION}
               max={MAX_COLLISION}
               step={0.1}
-              value={Number.isFinite(collisionDistance) ? collisionDistance : ""}
+              value={loaded && Number.isFinite(collisionDistance) ? collisionDistance : ""}
               onChange={(e) => setCollisionDistance(parseFloat(e.target.value))}
-              className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm font-mono text-s-text focus:outline-none focus:border-s-accent transition-colors"
+              disabled={!loaded}
+              className="w-full bg-s-elevated border border-s-border rounded-lg px-3 py-2 text-sm font-mono text-s-text focus:outline-none focus:border-s-accent transition-colors disabled:opacity-40"
             />
             <p className="font-mono text-[10px] text-s-muted leading-relaxed">
               Worker–forklift predicted distance that triggers a collision alert.
@@ -123,7 +150,7 @@ export default function SafetySettings() {
             </p>
           </div>
 
-          {(manDownInvalid || collisionInvalid) && (
+          {loaded && (manDownInvalid || collisionInvalid) && (
             <p className="font-mono text-[10px] text-s-danger leading-relaxed">
               {manDownInvalid && (
                 <>Man-down timer must be a whole number from {MIN_MAN_DOWN} to {MAX_MAN_DOWN}.{" "}</>
@@ -134,7 +161,7 @@ export default function SafetySettings() {
             </p>
           )}
 
-          {lastUpdated && (
+          {loaded && lastUpdated && (
             <p className="font-mono text-[10px] text-s-muted leading-relaxed">
               Last changed: {new Date(lastUpdated).toLocaleString()}
             </p>
