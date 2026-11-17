@@ -10,6 +10,7 @@ Beacon-centric out: one OmadaTelemetryPayload per beacon, listing all APs that h
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import threading
 import time
@@ -60,6 +61,18 @@ def _format_mac_colons(mac_no_colons: str) -> str:
     """'CCBABD819DCD' → 'CC:BA:BD:81:9D:CD' (matches Firestore AP storage format)."""
     m = mac_no_colons.upper()
     return ":".join(m[i : i + 2] for i in range(0, len(m), 2))
+
+
+def _dotted_ipv4(value) -> Optional[str]:
+    """An AP report's reporter.ipv4 as a dotted IPv4 string ("192.168.0.50"),
+    or None when it isn't one (Prompt 143, D4.1). Only a string counts:
+    ipaddress would also take an integer."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return str(ipaddress.IPv4Address(value.strip()))
+    except ValueError:
+        return None
 
 
 def redact_ingest_token(raw):
@@ -300,7 +313,7 @@ class OmadaIngestService:
 
     # ── Heartbeat ───────────────────────────────────────────────────────────────
 
-    def _write_ap_heartbeat(self, ap_mac_colons: str, name: str = "") -> None:
+    def _write_ap_heartbeat(self, ap_mac_colons: str, name: str = "", ipv4=None) -> None:
         """Write last-seen heartbeat for a reporting AP to RTDB.
         Called for every reporting AP — registered or not — so the dashboard can
         surface online-but-unplaced APs (with their reported name) in the detection panel.
@@ -309,20 +322,28 @@ class OmadaIngestService:
         report more than AP_SILENT_AFTER_S after the previous one starts a new
         run. The signal-loss sweep only counts an AP as alive once that run is
         AP_ALIVE_GRACE_S old (Prompt 136, REL-01). Runs under pipeline_lock
-        (ingest() holds it), like the rest of this service's state."""
+        (ingest() holds it), like the rest of this service's state.
+
+        ip is the report's reporter.ipv4 when that's a dotted IPv4, and absent
+        otherwise; Place in that panel names the AP by it (Prompt 143, D4.1).
+        set() replaces the node, so an earlier report's ip doesn't linger."""
         key = ap_mac_colons.replace(":", "_")
         now = int(time.time())
         last = self._ap_last_report.get(ap_mac_colons)
         if last is None or now - last > settings.AP_SILENT_AFTER_S:
             self._ap_up_since[ap_mac_colons] = now
         self._ap_last_report[ap_mac_colons] = now
+        node = {
+            "mac": ap_mac_colons,
+            "name": name or "",
+            "last_seen": now,
+            "up_since": self._ap_up_since[ap_mac_colons],
+        }
+        ip = _dotted_ipv4(ipv4)
+        if ip:
+            node["ip"] = ip
         try:
-            rtdb.reference(f"/ap_heartbeats/{key}").set({
-                "mac": ap_mac_colons,
-                "name": name or "",
-                "last_seen": now,
-                "up_since": self._ap_up_since[ap_mac_colons],
-            })
+            rtdb.reference(f"/ap_heartbeats/{key}").set(node)
         except Exception as e:
             print(f"[OMADA] WARNING: heartbeat write failed for {ap_mac_colons}: {e}")
 
@@ -431,8 +452,9 @@ class OmadaIngestService:
         ap_mac_colons = _format_mac_colons(_normalise_mac(ap_mac_raw))
 
         # Write heartbeat for every reporting AP — even unregistered ones —
-        # so the dashboard can surface online-but-unplaced APs (with their name).
-        self._write_ap_heartbeat(ap_mac_colons, reporter.get("name", ""))
+        # so the dashboard can surface online-but-unplaced APs (with their name
+        # and IP).
+        self._write_ap_heartbeat(ap_mac_colons, reporter.get("name", ""), reporter.get("ipv4"))
 
         # ── DEBUG: full raw Omada payload dump — every reporting AP ──────
         # Off by default (Prompt 124, settings.OMADA_RAW_DUMP_ENABLED): the
