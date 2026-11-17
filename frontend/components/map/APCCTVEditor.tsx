@@ -13,7 +13,11 @@ import { cctvStatus, useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import MacAddressInput from "@/components/shared/MacAddressInput";
 import ApIcon, { apStatusColor } from "./ApIcon";
 import CctvIcon, { CctvMarker, cctvStatusColor } from "./CctvIcon";
+import {
+  PlaceDistanceFields, WALL_STEP_HINT, WallGuidesOverlay, useStoredWallGuides, useWallSetup, type TypedDistances,
+} from "./WallGuides";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
+import { distancesM, formatMetres, guideImageSize, parseMetres, pointAtDistances, type Frac, type ImageSize } from "@/utils/wallGuides";
 
 const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
@@ -70,8 +74,28 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number } | null>(null);
+  // at: the device's place, for the guides' readout (Prompt 143, D1.3).
+  const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number; at?: Frac } | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+
+  // Placement guides (Prompt 143, D1): the walls kept for this floor, the
+  // three steps that set them, and the cursor while placing. Without walls,
+  // none of it shows and the editor works as before (D1.8).
+  const [walls, saveWalls, clearWalls] = useStoredWallGuides(floor.id);
+  const wallSetup = useWallSetup(saveWalls);
+  const [hoverFrac, setHoverFrac] = useState<Frac | null>(null);
+  const [naturalSize, setNaturalSize] = useState<ImageSize | null>(null);
+  const [typed, setTyped] = useState<TypedDistances | null>(null);
+  const guideSize = guideImageSize(floor, naturalSize);
+  const pxPerM = floor.scale_pixels_per_meter;
+  const guidesOn = !!(walls && guideSize && pxPerM);
+  const metresAt = (p: Frac) => (walls && guideSize && pxPerM ? distancesM(walls, p, guideSize, pxPerM) : null);
+  useEffect(() => { if (!pendingPct) setTyped(null); }, [pendingPct]);
+  useEffect(() => { if (!placementMode) setHoverFrac(null); }, [placementMode]);
+  useEffect(() => {
+    const img = imgRef.current;   // already loaded from the cache before onLoad was attached
+    if (img?.complete && img.naturalWidth) setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+  }, [floor.url]);
 
   // Drag-to-reposition an already-placed device. dragPct overlays the live
   // pointer position on top of whatever's in Firestore; the underlying
@@ -103,7 +127,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const handleMarkerPointerDown =
     (type: "ap" | "cctv", id: string, xPct: number, yPct: number) => (e: React.PointerEvent) => {
       if ((e.target as HTMLElement).closest("button")) return;
-      if (placementMode || dragTarget) return;
+      if (placementMode || dragTarget || wallSetup.step) return;
       e.preventDefault();
       e.stopPropagation();
       dragOriginRef.current = { clientX: e.clientX, clientY: e.clientY, xPct, yPct };
@@ -164,12 +188,59 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     };
   }, [dragTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** A pointer position as a fraction of the image, clamped to it. */
+  const fracAt = (e: { clientX: number; clientY: number }): Frac | null => {
+    const rect = imgRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width || !rect.height) return null;
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  // The walls' three steps take the map's pointer while they run; with walls
+  // set, the cursor is followed in Add AP / Add CCTV mode (Prompt 143, D1).
+  const handleMapPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const p = wallSetup.step ? fracAt(e) : null;
+    if (p) wallSetup.pointerDown(p, e);
+  };
+  const handleMapPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (wallSetup.step) { const p = fracAt(e); if (p) wallSetup.pointerMove(p); }
+    else if (placementMode && guidesOn && !pendingPct) setHoverFrac(fracAt(e));
+  };
+  const handleMapPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = imgRef.current?.getBoundingClientRect();
+    const p = wallSetup.step === 1 ? fracAt(e) : null;
+    if (p && rect) wallSetup.pointerUp(p, { w: 8 / rect.width, h: 8 / rect.height });
+  };
+
   const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (wallSetup.step) { const p = fracAt(e); if (p) wallSetup.click(p); return; }
     if (!placementMode || !imgRef.current) return;
     const rect = imgRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
-    setPendingPct({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) });
+    const clicked = { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+    setPendingPct(clicked);
+    // With walls set, the dialog's X and Y start from the clicked point (D1.6).
+    const d = metresAt(clicked);
+    setTyped(d ? { x: formatMetres(d.x), y: formatMetres(d.y), xEdited: false, yEdited: false, from: clicked } : null);
+  };
+
+  /** A typed X or Y moves the point being placed (D1.6): measured from the
+   *  same walls, clamped to the image, and saved like a click. A box that
+   *  wasn't typed in keeps the clicked point on its axis; one that doesn't
+   *  hold a number yet leaves the point where it is. */
+  const typeDistance = (axis: "x" | "y", text: string) => {
+    if (!typed || !pendingPct || !walls || !guideSize || !pxPerM) return;
+    const next = axis === "x" ? { ...typed, x: text, xEdited: true } : { ...typed, y: text, yEdited: true };
+    setTyped(next);
+    const xM = parseMetres(next.x), yM = parseMetres(next.y);
+    const moved = pointAtDistances(walls, next.from, { x: xM ?? 0, y: yM ?? 0 }, guideSize, pxPerM);
+    setPendingPct({
+      x: next.xEdited && xM !== null ? moved.x : pendingPct.x,
+      y: next.yEdited && yM !== null ? moved.y : pendingPct.y,
+    });
   };
 
   const openEditAP = (ap: APRecord) => {
@@ -372,7 +443,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-mono text-[10px] text-s-muted tracking-widest uppercase mr-1">Devices</span>
         <button
-          onClick={() => setPlacementMode(placementMode === "ap" ? null : "ap")}
+          onClick={() => { wallSetup.cancel(); setPlacementMode(placementMode === "ap" ? null : "ap"); }}
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "ap" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
@@ -380,14 +451,31 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           {placementMode === "ap" ? "Cancel" : "Add AP"}
         </button>
         <button
-          onClick={() => setPlacementMode(placementMode === "cctv" ? null : "cctv")}
+          onClick={() => { wallSetup.cancel(); setPlacementMode(placementMode === "cctv" ? null : "cctv"); }}
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "cctv" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
           <CctvIcon size={14} />
           {placementMode === "cctv" ? "Cancel" : "Add CCTV"}
         </button>
-        {placementMode && (
+        {/* Placement guides (Prompt 143, D1): pick two walls to measure from, or clear them */}
+        <button
+          onClick={() => { if (wallSetup.step) { wallSetup.cancel(); return; } cancelPlacement(); wallSetup.start(); }}
+          disabled={!floor.scale_pixels_per_meter}
+          title={walls ? "Draw the room and pick its walls again" : "Draw the room and pick two walls to measure from"}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${wallSetup.step ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M7 3v4M11 3v2M15 3v4M3 7h4M3 11h2M3 15h4"/></svg>
+          {wallSetup.step ? "Cancel" : "Walls"}
+        </button>
+        {walls && !wallSetup.step && (
+          <button onClick={clearWalls} className="px-3 py-1.5 rounded-lg text-xs font-mono bg-s-elevated border border-s-border text-s-muted hover:text-s-danger transition-colors">
+            Clear walls
+          </button>
+        )}
+        {wallSetup.step ? (
+          <span className="font-mono text-[10px] text-s-accent">{WALL_STEP_HINT[wallSetup.step]}</span>
+        ) : placementMode && (
           <span className="font-mono text-[10px] text-s-accent">Click on the map to place</span>
         )}
         {onClose && (
@@ -503,8 +591,16 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       {/* Map canvas */}
       <div
         className="relative w-full rounded-xl overflow-hidden border border-s-border bg-s-elevated select-none"
-        style={{ cursor: placementMode ? "crosshair" : "default", userSelect: dragTarget ? "none" : undefined }}
+        style={{
+          cursor: placementMode || wallSetup.step ? "crosshair" : "default",
+          userSelect: dragTarget ? "none" : undefined,
+          touchAction: wallSetup.step === 1 ? "none" : undefined,
+        }}
         onClick={handleMapClick}
+        onPointerDown={handleMapPointerDown}
+        onPointerMove={handleMapPointerMove}
+        onPointerUp={handleMapPointerUp}
+        onPointerLeave={() => setHoverFrac(null)}
       >
         <img
           ref={imgRef}
@@ -512,7 +608,31 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           alt={floor.name}
           className="w-full h-auto pointer-events-none"
           draggable={false}
+          onLoad={(e) => setNaturalSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
         />
+
+        {/* The walls, and the guides to the point being placed, dragged or hovered (Prompt 143, D1.3) */}
+        {(() => {
+          const point: Frac | null = !guidesOn || wallSetup.step ? null
+            : dragTarget && dragPct ? dragPct
+              : pendingPct && placementMode ? pendingPct
+                : placementMode ? hoverFrac
+                  : hoveredMarker?.at ?? null;
+          return <WallGuidesOverlay walls={guidesOn ? walls : null} setup={wallSetup} point={point}
+            distances={point ? metresAt(point) : null} />;
+        })()}
+
+        {/* With walls set, a ghost marker follows the cursor in Add AP / Add CCTV mode and stays
+            on the point being placed while its dialog is open */}
+        {(() => {
+          const at = placementMode && guidesOn ? (pendingPct ?? hoverFrac) : null;
+          if (!at) return null;
+          return (
+            <div className="absolute" style={{ left: `${at.x * 100}%`, top: `${at.y * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: "none", zIndex: 12, opacity: pendingPct ? 0.9 : 0.55 }}>
+              {placementMode === "ap" ? <ApIcon size={22} style={{ color: "var(--accent)" }} /> : <CctvMarker color="var(--accent)" />}
+            </div>
+          );
+        })()}
 
         {/* AP markers, coloured by status (Prompt 142, D2) — drag an existing one to reposition it */}
         {aps.map((ap) => {
@@ -531,15 +651,16 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 // Only the scale/shadow pop eases in — left/top must stay
                 // untransitioned so the marker tracks the cursor instantly.
                 transition: "transform 0.12s ease-out, filter 0.12s ease-out",
-                pointerEvents: "auto",
+                // While the walls' steps run, clicks go to the map, never a marker's ✕.
+                pointerEvents: wallSetup.step ? "none" : "auto",
                 zIndex: isDragging ? 20 : 10,
                 cursor: placementMode ? "default" : isDragging ? "grabbing" : "grab",
                 filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" : undefined,
                 touchAction: "none",
               }}
               onPointerDown={handleMarkerPointerDown("ap", ap.id, ap.x_pct, ap.y_pct)}
-              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
-              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
+              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
+              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
               onMouseLeave={() => setHoveredMarker(null)}
             >
               <ApIcon size={22} style={{ color: apStatusColor(status) }} />
@@ -571,15 +692,16 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 // Only the scale/shadow pop eases in — left/top must stay
                 // untransitioned so the marker tracks the cursor instantly.
                 transition: "transform 0.12s ease-out, filter 0.12s ease-out",
-                pointerEvents: "auto",
+                // While the walls' steps run, clicks go to the map, never a marker's ✕.
+                pointerEvents: wallSetup.step ? "none" : "auto",
                 zIndex: isDragging ? 20 : 10,
                 cursor: placementMode ? "default" : isDragging ? "grabbing" : "grab",
                 filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" : undefined,
                 touchAction: "none",
               }}
               onPointerDown={handleMarkerPointerDown("cctv", cctv.id, cctv.x_pct, cctv.y_pct)}
-              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
-              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY })}
+              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
+              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
               onMouseLeave={() => setHoveredMarker(null)}
             >
               <CctvMarker color={cctvStatusColor(status)} />
@@ -597,6 +719,11 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         {hoveredMarker && typeof document !== "undefined" && createPortal(
           <div style={{ position: "fixed", left: hoveredMarker.x + 12, top: hoveredMarker.y - 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-primary)", padding: "4px 10px", borderRadius: "6px", fontSize: "12px", pointerEvents: "none", zIndex: 9999, fontFamily: "IBM Plex Mono, monospace", whiteSpace: "nowrap" }}>
             {hoveredMarker.label}
+            {(() => {
+              // With walls set, the device's distances from them (Prompt 143, D1.3).
+              const d = guidesOn && hoveredMarker.at ? metresAt(hoveredMarker.at) : null;
+              return d && <div style={{ color: "var(--text-secondary)", marginTop: 2 }}>X {formatMetres(d.x)} m · Y {formatMetres(d.y)} m</div>;
+            })()}
           </div>,
           document.body
         )}
@@ -701,7 +828,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
       {/* AP place / rename modal */}
       {((pendingPct && placementMode === "ap") || editingApId) && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={cancelPlacement}>
+        // With walls set (typed), a light backdrop with no blur, so the guides to the point stay readable (D1.3)
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${typed ? "bg-black/20" : "bg-black/50 backdrop-blur-sm"}`} onClick={cancelPlacement}>
           <div className="w-full max-w-xs rounded-xl overflow-hidden" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }} onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-s-border">
               <h3 className="font-mono text-xs text-s-muted tracking-widest uppercase">{editingApId ? "Rename Access Point" : "Place Access Point"}</h3>
@@ -732,6 +860,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   />
                 </div>
               )}
+              {typed && pendingPct && !editingApId && (
+                <PlaceDistanceFields typed={typed} reads={metresAt(pendingPct)} onType={typeDistance} />
+              )}
             </div>
             <div className="flex gap-2 px-5 py-4 border-t border-s-border">
               <button onClick={cancelPlacement} className="px-4 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors">Cancel</button>
@@ -747,7 +878,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
       {/* CCTV add / edit modal */}
       {((pendingPct && placementMode === "cctv") || editingCctvId) && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={cancelPlacement}>
+        // With walls set (typed), a light backdrop with no blur, so the guides to the point stay readable (D1.3)
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${typed ? "bg-black/20" : "bg-black/50 backdrop-blur-sm"}`} onClick={cancelPlacement}>
           <div className="w-full max-w-sm rounded-xl overflow-hidden" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }} onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-s-border">
               <h3 className="font-mono text-xs text-s-muted tracking-widest uppercase">{editingCctvId ? "Edit CCTV Camera" : "Place CCTV Camera"}</h3>
@@ -791,6 +923,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   ))}
                 </select>
               </div>
+              {typed && pendingPct && !editingCctvId && (
+                <PlaceDistanceFields typed={typed} reads={metresAt(pendingPct)} onType={typeDistance} />
+              )}
               {cctvFormError && (
                 <p className="text-xs rounded-lg px-3 py-2" style={{ color: "var(--danger, #ef4444)", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)" }}>
                   {cctvFormError}
