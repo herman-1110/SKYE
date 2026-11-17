@@ -67,6 +67,18 @@ export function distancesM(g: WallGuides, p: Frac, size: ImageSize, pxPerM: numb
   };
 }
 
+/** The room's width and height in metres, (x1 − x0) × width ÷ px/m and
+ *  (y1 − y0) × height ÷ px/m: distancesM()'s arithmetic, so the width is the
+ *  X a device on the far side wall reads, and the height its Y on the far end
+ *  wall. Shown on the room's outline so its size can be checked against the
+ *  real room. */
+export function rectSizeM(rect: WallRect, size: ImageSize, pxPerM: number): { w: number; h: number } {
+  return {
+    w: (rect.x1 - rect.x0) * size.w / pxPerM,
+    h: (rect.y1 - rect.y0) * size.h / pxPerM,
+  };
+}
+
 /** Where typed distances put a device, measured from the same walls. Each
  *  axis keeps the side of its wall that `from` (the clicked point) is on; a
  *  point right on the wall goes into the room. Clamped to the image. */

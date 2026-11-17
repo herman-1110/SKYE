@@ -17,6 +17,10 @@
 //  12  rounding for the handle wraps 359.6 to 0; compass words; the "135° (SE)" label
 //  13  the cone's outline and the handle's tip point the right way; the dialog's boxes
 //
+// And for the room's outline (Herman, 18 Nov):
+//  14  the room's width and height in metres, from the floor's px/m
+//  15  the width is the X a device on the far side wall reads; the height, its Y on the far end wall
+//
 // Run with Node, which strips the types itself (Node 23.6 or later; this PC has 24):
 //   node tools/harness/f143_wall_guides_check.ts
 // (from PowerShell on this PC: Node isn't on Git Bash's PATH). Exit 1 on a failure.
@@ -24,9 +28,9 @@
 // No browser, no backend, nothing written.
 import {
   distancesM, formatMetres, guideGeometry, guideImageSize, insideRect, nearerEndWall, nearerSideWall,
-  parseMetres, parseWallGuides, pointAtDistances, rectFromCorners, serialiseWallGuides, wallGuidesKey,
+  parseMetres, parseWallGuides, pointAtDistances, rectFromCorners, rectSizeM, serialiseWallGuides, wallGuidesKey,
 } from "../../frontend/utils/wallGuides.ts";
-import type { EndWall, Frac, ImageSize, SideWall, WallGuides } from "../../frontend/utils/wallGuides.ts";
+import type { EndWall, Frac, ImageSize, SideWall, WallGuides, WallRect } from "../../frontend/utils/wallGuides.ts";
 import {
   compassWord, conePath, facingBetween, facingFromVector, facingLabel, facingVector, normaliseFacing,
   parseFacing, parseFov, roundFacing,
@@ -274,6 +278,49 @@ const walls = (xWall: SideWall, yWall: EndWall): WallGuides => ({ rect: RECT, xW
     && JSON.stringify(fovs) === JSON.stringify([null, 10, 360, "bad", "bad", 120]);
   check(13, "a cone facing 90° opens to the right, the handle at 90° is right and at 180° down; the dialog's boxes", ok,
     `start (${lx.toFixed(1)}, ${ly.toFixed(1)}) end (${ex.toFixed(1)}, ${ey.toFixed(1)}); facings ${JSON.stringify(facings)}; fovs ${JSON.stringify(fovs)}`);
+}
+
+// The room's outline (Herman, 18 Nov): a room on the 597 x 450 floor, and the two floors.
+const REAL_ROOM: WallRect = { x0: 0.12, y0: 0.08, x1: 0.83, y1: 0.91 };
+const FLOORS: { name: string; size: ImageSize; ppm: number; rect: WallRect }[] = [
+  { name: "harness", size: HARNESS, ppm: PPM, rect: RECT },
+  { name: "597 x 450", size: REAL, ppm: REAL_PPM, rect: REAL_ROOM },
+];
+
+// 14. Width = (x1 - x0) x width ÷ px/m and height = (y1 - y0) x height ÷ px/m. RECT is
+// 12 m by 11.2 m on the harness floor; REAL_ROOM is 0.71 x 597 ÷ 46.08 by 0.83 x 450 ÷ 46.08.
+{
+  const harness = rectSizeM(RECT, HARNESS, PPM);
+  const real = rectSizeM(REAL_ROOM, REAL, REAL_PPM);
+  const whole = rectSizeM(rectFromCorners({ x: -0.3, y: 1.4 }, { x: 1.2, y: -0.1 }), HARNESS, PPM);   // dragged past the image
+  const press = rectSizeM(rectFromCorners({ x: 0.4, y: 0.4 }, { x: 0.4, y: 0.4 }), HARNESS, PPM);   // the press, before any move
+  const ok = near(harness.w, 12) && near(harness.h, 11.2)
+    && near(real.w, 9.198567708333333) && near(real.h, 8.10546875)
+    && formatMetres(real.w) === "9.20" && formatMetres(real.h) === "8.11"
+    && whole.w === 20 && whole.h === 16 && press.w === 0 && press.h === 0;
+  check(14, "the room's width and height in metres from the floor's px/m (a drag past the image counts to its edge)", ok,
+    `harness ${formatMetres(harness.w)} x ${formatMetres(harness.h)} m; 597 x 450 floor ${formatMetres(real.w)} x ${formatMetres(real.h)} m; `
+    + `past the edges ${formatMetres(whole.w)} x ${formatMetres(whole.h)} m`);
+}
+
+// 15. The lengths and the guides agree to the last bit: on the far side wall a device reads
+// X = the width, and on the far end wall Y = the height, whichever walls are picked.
+{
+  const cases: { name: string; got: number; want: number }[] = [];
+  for (const f of FLOORS) {
+    const s = rectSizeM(f.rect, f.size, f.ppm);
+    const g = (xWall: SideWall, yWall: EndWall): WallGuides => ({ rect: f.rect, xWall, yWall });
+    const mid = { x: (f.rect.x0 + f.rect.x1) / 2, y: (f.rect.y0 + f.rect.y1) / 2 };
+    cases.push(
+      { name: `${f.name}, X from the left wall at the right wall`, got: distancesM(g("left", "top"), { x: f.rect.x1, y: mid.y }, f.size, f.ppm).x, want: s.w },
+      { name: `${f.name}, X from the right wall at the left wall`, got: distancesM(g("right", "top"), { x: f.rect.x0, y: mid.y }, f.size, f.ppm).x, want: s.w },
+      { name: `${f.name}, Y from the top wall at the bottom wall`, got: distancesM(g("left", "top"), { x: mid.x, y: f.rect.y1 }, f.size, f.ppm).y, want: s.h },
+      { name: `${f.name}, Y from the bottom wall at the top wall`, got: distancesM(g("left", "bottom"), { x: mid.x, y: f.rect.y0 }, f.size, f.ppm).y, want: s.h },
+    );
+  }
+  const bad = cases.filter((c) => c.got !== c.want);
+  check(15, "the width is the X a device on the far side wall reads, the height its Y on the far end wall (identical)",
+    bad.length === 0, bad.length ? `differ: ${bad.map((c) => c.name).join("; ")}` : `${cases.length} of ${cases.length} identical`);
 }
 
 const failed = results.filter((r) => !r.ok).length;

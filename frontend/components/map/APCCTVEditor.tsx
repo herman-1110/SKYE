@@ -645,7 +645,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           onLoad={(e) => setNaturalSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
         />
 
-        {/* The walls, and the guides to the point being placed, dragged or hovered (Prompt 143, D1.3) */}
+        {/* The walls, and the guides to the point being placed, dragged or hovered (Prompt 143, D1.3);
+            the room's outline carries its width and height in metres */}
         {(() => {
           const point: Frac | null = !guidesOn || wallSetup.step ? null
             : dragTarget && dragPct ? dragPct
@@ -653,7 +654,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 : placementMode ? hoverFrac
                   : hoveredMarker?.at ?? null;
           return <WallGuidesOverlay walls={guidesOn ? walls : null} setup={wallSetup} point={point}
-            distances={point ? metresAt(point) : null} />;
+            distances={point ? metresAt(point) : null} scale={guideSize && pxPerM ? { size: guideSize, pxPerM } : null} />;
         })()}
 
         {/* With walls set, a ghost marker follows the cursor in Add AP / Add CCTV mode and stays

@@ -2,20 +2,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   formatMetres, guideGeometry, nearerEndWall, nearerSideWall, parseMetres, parseWallGuides, rectFromCorners,
-  serialiseWallGuides, wallGuidesKey,
-  type Distances, type EndWall, type Frac, type SideWall, type WallGuides, type WallRect,
+  rectSizeM, serialiseWallGuides, wallGuidesKey,
+  type Distances, type EndWall, type Frac, type ImageSize, type SideWall, type WallGuides, type WallRect,
 } from "@/utils/wallGuides";
 
 // Placement guides for Manage Devices (Prompt 143, D1): the walls Herman picks,
 // drawn over the floor plan, and two dimension lines from them to the device
-// being placed, dragged or hovered. The maths is in utils/wallGuides.ts.
+// being placed, dragged or hovered. The room's outline carries its width and
+// height in metres. The maths is in utils/wallGuides.ts.
 // Everything is drawn in percentages of the image, so the overlay needs no
 // measuring; only line widths and text are in pixels.
 
 const ACCENT = "var(--accent)";
 const MUTED = "var(--text-secondary)";
 const HALO = "var(--bg-surface)";
+const SMALL_FONT = 10;
 const pct = (v: number) => `${v * 100}%`;
+
+/** What metres are counted in: the image's pixel size and the floor's px/m. */
+export interface GuideScale { size: ImageSize; pxPerM: number }
+
+/** The room's width and height as shown, "6.10 m"; null without a scale. */
+interface RoomLengths { w: string; h: string }
+
+function roomLengths(rect: WallRect, scale: GuideScale | null): RoomLengths | null {
+  if (!scale) return null;
+  const m = rectSizeM(rect, scale.size, scale.pxPerM);
+  return { w: `${formatMetres(m.w)} m`, h: `${formatMetres(m.h)} m` };
+}
 
 export type WallStep = 1 | 2 | 3;
 
@@ -122,13 +136,14 @@ export function useWallSetup(onDone: (g: WallGuides) => void) {
   return { step, rect, xWall, candidate, start, cancel: reset, pointerDown, pointerMove, pointerUp, click };
 }
 
-function Label({ x, y, dx = 0, dy = 0, anchor = "middle", children }: {
-  x: number; y: number; dx?: number; dy?: number; anchor?: "start" | "middle" | "end"; children: string;
+/** A label over the plan; `small` ones are muted, like the room's lengths. */
+function Label({ x, y, dx = 0, dy = 0, anchor = "middle", small = false, children }: {
+  x: number; y: number; dx?: number; dy?: number; anchor?: "start" | "middle" | "end"; small?: boolean; children: React.ReactNode;
 }) {
   return (
     <text x={pct(x)} y={pct(y)} dx={dx} dy={dy} textAnchor={anchor} dominantBaseline="middle"
-      fill={ACCENT} stroke={HALO} strokeWidth={3} paintOrder="stroke"
-      style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 11 }}>
+      fill={small ? MUTED : ACCENT} stroke={HALO} strokeWidth={3} paintOrder="stroke"
+      style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: small ? SMALL_FONT : 11 }}>
       {children}
     </text>
   );
@@ -143,14 +158,18 @@ function wallLine(rect: WallRect, wall: SideWall | EndWall): { x1: number; y1: n
   return { x1: rect.x0, y1: y, x2: rect.x1, y2: y };
 }
 
-/** Its label, just inside the rectangle by the wall's midpoint. */
-function WallLabel({ rect, wall, text }: { rect: WallRect; wall: SideWall | EndWall; text: string }) {
+/** Text just inside the rectangle by a wall's midpoint: its label, or a length. */
+function WallText({ rect, wall, small = false, children }: {
+  rect: WallRect; wall: SideWall | EndWall; small?: boolean; children: React.ReactNode;
+}) {
   const midX = (rect.x0 + rect.x1) / 2, midY = (rect.y0 + rect.y1) / 2;
-  if (wall === "left") return <Label x={rect.x0} y={midY} dx={6} anchor="start">{text}</Label>;
-  if (wall === "right") return <Label x={rect.x1} y={midY} dx={-6} anchor="end">{text}</Label>;
-  if (wall === "top") return <Label x={midX} y={rect.y0} dy={10}>{text}</Label>;
-  return <Label x={midX} y={rect.y1} dy={-10}>{text}</Label>;
+  if (wall === "left") return <Label x={rect.x0} y={midY} dx={6} anchor="start" small={small}>{children}</Label>;
+  if (wall === "right") return <Label x={rect.x1} y={midY} dx={-6} anchor="end" small={small}>{children}</Label>;
+  if (wall === "top") return <Label x={midX} y={rect.y0} dy={10} small={small}>{children}</Label>;
+  return <Label x={midX} y={rect.y1} dy={-10} small={small}>{children}</Label>;
 }
+
+const isSideWall = (w: SideWall | EndWall): w is SideWall => w === "left" || w === "right";
 
 function Line({ l, color, width, dash, opacity = 1 }: {
   l: { x1: number; y1: number; x2: number; y2: number }; color: string; width: number; dash?: string; opacity?: number;
@@ -162,9 +181,13 @@ function Line({ l, color, width, dash, opacity = 1 }: {
 }
 
 /** The rectangle with its four sides: `solid` ones drawn and labelled, the
- *  rest faint, and `candidate` (the wall a click would pick) thick. */
-function Room({ rect, solid, candidate }: {
+ *  rest faint, and `candidate` (the wall a click would pick) thick. With
+ *  `lengths`, the room's height sits small beside the side wall's label and
+ *  its width beside the end wall's; until a wall of that kind is picked, the
+ *  width sits on the top edge and the height on the left one. */
+function Room({ rect, solid, candidate, lengths }: {
   rect: WallRect; solid: { wall: SideWall | EndWall; label: string }[]; candidate: SideWall | EndWall | null;
+  lengths: RoomLengths | null;
 }) {
   const walls: (SideWall | EndWall)[] = ["left", "right", "top", "bottom"];
   return (
@@ -178,9 +201,16 @@ function Room({ rect, solid, candidate }: {
       {solid.map((s) => (
         <g key={s.wall}>
           <Line l={wallLine(rect, s.wall)} color={ACCENT} width={2.5} />
-          <WallLabel rect={rect} wall={s.wall} text={s.label} />
+          <WallText rect={rect} wall={s.wall}>
+            {s.label}
+            {lengths && (
+              <tspan dx={6} fill={MUTED} style={{ fontSize: SMALL_FONT }}>{isSideWall(s.wall) ? lengths.h : lengths.w}</tspan>
+            )}
+          </WallText>
         </g>
       ))}
+      {lengths && !solid.some((s) => !isSideWall(s.wall)) && <WallText rect={rect} wall="top" small>{lengths.w}</WallText>}
+      {lengths && !solid.some((s) => isSideWall(s.wall)) && <WallText rect={rect} wall="left" small>{lengths.h}</WallText>}
     </>
   );
 }
@@ -229,24 +259,37 @@ export function PlaceDistanceFields({ typed, reads, onType }: {
 }
 
 /** The whole overlay over the map. While a step is running it shows that
- *  step; otherwise the saved walls and, for `point`, the two guides. */
-export function WallGuidesOverlay({ walls, setup, point, distances }: {
+ *  step; otherwise the saved walls and, for `point`, the two guides. With a
+ *  `scale`, the room's outline carries its width and height in metres: live
+ *  while step 1's rectangle is being drawn, then small beside the walls' labels. */
+export function WallGuidesOverlay({ walls, setup, point, distances, scale }: {
   walls: WallGuides | null;
   setup: { step: WallStep | null; rect: WallRect | null; xWall: SideWall | null; candidate: SideWall | EndWall | null };
   point: Frac | null;
   distances: Distances | null;
+  scale: GuideScale | null;
 }) {
   let content: React.ReactNode = null;
   if (setup.step !== null) {
     const r = setup.rect;
     if (setup.step === 1 && r) {
-      content = <rect x={pct(r.x0)} y={pct(r.y0)} width={pct(r.x1 - r.x0)} height={pct(r.y1 - r.y0)}
-        fill="none" stroke={ACCENT} strokeWidth={2} strokeDasharray="6 4" />;
+      // The width on the top edge and the height on the left one, as the drag goes (none for the press's 0 x 0)
+      const live = r.x1 > r.x0 || r.y1 > r.y0 ? roomLengths(r, scale) : null;
+      content = (
+        <>
+          <rect x={pct(r.x0)} y={pct(r.y0)} width={pct(r.x1 - r.x0)} height={pct(r.y1 - r.y0)}
+            fill="none" stroke={ACCENT} strokeWidth={2} strokeDasharray="6 4" />
+          {live && <WallText rect={r} wall="top">{live.w}</WallText>}
+          {live && <WallText rect={r} wall="left">{live.h}</WallText>}
+        </>
+      );
     } else if (r) {
-      content = <Room rect={r} solid={setup.xWall ? [{ wall: setup.xWall, label: "X wall" }] : []} candidate={setup.candidate} />;
+      content = <Room rect={r} solid={setup.xWall ? [{ wall: setup.xWall, label: "X wall" }] : []} candidate={setup.candidate}
+        lengths={roomLengths(r, scale)} />;
     }
   } else if (walls) {
-    const room = <Room rect={walls.rect} solid={[{ wall: walls.xWall, label: "X wall" }, { wall: walls.yWall, label: "Y wall" }]} candidate={null} />;
+    const room = <Room rect={walls.rect} solid={[{ wall: walls.xWall, label: "X wall" }, { wall: walls.yWall, label: "Y wall" }]} candidate={null}
+      lengths={roomLengths(walls.rect, scale)} />;
     let guides: React.ReactNode = null;
     if (point && distances) {
       const g = guideGeometry(walls, point);
