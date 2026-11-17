@@ -18,8 +18,10 @@ const PAD = HANDLE_R + 3;   // room in the box for the handle at the tip
 
 /** The cone for one camera at (xPct, yPct), fractions of the image. With
  *  onHandlePointerDown it has a rotate handle at its tip (Manage Devices).
- *  notSet draws it faint and dashed: the default cone Manage Devices shows
- *  for a camera with no saved facing (Herman, 18 Nov). */
+ *  notSet draws it dashed with a lighter fill: the default cone Manage
+ *  Devices shows for a camera with no saved facing (Herman, 18 Nov). Its
+ *  dashed outline is full strength, so it reads clearly on a floor plan's
+ *  lines, as "not set" rather than as a saved cone's solid one. */
 export default function CameraCone({ xPct, yPct, facingDeg, fovDeg, color, notSet = false, onHandlePointerDown }: {
   xPct: number;
   yPct: number;
@@ -41,8 +43,9 @@ export default function CameraCone({ xPct, yPct, facingDeg, fovDeg, color, notSe
     >
       {/* A box of fixed pixels around the camera: the image's own pixels scale evenly with it, so the angle drawn is the angle stored */}
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", overflow: "visible" }} aria-hidden="true">
-        <path d={conePath(c, c, r, facingDeg, fovDeg ?? DEFAULT_FOV_DEG)} fill={color} fillOpacity={notSet ? 0.05 : 0.16}
-          stroke={color} strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray={notSet ? "4 3" : undefined} strokeLinejoin="round" />
+        <path d={conePath(c, c, r, facingDeg, fovDeg ?? DEFAULT_FOV_DEG)} fill={color} fillOpacity={notSet ? 0.1 : 0.16}
+          stroke={color} strokeOpacity={notSet ? 1 : 0.6} strokeWidth={notSet ? 2 : 1.5} strokeDasharray={notSet ? "6 4" : undefined}
+          strokeLinejoin="round" />
         {onHandlePointerDown && (
           <circle cx={c + tip.x * r} cy={c + tip.y * r} r={HANDLE_R} fill="var(--bg-surface)" stroke={color} strokeWidth={2}
             style={{ pointerEvents: "auto", cursor: "grab", touchAction: "none" }} onPointerDown={onHandlePointerDown}>
