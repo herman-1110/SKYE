@@ -1,6 +1,7 @@
 "use client";
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback } from "react";
 import { useZones } from "@/hooks/useZones";
+import { PolygonDraftHint, PolygonDraftPreview, usePolygonDraft } from "./PolygonDraft";
 import { createZone, deleteZone, aiDetectZones } from "@/services/zoneService";
 import { toast } from "@/store/toastStore";
 import type { FloorRecord } from "@/types/floor";
@@ -97,11 +98,12 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
   const [showZones, setShowZones]       = useState(true);
   const [drawMode, setDrawMode]         = useState(false);
   const [naturalSize, setNaturalSize]   = useState<NaturalSize | null>(null);
-  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
-  // Polygon drawing
-  const [polyPts, setPolyPts]       = useState<Pt[]>([]);   // metres, in-progress
-  const [mousePos, setMousePos]     = useState<Pt | null>(null); // metres, preview
+  // Polygon drawing, shared with the walls in Manage Devices (PolygonDraft.tsx):
+  // the points (metres, in progress), the cursor (metres, preview), and Esc to clear the points.
+  const draft    = usePolygonDraft<Pt>();
+  const polyPts  = draft.points;
+  const mousePos = draft.cursor;
   const [pendingMetres, setPendingMetres] = useState<{ x_min: number; x_max: number; y_min: number; y_max: number } | null>(null);
 
   // Saved zone management
@@ -126,29 +128,6 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
   const maxW         = naturalSize ? naturalSize.w / scale : 0;
   const maxH         = naturalSize ? naturalSize.h / scale : 0;
 
-  // Track container CSS pixel size for SVG coordinate conversion
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const obs = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      setContainerSize({ w: width, h: height });
-    });
-    obs.observe(containerRef.current);
-    return () => obs.disconnect();
-  }, []);
-
-  // Escape cancels in-progress polygon
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && polyPts.length > 0) {
-        setPolyPts([]);
-        setMousePos(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [polyPts.length]);
-
   // ── helpers ──────────────────────────────────────────────────────────────
   const toMetres = useCallback(
     (px: number, py: number): Pt => {
@@ -164,11 +143,8 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
     return ((metres * scale) / (axis === "x" ? naturalSize.w : naturalSize.h)) * 100;
   };
 
-  // Converts metres → SVG user coordinates (CSS pixels of container)
-  const toSvg = (m: Pt): Pt => ({
-    x: maxW > 0 && containerSize.w > 0 ? (m.x / maxW) * containerSize.w : 0,
-    y: maxH > 0 && containerSize.h > 0 ? (m.y / maxH) * containerSize.h : 0,
-  });
+  // Converts metres → fractions of the image, for the shared drawing preview
+  const toFrac = (m: Pt): Pt => (naturalSize ? { x: (m.x * scale) / naturalSize.w, y: (m.y * scale) / naturalSize.h } : { x: 0, y: 0 });
 
   const getRelPos = (e: React.MouseEvent): Pt => {
     const rect = containerRef.current!.getBoundingClientRect();
@@ -188,7 +164,7 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
     if (drawMode && calibrated) {
       e.preventDefault();
       const m = toMetres(getRelPos(e).x, getRelPos(e).y);
-      setPolyPts((prev) => [...prev, m]);
+      draft.add(m);
       return;
     }
     if (!dragState) setSelectedKey(null);
@@ -196,23 +172,23 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
 
   const handleRightClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (!drawMode || polyPts.length < 3) return;
-    const xs = polyPts.map((p) => p.x);
-    const ys = polyPts.map((p) => p.y);
+    if (!drawMode) return;
+    const pts = draft.close();   // null below 3 points; otherwise the points, and the draft is cleared
+    if (!pts) return;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
     setPendingMetres({
       x_min: Math.round(Math.min(...xs) * 100) / 100,
       x_max: Math.round(Math.max(...xs) * 100) / 100,
       y_min: Math.round(Math.min(...ys) * 100) / 100,
       y_max: Math.round(Math.max(...ys) * 100) / 100,
     });
-    setPolyPts([]);
-    setMousePos(null);
     setDrawMode(false);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (drawMode) {
-      setMousePos(toMetres(getRelPos(e).x, getRelPos(e).y));
+      draft.setCursor(toMetres(getRelPos(e).x, getRelPos(e).y));
     }
 
     if (dragState) {
@@ -371,7 +347,7 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
         {isAdmin && (
           <>
             <button
-              onClick={() => { setDrawMode((m) => !m); setPendingMetres(null); setPolyPts([]); setMousePos(null); }}
+              onClick={() => { setDrawMode((m) => !m); setPendingMetres(null); draft.clear(); }}
               disabled={!calibrated}
               title={calibrated ? undefined : "Calibrate this floor first"}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 ${drawMode ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
@@ -546,46 +522,13 @@ export default function ZoneEditor({ buildingId, floor, isAdmin, onClose }: Prop
           <div className="absolute pointer-events-none" style={{ left: `${toPct(pendingMetres.x_min, "x")}%`, top: `${toPct(pendingMetres.y_min, "y")}%`, width: `${toPct(pendingMetres.x_max - pendingMetres.x_min, "x")}%`, height: `${toPct(pendingMetres.y_max - pendingMetres.y_min, "y")}%`, border: "2px dashed var(--accent)", borderRadius: 4, backgroundColor: "rgba(245,158,11,0.08)" }} />
         )}
 
-        {/* SVG overlay — polygon drawing lines + preview */}
-        {naturalSize && containerSize.w > 0 && (polyPts.length > 0 || (drawMode && mousePos)) && (
-          <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
-            {/* Lines between placed points */}
-            {polyPts.map((pt, i) => {
-              if (i === 0) return null;
-              const p1 = toSvg(polyPts[i - 1]);
-              const p2 = toSvg(pt);
-              return <line key={i} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="5 3" />;
-            })}
-            {/* Closing-line ghost (last → first) when 3+ points */}
-            {polyPts.length >= 3 && (() => {
-              const p1 = toSvg(polyPts[polyPts.length - 1]);
-              const p2 = toSvg(polyPts[0]);
-              return <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="var(--accent)" strokeWidth="1" strokeDasharray="3 5" opacity="0.4" />;
-            })()}
-            {/* Live preview line to cursor */}
-            {mousePos && polyPts.length > 0 && (() => {
-              const p1 = toSvg(polyPts[polyPts.length - 1]);
-              const p2 = toSvg(mousePos);
-              return <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="var(--accent)" strokeWidth="1" strokeDasharray="4 4" opacity="0.6" />;
-            })()}
-          </svg>
+        {/* Polygon drawing: lines, closing ghost, cursor line and point markers (shared with the walls) */}
+        {naturalSize && (
+          <PolygonDraftPreview points={polyPts.map(toFrac)} cursor={drawMode && mousePos ? toFrac(mousePos) : null} />
         )}
-
-        {/* Polygon point markers (div-based for circular appearance) */}
-        {polyPts.map((pt, i) => (
-          <div key={i} style={{ position: "absolute", left: `${toPct(pt.x, "x")}%`, top: `${toPct(pt.y, "y")}%`, width: 8, height: 8, transform: "translate(-50%,-50%)", borderRadius: "50%", backgroundColor: "var(--accent)", border: "1.5px solid white", pointerEvents: "none", zIndex: 10 }} />
-        ))}
 
         {/* Draw-mode hints */}
-        {drawMode && (
-          <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", backgroundColor: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 12px", fontSize: 11, color: "var(--text-secondary)", pointerEvents: "none", whiteSpace: "nowrap" }}>
-            {polyPts.length === 0
-              ? "Click to place points · Esc to cancel"
-              : polyPts.length < 3
-              ? `${polyPts.length} point${polyPts.length !== 1 ? "s" : ""} placed — need at least 3`
-              : `${polyPts.length} points — right-click to close · Esc to cancel`}
-          </div>
-        )}
+        {drawMode && <PolygonDraftHint count={polyPts.length} />}
       </div>
 
       {pendingMetres && (

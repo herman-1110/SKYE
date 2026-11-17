@@ -15,10 +15,10 @@ import ApIcon, { apStatusColor } from "./ApIcon";
 import CctvIcon, { CctvMarker, cctvStatusColor } from "./CctvIcon";
 import CameraCone, { CameraDirectionFields, useConeRotation } from "./CameraCone";
 import {
-  PlaceDistanceFields, WALL_STEP_HINT, WallGuidesOverlay, useStoredWallGuides, useWallSetup, type TypedDistances,
+  PARALLEL_HINT, PlaceDistanceFields, WALL_STEP_HINT, WallGuidesOverlay, useStoredWallGuides, useWallSetup, type TypedDistances,
 } from "./WallGuides";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
-import { distancesM, formatMetres, guideImageSize, parseMetres, pointAtDistances, type Frac, type ImageSize } from "@/utils/wallGuides";
+import { distancesM, formatMetres, guideImageSize, parseMetres, placeAtDistances, type Frac, type ImageSize } from "@/utils/wallGuides";
 import { DEFAULT_FOV_DEG, defaultFacing, facingSaveFields, parseFacing, parseFov } from "@/utils/cameraFacing";
 
 const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
@@ -90,14 +90,15 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   // Placement guides (Prompt 143, D1): the walls kept for this floor, the
-  // three steps that set them, and the cursor while placing. Without walls,
-  // none of it shows and the editor works as before (D1.8).
+  // three steps that set them (an outline with any number of corners since
+  // 18 Nov), and the cursor while placing. Without walls, none of it shows and
+  // the editor works as before (D1.8).
   const [walls, saveWalls, clearWalls] = useStoredWallGuides(floor.id);
-  const wallSetup = useWallSetup(saveWalls);
   const [hoverFrac, setHoverFrac] = useState<Frac | null>(null);
   const [naturalSize, setNaturalSize] = useState<ImageSize | null>(null);
   const [typed, setTyped] = useState<TypedDistances | null>(null);
   const guideSize = guideImageSize(floor, naturalSize);
+  const wallSetup = useWallSetup(saveWalls, guideSize);
   const pxPerM = floor.scale_pixels_per_meter;
   const guidesOn = !!(walls && guideSize && pxPerM);
   const metresAt = (p: Frac) => (walls && guideSize && pxPerM ? distancesM(walls, p, guideSize, pxPerM) : null);
@@ -248,24 +249,25 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     };
   };
 
-  // The walls' three steps take the map's pointer while they run; with walls
-  // set, the cursor is followed in Add AP / Add CCTV mode (Prompt 143, D1).
-  const handleMapPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const p = wallSetup.step ? fracAt(e) : null;
-    if (p) wallSetup.pointerDown(p, e);
-  };
+  // The walls' three steps take the map's clicks and pointer while they run:
+  // the outline is drawn with clicks and closed with a right-click, as a zone
+  // is, Shift held for a level or upright wall. With walls set, the cursor is
+  // followed in Add AP / Add CCTV mode (Prompt 143, D1).
   const handleMapPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (wallSetup.step) { const p = fracAt(e); if (p) wallSetup.pointerMove(p); }
+    if (wallSetup.step) {
+      const p = fracAt(e), rect = imgRef.current?.getBoundingClientRect();
+      if (p && rect) wallSetup.pointerMove(p, e.shiftKey, { x: 8 / rect.width, y: 8 / rect.height });
+    }
     else if (placementMode && guidesOn && !pendingPct) setHoverFrac(fracAt(e));
   };
-  const handleMapPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = imgRef.current?.getBoundingClientRect();
-    const p = wallSetup.step === 1 ? fracAt(e) : null;
-    if (p && rect) wallSetup.pointerUp(p, { w: 8 / rect.width, h: 8 / rect.height });
+  const handleMapContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (wallSetup.step !== 1) return;
+    e.preventDefault();
+    wallSetup.closeOutline();
   };
 
   const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (wallSetup.step) { const p = fracAt(e); if (p) wallSetup.click(p); return; }
+    if (wallSetup.step) { const p = fracAt(e); if (p) wallSetup.click(p, e.shiftKey); return; }
     if (!placementMode || !imgRef.current) return;
     const rect = imgRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
@@ -277,20 +279,19 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setTyped(d ? { x: formatMetres(d.x), y: formatMetres(d.y), xEdited: false, yEdited: false, from: clicked } : null);
   };
 
-  /** A typed X or Y moves the point being placed (D1.6): measured from the
-   *  same walls, clamped to the image, and saved like a click. A box that
-   *  wasn't typed in keeps the clicked point on its axis; one that doesn't
-   *  hold a number yet leaves the point where it is. */
+  /** A typed X or Y moves the point being placed (D1.6): to where its
+   *  distances from the two walls are as typed, on the clicked point's side
+   *  of each, clamped to the image, and saved like a click. A box that wasn't
+   *  typed in, or doesn't hold a number yet, keeps the point's distance from
+   *  that wall where it is now (for a rectangle's walls, its coordinate, as
+   *  before). */
   const typeDistance = (axis: "x" | "y", text: string) => {
     if (!typed || !pendingPct || !walls || !guideSize || !pxPerM) return;
     const next = axis === "x" ? { ...typed, x: text, xEdited: true } : { ...typed, y: text, yEdited: true };
     setTyped(next);
     const xM = parseMetres(next.x), yM = parseMetres(next.y);
-    const moved = pointAtDistances(walls, next.from, { x: xM ?? 0, y: yM ?? 0 }, guideSize, pxPerM);
-    setPendingPct({
-      x: next.xEdited && xM !== null ? moved.x : pendingPct.x,
-      y: next.yEdited && yM !== null ? moved.y : pendingPct.y,
-    });
+    setPendingPct(placeAtDistances(walls, next.from, pendingPct,
+      { x: next.xEdited ? xM : null, y: next.yEdited ? yM : null }, guideSize, pxPerM));
   };
 
   const openEditAP = (ap: APRecord) => {
@@ -536,7 +537,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         <button
           onClick={() => { if (wallSetup.step) { wallSetup.cancel(); return; } cancelPlacement(); wallSetup.start(); }}
           disabled={!floor.scale_pixels_per_meter}
-          title={walls ? "Draw the room and pick its walls again" : "Draw the room and pick two walls to measure from"}
+          title={walls ? "Draw the room's outline and pick its walls again" : "Draw the room's outline and pick two walls to measure from"}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${wallSetup.step ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" overflow="visible" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M7 3v4M11 3v2M15 3v4M3 7h4M3 11h2M3 15h4"/></svg>
@@ -548,7 +549,10 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           </button>
         )}
         {wallSetup.step ? (
-          <span className="font-mono text-[10px] text-s-accent">{WALL_STEP_HINT[wallSetup.step]}</span>
+          // Step 3 refuses a Y wall within 30° of parallel to the X wall, and says so
+          <span className="font-mono text-[10px]" style={{ color: wallSetup.step === 3 && (wallSetup.candidateRefused || wallSetup.refused) ? "var(--danger, #ef4444)" : "var(--accent)" }}>
+            {wallSetup.step === 3 && (wallSetup.candidateRefused || wallSetup.refused) ? PARALLEL_HINT : WALL_STEP_HINT[wallSetup.step]}
+          </span>
         ) : placementMode && (
           <span className="font-mono text-[10px] text-s-accent">Click on the map to place</span>
         )}
@@ -669,12 +673,10 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         style={{
           cursor: placementMode || wallSetup.step ? "crosshair" : "default",
           userSelect: dragTarget ? "none" : undefined,
-          touchAction: wallSetup.step === 1 ? "none" : undefined,
         }}
         onClick={handleMapClick}
-        onPointerDown={handleMapPointerDown}
+        onContextMenu={handleMapContextMenu}
         onPointerMove={handleMapPointerMove}
-        onPointerUp={handleMapPointerUp}
         onPointerLeave={() => setHoverFrac(null)}
       >
         <img
@@ -687,7 +689,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
         />
 
         {/* The walls, and the guides to the point being placed, dragged or hovered (Prompt 143, D1.3);
-            the room's outline carries its width and height in metres */}
+            every wall of the room's outline carries its length in metres */}
         {(() => {
           const point: Frac | null = !guidesOn || wallSetup.step ? null
             : dragTarget && dragPct ? dragPct
