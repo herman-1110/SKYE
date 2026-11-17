@@ -408,6 +408,17 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setPendingPct(null); setPlacementMode(null); setApName(""); setApMac(""); setMacError(""); setEditingApId(null); resetCctvForm();
   };
 
+  // Add AP and Add CCTV always start from an empty form: only Place on an
+  // online device fills one in. Before, leaving such a placement with the
+  // toolbar's Cancel kept its name and MAC for the next Add. Pressed again
+  // (it reads Cancel), the button just leaves the mode, as before.
+  const toggleAdding = (mode: "ap" | "cctv") => {
+    wallSetup.cancel();
+    if (placementMode === mode) { setPlacementMode(null); return; }
+    cancelPlacement();
+    setPlacementMode(mode);
+  };
+
   const scanForCameras = async () => {
     setScanning(true);
     try {
@@ -465,7 +476,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-mono text-[10px] text-s-muted tracking-widest uppercase mr-1">Devices</span>
         <button
-          onClick={() => { wallSetup.cancel(); setPlacementMode(placementMode === "ap" ? null : "ap"); }}
+          onClick={() => toggleAdding("ap")}
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "ap" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
@@ -473,7 +484,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           {placementMode === "ap" ? "Cancel" : "Add AP"}
         </button>
         <button
-          onClick={() => { wallSetup.cancel(); setPlacementMode(placementMode === "cctv" ? null : "cctv"); }}
+          onClick={() => toggleAdding("cctv")}
           disabled={!floor.scale_pixels_per_meter}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${placementMode === "cctv" ? "bg-s-accent text-s-base" : "bg-s-elevated border border-s-border text-s-muted hover:text-s-text"}`}
         >
