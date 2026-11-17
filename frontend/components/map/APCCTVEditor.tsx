@@ -25,6 +25,10 @@ const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d
 
 type PlacementMode = "ap" | "cctv" | null;
 
+type DeviceRef = { type: "ap" | "cctv"; id: string };
+type HoveredMarker = { device: DeviceRef; label: string; x: number; y: number; at?: Frac };
+const isDevice = (h: HoveredMarker | null, d: DeviceRef): boolean => !!h && h.device.type === d.type && h.device.id === d.id;
+
 interface Props {
   buildingId: string;
   floor: FloorRecord;
@@ -80,8 +84,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  // at: the device's place, for the guides' readout (Prompt 143, D1.3).
-  const [hoveredMarker, setHoveredMarker] = useState<{ label: string; x: number; y: number; at?: Frac } | null>(null);
+  // at: the device's place, for the guides' readout (Prompt 143, D1.3). device:
+  // whose tooltip it is, so a dragged device's can be hidden (Herman, 18 Nov).
+  const [hoveredMarker, setHoveredMarker] = useState<HoveredMarker | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   // Placement guides (Prompt 143, D1): the walls kept for this floor, the
@@ -115,9 +120,12 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   // aps/cctvs arrays are never optimistically mutated, so if the PATCH on
   // release fails, clearing dragPct alone puts the marker right back where
   // it started — no separate revert logic needed.
-  const [dragTarget, setDragTarget] = useState<{ type: "ap" | "cctv"; id: string } | null>(null);
+  const [dragTarget, setDragTarget] = useState<DeviceRef | null>(null);
   const [dragPct, setDragPct] = useState<{ x: number; y: number } | null>(null);
   const dragPctRef = useRef<{ x: number; y: number } | null>(null);
+  // While the button is held: the dragged device's name and status are hidden,
+  // and Esc cancels (Herman, 18 Nov). dragTarget outlasts it, until the save resolves.
+  const [dragHeld, setDragHeld] = useState(false);
   // Grab origin, in both cursor and marker-pct space — lets handleMove apply
   // the cursor's DELTA rather than snapping the marker's center to wherever
   // the cursor currently is. Without this, an off-center grab (you rarely
@@ -147,6 +155,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       dragPctRef.current = { x: xPct, y: yPct };
       setDragTarget({ type, id });
       setDragPct({ x: xPct, y: yPct });
+      setDragHeld(true);
     };
 
   useEffect(() => {
@@ -164,11 +173,19 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       setDragPct({ x, y });
     };
 
-    const handleUp = async () => {
+    const handleUp = async (e: PointerEvent) => {
       const final = dragPctRef.current;
       const target = dragTarget;
       dragOriginRef.current = null;
+      setDragHeld(false);
       if (!final) { setDragTarget(null); setDragPct(null); return; }
+      // The name and status come back on release, beside the cursor and for
+      // the drop point: the tooltip can still hold the starting point, since a
+      // cancelled pointerdown stops mousemove until release.
+      setHoveredMarker((h) => {
+        if (!h || !isDevice(h, target)) return h;
+        return e.type === "pointerup" ? { ...h, x: e.clientX, y: e.clientY, at: final } : null;
+      });
 
       // Deliberately keep rendering from dragPct (the exact drop point) until
       // the PATCH resolves — clearing it immediately made the marker jump
@@ -185,19 +202,37 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "";
         toast.error(msg.toLowerCase().includes("not calibrated") ? msg : "Failed to update device position");
+        setHoveredMarker((h) => (isDevice(h, target) ? null : h));   // it goes back, out from under the cursor
       } finally {
         setDragTarget(null);
         setDragPct(null);
       }
     };
 
+    // Esc while the button is still held cancels the drag (Herman, 18 Nov):
+    // the device goes back and nothing is saved. After release the save is
+    // already on its way, so Esc does nothing then.
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !dragOriginRef.current) return;
+      const target = dragTarget;
+      dragOriginRef.current = null;
+      dragPctRef.current = null;   // a pointerup still to come saves nothing
+      setDragHeld(false);
+      setDragTarget(null);
+      setDragPct(null);
+      // Back where it was, out from under the cursor: hovering it shows its name and status again.
+      setHoveredMarker((h) => (isDevice(h, target) ? null : h));
+    };
+
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
     window.addEventListener("pointercancel", handleUp);
+    window.addEventListener("keydown", handleKey);
     return () => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("pointercancel", handleUp);
+      window.removeEventListener("keydown", handleKey);
     };
   }, [dragTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -694,8 +729,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 touchAction: "none",
               }}
               onPointerDown={handleMarkerPointerDown("ap", ap.id, ap.x_pct, ap.y_pct)}
-              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
-              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
+              onMouseEnter={(e) => setHoveredMarker({ device: { type: "ap", id: ap.id }, label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
+              onMouseMove={(e) => setHoveredMarker({ device: { type: "ap", id: ap.id }, label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
               onMouseLeave={() => setHoveredMarker(null)}
             >
               <ApIcon size={22} style={{ color: apStatusColor(status) }} />
@@ -749,8 +784,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                 touchAction: "none",
               }}
               onPointerDown={handleMarkerPointerDown("cctv", cctv.id, cctv.x_pct, cctv.y_pct)}
-              onMouseEnter={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
-              onMouseMove={(e) => setHoveredMarker({ label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
+              onMouseEnter={(e) => setHoveredMarker({ device: { type: "cctv", id: cctv.id }, label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
+              onMouseMove={(e) => setHoveredMarker({ device: { type: "cctv", id: cctv.id }, label, x: e.clientX, y: e.clientY, at: { x: xPct, y: yPct } })}
               onMouseLeave={() => setHoveredMarker(null)}
             >
               <CctvMarker color={cctvStatusColor(status)} />
@@ -764,8 +799,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           );
         })}
 
-        {/* Marker tooltip */}
-        {hoveredMarker && typeof document !== "undefined" && createPortal(
+        {/* Marker tooltip. Hidden for the device being dragged while the button is held (Herman, 18 Nov):
+            its name and status go, and the guides' live X and Y labels stay. Other devices keep theirs. */}
+        {hoveredMarker && !(dragHeld && dragTarget && isDevice(hoveredMarker, dragTarget)) && typeof document !== "undefined" && createPortal(
           <div style={{ position: "fixed", left: hoveredMarker.x + 12, top: hoveredMarker.y - 8, background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-primary)", padding: "4px 10px", borderRadius: "6px", fontSize: "12px", pointerEvents: "none", zIndex: 9999, fontFamily: "IBM Plex Mono, monospace", whiteSpace: "nowrap" }}>
             {hoveredMarker.label}
             {(() => {
