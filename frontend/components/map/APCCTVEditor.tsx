@@ -60,7 +60,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const placedMacs = new Set(aps.map((a) => a.mac.toUpperCase()));
   const unregisteredOnlineAPs = Object.values(apHeartbeats)
     .filter((hb) => hb.status === "online" && !placedMacs.has(hb.mac.toUpperCase()))
-    .map((hb) => ({ mac: hb.mac, name: hb.name }));
+    .map((hb) => ({ mac: hb.mac, name: hb.name, ip: hb.ip }));
 
   // Prompt 131b: cameras the backend found (ONVIF discovery or an alarm push)
   // that aren't on this floor — the camera twin of the AP list above. A node
@@ -423,10 +423,11 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
 
   // Click a discovered camera: start placement with its name, MAC and IP
   // filled in; clicking the map opens the usual dialog to pick the checkpoint and save.
+  // The name starts as its IP, or else its device name (Prompt 143, D4.2); it stays editable.
   const startPlacingDetectedCamera = (mac: string, name: string | null, ip: string | null) => {
     resetCctvForm();
     setCctvMac(mac.toUpperCase());
-    setCctvName(name ?? "");
+    setCctvName(ip ?? name ?? "");
     setCctvIp(ip ?? "");
     setPendingPct(null);
     setPlacementMode("cctv");
@@ -526,7 +527,8 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
             {unregisteredOnlineAPs.map((ap) => (
               <button
                 key={ap.mac}
-                onClick={() => startPlacingDetectedAP(ap.mac, ap.name)}
+                // The name starts as its IP, or else its reported name, or empty for the default "AP" (Prompt 143, D4.2)
+                onClick={() => startPlacingDetectedAP(ap.mac, ap.ip || ap.name || "")}
                 className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-s-elevated border border-s-border hover:border-s-accent transition-colors text-left group"
               >
                 <div className="flex items-center gap-2">
@@ -534,7 +536,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   <ApIcon size={12} style={{ color: "var(--accent)" }} />
                   <div className="flex flex-col leading-tight">
                     {ap.name && <span className="font-mono text-[11px] text-s-text">{ap.name}</span>}
-                    <span className="font-mono text-[10px] text-s-muted">{ap.mac}</span>
+                    <span className="font-mono text-[10px] text-s-muted">{ap.ip ?? "IP unknown"} · {ap.mac}</span>
                   </div>
                 </div>
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-s-accent opacity-0 group-hover:opacity-100 transition-opacity">
