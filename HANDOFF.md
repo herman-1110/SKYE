@@ -1,43 +1,48 @@
-# SKYE Sentinel-AI — Handoff (v8, after Prompts 136 and 142 and the 13–14 Nov fixes; updated 2026-11-14)
+# SKYE Sentinel-AI — Handoff (v9, after Prompt 145 and its live check; updated 2026-11-17)
 
-Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTDB/Storage) backend, Next.js/TypeScript frontend. Indoor BLE positioning → safety alerting (man-down, collision, patrol compliance) → real-time patrol tracking and reporting. Plus a VIGI camera integration: alarm events, health, discovery and live video. **Next up:** get the camera's alarms through (Open #22), run 136's and 142's live checks, then merge both into `main` if Herman says so. Then 133 (Ghost Patrol).
+Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTDB/Storage) backend, Next.js/TypeScript frontend. Indoor BLE positioning → safety alerting (man-down, collision, patrol compliance) → real-time patrol tracking and reporting. Plus a VIGI camera integration: alarm events, health, discovery and live video. **Next up:** Prompt 143, stacked on 145 (Herman has the spec). Then, on a dock day, 136's and 142's live checks, plus a live test of the red man-down's restart check once the third AP is placed (Open #1). Then merge 136, 142, 145 and 143 into `main`, in that order, if Herman says so. Then 133 (Ghost Patrol).
 
-**This replaces v7** (16 Oct), which is in git history: `git show 2975863:HANDOFF.md`. v6 is `git show 2f00309:HANDOFF.md` and v5 `git show 56882ff:HANDOFF.md`. **v8 was written on a different PC from v7** (see "This PC" under "Environment quirks"); the parts marked "Intern laptop" describe the old machine. **Check every claim here against the current code, git history and data before relying on it.**
+**This replaces v8** (14 Nov), which is in git history: `git show 5bb495f:HANDOFF.md`. v7 is `git show 2975863:HANDOFF.md`, v6 `git show 2f00309:HANDOFF.md` and v5 `git show 56882ff:HANDOFF.md`. **v8 and v9 were written on a different PC from v7** (see "This PC" under "Environment quirks"); the parts marked "Intern laptop" describe the old machine. **Check every claim here against the current code, git history and data before relying on it.**
 
-## Where things stand (14 Nov)
+## Where things stand (17 Nov)
 
 - **The Intern laptop is gone** (Herman, 19 Oct). Work continues on a second clone at `D:\DOWNLOAD\Y3S2\FYP\SKYE` (Windows user `User`). How it differs is under "This PC" in "Environment quirks".
 - **The Prompt 134 review is lost.** It lived only on the Intern laptop's local branch `review/134` and was never pushed. What survives: the fix plan below, the non-security findings this handoff describes, and the IDs of fixed findings in commit messages. The unfixed `SEC-xx` findings are gone, so Prompt 137 needs a fresh security pass, kept out of the public repo.
 - **Prompt 136 (man-down and collision correctness) is built, not merged.** 7 commits on `fix/136-man-down-collision` (`73f131a`..`3ab8adc`, on `2975863`): COR-02, COR-04, COR-03, CON-03, REL-01, COR-06 and the frontend's amber alerts. V1–V5 passed on 20 Oct. **V6, the live check, hasn't run.** Report: `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\136\report.md`.
 - **Prompt 142 (floors and APs) is built, not merged,** stacked on 136: 8 commits on `fix/142-floors-aps` (`4bcf64c`..`e9d824a`). Several active floors, AP status colours, calibration memory, AP removal, and a dashboard-map fix (`e9d824a`, confirmed live on 3 Nov: markers on 14 of 14 loads). **V5, the live check (L1–L6), hasn't run.** Report: `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\142\report.md`, with `live-check-findings.md` next to it.
+- **Prompt 145 (alerts that stay dismissed) is built, live-checked and pushed, not merged,** stacked on 142's `9f28798`: 5 commits on `fix/145-alerts-stay-dismissed` (`d070aa7`..`1c5f206`), then the v9 commit. An admin's ✕ or Dismiss all closes a critical pop-up for everyone, and a restarted backend doesn't repeat a stillness alert for someone who hasn't moved. **V5, the live check, passed on 17 Nov** (L1 and L2; Herman skipped L3). See "Prompt 145" below. Report: `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\145\report.md`.
 - **13–14 Nov, the stuck AUTHENTICATING screen.** On 13 Nov a freshly compiled `/dashboard` sat on AUTHENTICATING. React's first commit came 120 s late (high confidence); the likely cause is that `next dev` rewrote `app/layout.js` while the browser was downloading it, so webpack waited out its 120 s chunk timeout (inferred). The fix is **`5f70fb7`**, committed by Herman on `fix/142-floors-aps` (message "stuck AUTHENTICATING screen"): a one-time reload at 20 s, a "taking longer than it should" hint, and an error screen with Retry when the account check fails. See Open #24.
 - **Pushed on 14 Nov:** Herman pushed `fix/142-floors-aps` (`5f70fb7`) to GitHub. It contains 136's commits, so all 16 are public; the `.env` scan of the range found none of the real values. `main` is still `2975863`. Claude's recommendation: merge into `main` after the live checks, unless someone needs `main` sooner.
-- **Uncommitted in the working tree:** the camera status colours (3 Nov), in 7 frontend files: `DeviceStatusPanel.tsx`, `APCCTVEditor.tsx`, `ApIcon.tsx`, `CameraPanel.tsx`, `CctvIcon.tsx`, `FloorMap.tsx` and `useCCTVHeartbeats.ts`. Camera icons go green, red or grey like the APs. They become the 9th 142 commit only if Herman says so. The recipe in 142's report was written before `5f70fb7`: its patch still applies, but its final `HEAD^{tree}` check (`ff4c966d…`) no longer can.
-- **The camera on this PC** isn't the one measured on 5 Oct (see "Hardware and network"). Live view works since go2rtc and ffmpeg were installed on 14 Nov. Its OpenAPI is switched off (Open #23), and its alarms don't get through (Open #22).
-- **The floor set-up changed on 13–14 Nov** (backend logs). At 19:44 on 13 Nov TPLink's three APs and its camera were removed through the dashboard, and TPLink was deactivated. Since 00:30 on 14 Nov the active floor is `355d6a73…` (same building, `53c3872f…`). It has two APs, EAP660 HD `40:AE:30:9D:34:5A` (`.50`) and EAP770 `A8:29:48:C3:88:A0` (`.52`), plus the new camera and `guard-001`. The third AP, `40:AE:30:9D:34:5C`, sent no report on 13–14 Nov. **136's V6 and 142's V5 were written for TPLink with three APs and the 5 Oct camera** (`192.168.0.101`), so adapt their floor, AP and camera steps before running them. The simulators need an active floor with at least three APs placed.
-- **Last checked at 11:00 on 14 Nov:** `next dev` was running on :3000; the backend (:8000) and go2rtc (:1984) were not. **The PC was off the lab network:** Ethernet disconnected (its static `192.168.0.10` still configured) and Wi-Fi on `172.20.10.3`. The camera's Alarm Server target, the APs' push URL and go2rtc's config (`192.168.0.15:8555`) all name this PC's lab address, so check the PC's address before anything else.
+- **Pushed on 17 Nov,** at Herman's word: `fix/145-alerts-stay-dismissed` with `-u`, then the v9 commit. It carries 142's `9f28798`, so that commit is public too, but GitHub's `fix/142-floors-aps` still points at `5bb495f`: it needs its own push after 142's live check. The `.env` scan of the range found none of the real values. `main` is still `2975863`.
+- **The camera status colours are committed** as `9f28798` (16 Nov, at Herman's word), the newest commit on `fix/142-floors-aps`, in 7 frontend files (`DeviceStatusPanel.tsx`, `APCCTVEditor.tsx`, `ApIcon.tsx`, `CameraPanel.tsx`, `CctvIcon.tsx`, `FloorMap.tsx` and `useCCTVHeartbeats.ts`). Camera icons go green, red or grey like the APs. Green means port 554 answers at the registered IP; the login state stays in the panel's Health check row. The working tree is clean.
+- **The camera on this PC** isn't the one measured on 5 Oct (see "Hardware and network"). Live view works since go2rtc and ffmpeg were installed on 14 Nov. Its OpenAPI is switched off (Open #23), and its alarms still fail on arrival (Open #22, parked on 17 Nov).
+- **The floor set-up changed on 13–14 Nov** (backend logs). At 19:44 on 13 Nov TPLink's three APs and its camera were removed through the dashboard, and TPLink was deactivated. Since 00:30 on 14 Nov the active floor is `355d6a73…` (same building, `53c3872f…`). It has two APs, EAP660 HD `40:AE:30:9D:34:5A` (`.50`) and EAP770 `A8:29:48:C3:88:A0` (`.52`), plus the new camera and `guard-001`. The third AP, `40:AE:30:9D:34:5C`, sent no report on 13–14 Nov. Since 16 Nov a third AP posts from `192.168.0.51` (probably `…34:5C`), but it isn't placed on the floor, so every reading of `guard-001` and `worker-001` is approximate (one or two APs). **136's V6 and 142's V5 were written for TPLink with three APs and the 5 Oct camera** (`192.168.0.101`), so adapt their floor, AP and camera steps before running them. The simulators need an active floor with at least three APs placed.
+- **Last checked at 15:19 on 17 Nov:** Herman's backend (:8000, restarted at 14:43 on `1c5f206`), `next dev` (:3000) and go2rtc (:1984) were running. The PC was on the lab network over Wi-Fi, `192.168.0.15`. Ethernet's static `192.168.0.10` was listed too, but a static address shows even with the cable out. AP posts from `.50`, `.51` and `.52` answered 200. The camera's Alarm Server target, the APs' push URL and go2rtc's config (`192.168.0.15:8555`) all name this PC's lab address, so check the PC's address before anything else. (On 14 Nov at 11:00 the PC was off the lab network, on Wi-Fi `172.20.10.3`.)
 - **The 134 fix plan, in order** (the review's own titles):
   1. 135: credentials and quick safety stops (**done**, on `main`).
   2. 136: man-down and collision correctness (**built**; live check pending).
   3. 133: Ghost Patrol, plus its prerequisites.
-  4. 137: Firebase rules and account controls.
+  4. 137: Firebase rules and account controls (FE-02 moved to 145).
   5. 138: reports and the simulator.
   6. 139: positioning robustness and observability (with 127 and 129).
   7. 140: reliability and housekeeping.
   8. 141: documentation pass.
 
-  142 (floors and APs, from Herman's 20 Oct list) came after 136 and is stacked on it.
+  142 (floors and APs, from Herman's 20 Oct list) came after 136 and is stacked on it. 145 (alerts that stay dismissed) is stacked on 142, and 143 is to be stacked on 145.
 
 ## Git
 
 - **Branches:**
   - `main` = `origin/main` = **`2975863`** (16 Oct, the v7 docs commit). The last code commit on `main` is `13491a9`.
   - `fix/136-man-down-collision` (`3ab8adc`): local only, 7 commits ahead of `main`; its upstream is `origin/main`. Its commits are on GitHub inside `fix/142-floors-aps`.
-  - `fix/142-floors-aps` (`5f70fb7`): pushed on 14 Nov and tracking `origin/fix/142-floors-aps`. It's 16 commits ahead of `main` (136's 7, 142's 8 and `5f70fb7`). The live tree is on it.
-  - **The merge order is 136, then 142.** `main` can fast-forward to `fix/142-floors-aps` (0 commits behind). Each report ends with its merge steps and their preconditions, **written before the 14 Nov push and `5f70fb7`:** 142's push step is done (before the live checks, and it carried 136's commits), and its later checks name `e9d824a`, which is no longer the tip.
+  - `fix/142-floors-aps` (`9f28798`): tracking `origin/fix/142-floors-aps`, which is still `5bb495f` (pushed 14 Nov), so it's 1 ahead. It's 18 commits ahead of `main`: 136's 7, 142's 8, `5f70fb7`, `5bb495f` (v8) and `9f28798` (camera colours). `9f28798` is public anyway, inside `fix/145-alerts-stay-dismissed`; the branch itself needs its own push after 142's live check.
+  - `fix/145-alerts-stay-dismissed` (the v9 commit): pushed on 17 Nov and tracking `origin/fix/145-alerts-stay-dismissed`. It's stacked on `9f28798`: 145's 5 commits and v9, 24 commits ahead of `main`. The live tree is on it.
+  - **The merge order is 136, 142, 145, then 143.** `main` can fast-forward through them in turn (0 commits behind). Each report ends with its merge steps and their preconditions.
+    - 136's and 142's were **written before the 14 Nov push and `5f70fb7`:** 142's push step is done (before the live checks, and it carried 136's commits), and its later checks name `e9d824a`, which is no longer the tip.
+    - In 145's, step 2 (push 145) was done on 17 Nov ahead of step 1 (push 142 again), which is still outstanding. Its later steps name `1c5f206` as 145's last commit; the v9 commit now follows it.
   - Gone: `review/134` (with the Intern laptop) and `fix/135-credentials-safety-stops` (locally and on GitHub). `git branch -r` may still list `origin/claude/repo-review-r1fviz`, which GitHub no longer has; `git fetch --prune` drops it.
 - **Fetching and pushing:** use `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git fetch|push origin …`. A plain fetch can hang on a credential prompt.
-- **Commits since v7** (on the fix branches; none on `main`):
+- **Commits since v7** (all on the fix branches; none on `main`):
 
   | Commit | What |
   |---|---|
@@ -57,6 +62,41 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
   | `0f64f00` | **142**, frontend: a failed remove checks whether the item is gone |
   | `e9d824a` | **142**, frontend: the dashboard map measures itself once a floor arrives |
   | `5f70fb7` (Herman, 14 Nov, "stuck AUTHENTICATING screen") | Frontend: a stuck AUTHENTICATING screen reloads once, then says why (7 files, including the new `frontend/utils/authCheck.ts`) |
+  | `5bb495f` (Herman, 14 Nov, "Handoff file") | HANDOFF v8 |
+  | `9f28798` (16 Nov) | **142**, frontend: camera icons coloured by status, like the APs |
+  | `d070aa7` | **145** D1: an admin can acknowledge an alert, closing its pop-up for everyone |
+  | `80f5703` | **145** D3: a restart doesn't repeat a stillness alert for someone who hasn't moved |
+  | `794261a` | **145**, frontend: critical pop-ups stay dismissed once an admin closes them |
+  | `a886862` | **145** D3: a change of strongest AP counts only once it has held 30 s, and the restart check looks back 12 hours |
+  | `1c5f206` | **145** D3: the AP-change hold defaults to 120 s, and a third AP no longer restarts it |
+  | the v9 commit | HANDOFF v9 (this file) |
+
+## Prompt 145: alerts that stay dismissed (16–17 Nov)
+
+- **What it does:**
+  - **D1:** `POST /alerts/{id}/acknowledge` (admin or owner, else 403; 404 "Alert not found") writes `acknowledged_at` (UTC), `acknowledged_by` (the display name, or "admin") and `acknowledged_by_uid`, and nothing else. A second call keeps the first one's values. Acknowledged isn't resolved: only feedback resolves an alert.
+  - **D2 (frontend; the review's FE-02):** the pop-ups are worked out from the live alerts: critical (`man_down`, `possible_man_down`, `collision`, `positioning_offline`), unresolved, not acknowledged, oldest first. An admin's ✕ acknowledges the alert for everyone; if that fails, the pop-up stays, with a toast. Anyone else's ✕ hides it in that tab until a reload. With two or more showing, admins get "Dismiss all (N)" at the top. Alert cards say "Acknowledged by <name> · <local time>".
+  - **D3:** stillness `man_down` and `possible_man_down` alerts carry `floor_id` and their anchor. Before raising one for someone it hasn't seen move, a restarted backend reads `/alerts` once and doesn't raise a repeat (Open #1).
+- **Herman's decisions** (also in the decisions table):
+  - **16 Nov, option (c):** with one or two APs, a change of strongest AP counts, as a new approximate run and as "seen moving", only after a hold. Kept with it:
+    - E1: the change counts as movement only if the old run had itself lasted the hold;
+    - E2: the restart check matches any AP the run had as the strongest;
+    - the setting `MAN_DOWN_AP_CHANGE_HOLD_S`.
+  - **16 Nov:** the restart check counts only alerts from the last `MAN_DOWN_RESTART_MATCH_H` = 12 hours.
+  - **17 Nov, the hold defaults to 120 s.** In a replay of 16 Nov, a beacon left on a desk was counted as moving up to once an hour at 30 s, and never at 120 s.
+    - The hold is timed from the first reading away from the run's AP, whichever other APs are the strongest meanwhile, so a third AP doesn't restart it.
+    - Only a reading back at the run's AP cancels it.
+  - Neither setting is in the live `.env`, so the defaults apply. A change needs a backend restart (Open #8).
+- **Tests:** `f145_acknowledge_inprocess.py` 7/7, `f145_stillness_restart_inprocess.py` 19/19, and `cor03_coverage_edge_inprocess.py` 12/12 (see the harness table).
+- **The live check (V5, 17 Nov):**
+  - **Overnight:** Herman restarted the backend at 02:45. At 03:45, guard-001's and worker-001's runs came due at the live 60 minutes. The restart check found their 23:34 alerts (unresolved, acknowledged) and raised nothing: "already raised for this spot", in 40 and 34 ms, with 58 alerts in `/alerts`. No alert was raised between 02:26 and the live check.
+  - **L1 passed.** The backlog didn't pop up again in two tabs, after a reload, after a sign-out and in, or after the restarts. Herman had dismissed it himself: 52 alerts on 16 Nov at 21:10, and the two 23:34 ambers at 01:53.
+  - **L2 passed,** with man-down set to 1 minute, then back to 60:
+    - After a restart, both beacons got one amber each at 14:37:32: "nothing earlier for this spot in the last 12 h", in 40 and 36 ms. Dismiss all (2) closed both in both tabs.
+    - After a second restart, both matched ("already raised", 71 and 64 ms, 60 alerts), and nothing popped up.
+    - Once moved next to the EAP770, `guard-001` got a new amber with no restart-check line, which means a counted move. It came 4.7 minutes after the move rather than 2 (Open #27). ✕ closed it in both tabs.
+  - **L3** (a non-admin's ✕) was skipped by Herman.
+  - **Only the amber path ran live:** with two APs placed, every reading is approximate. The suites cover the red path's restart check, and its live test waits for the third AP (Open #1).
 
 ## Working methodology
 
@@ -69,10 +109,10 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
   - Commit only when asked, and split commits logically (frontend in its own commit).
   - Run `git diff --cached --stat` right before every commit.
   - **Push only when Herman says so.**
-  - Work is on **fix branches** now: `fix/136-man-down-collision`, then `fix/142-floors-aps` stacked on it. A prompt that needs a branch says so.
+  - Work is on **fix branches** now: `fix/136-man-down-collision`, then `fix/142-floors-aps` stacked on it, then `fix/145-alerts-stay-dismissed` on 142; 143 goes on 145. A prompt that needs a branch says so.
   - **HANDOFF.md and README.md are tracked.** Commit changes to them only when asked. Never modify `frontend/package*.json` (Herman's own lockfile update is `13491a9`) or `backend/encode.py`.
   - **The repo is public.** Never put the 134 review's text, or any description of a **security** finding (`SEC-xx`) that isn't fixed yet, into a tracked file, a commit message or a push. Correctness, reliability and documentation items can be described (the open threads below do), and so can fixed findings, whose IDs the commit messages already carry.
-  - **Herman runs git commands himself from these messages**, including steps labelled as Claude's: on 16 Oct he ran the post-merge switch before anything was merged. Give him copy-paste commands in the order he should run them, with any precondition (such as "merged on GitHub") stated before the command.
+  - **Herman runs git commands himself from these messages**, including steps labelled as Claude's: on 16 Oct he ran the post-merge switch before anything was merged. Give him copy-paste commands in the order he should run them, with any precondition (such as "merged on GitHub") stated before the command. On 17 Nov he had Claude run the 145 push and the v9 commit and push.
 - **Secrets:**
   - Never print, log, write to a fixture, or commit:
     - `VIGI_CAMERA_PASSWORD`;
@@ -89,16 +129,16 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 - **Browser data:** don't open Chrome's profile files (History, Sessions, IndexedDB, Cookies) unless Herman asks.
 - **Live system:**
   - Herman's dev backend is `uvicorn main:app --reload --host 0.0.0.0 --port 8000` (backend venv). `next dev` is on :3000.
-  - The live tree is on `fix/142-floors-aps`, so a backend started now runs 136 and 142 together. Checking 136 alone (L0 in its report) means `git checkout fix/136-man-down-collision`, which the uncommitted camera files block (four of them differ between the branches); 136 alone also lacks `e9d824a`'s map fix, which its own marker checks need.
-  - Saving any `.py` under `backend/` reloads the backend. Each reload costs one new camera OpenAPI login, and produces a short burst of "RuntimeError: No response returned" tracebacks (see Open #15).
+  - The live tree is on `fix/145-alerts-stay-dismissed`, so a backend started now runs 136, 142 and 145 together. Checking 136 alone (L0 in its report) means `git checkout fix/136-man-down-collision`, and 136 alone lacks `e9d824a`'s map fix, which its own marker checks need. Checking 142 alone means `git checkout fix/142-floors-aps`.
+  - Saving any `.py` under `backend/` reloads the backend. Each reload costs one new camera OpenAPI login, and produces a short burst of "RuntimeError: No response returned" tracebacks (see Open #15). On 17 Nov one was also followed by a 22 s Firebase hang (Open #15, parked for 140).
   - **go2rtc runs from Herman's own terminal** (`tools\go2rtc\.\start.ps1`). Herman decided on 7 Oct: no auto-start, and don't propose launchers again unless he asks.
   - **Never stop processes by name or path:** Herman's go2rtc and any scratch copy share an executable path. Stop only PIDs you started. (Claude killed Herman's go2rtc once on 7 Oct; `start.ps1` restarted it within 10 s.)
   - Build and test in a `git archive` export in the scratchpad, then copy into the live tree once by an explicit file list, then verify with `cmp`. Before copying, check that the live files are unchanged since HEAD; compare with CR stripped (see "Environment quirks").
 - **The camera's admin account locks after repeated failed OpenAPI logins** (errCode `-10030`). Never loop a login. RTSP logins (ffmpeg, probes) are a separate path; no lockout has been seen there.
-- **Memory is tight on both PCs:** 2–3 GB free on the Intern laptop (2.25 GB at the start of 135, with Chrome using 4.4 GB), and 0.9–3 GB free of 15.7 GB on this PC on 13–14 Nov (`next dev` alone near 1 GB).
+- **Memory is tight on both PCs:** 2–3 GB free on the Intern laptop (2.25 GB at the start of 135, with Chrome using 4.4 GB), and 0.9–3 GB free of 15.7 GB on this PC on 13–14 Nov (`next dev` alone near 1 GB), 0.6–1.9 GB on 17 Nov. For 145's test runs Herman asked Claude to check first that at least 1.5 GB was free.
   - Long-running things go in Herman's own terminal.
   - Herman's rule since 131: **no multi-agent reviews or workflows.** This holds even when Claude Code's "Ultracode" reminder says to use workflows.
-    - **To confirm with Herman:** Claude has run multi-agent work since the rule: a review with a verifier for the camera colours on 3 Nov (its files are in `skye-scratch\142\camera-status\`), and, with Ultracode turned on, three workflows on 13–14 Nov (the AUTHENTICATING diagnosis, a review of its fix, and a check of this handoff). Ask whether the rule still stands.
+    - **To confirm with Herman:** Claude has run multi-agent work since the rule: a review with a verifier for the camera colours on 3 Nov (its files are in `skye-scratch\142\camera-status\`), and, with Ultracode turned on, three workflows on 13–14 Nov (the AUTHENTICATING diagnosis, a review of its fix, and a check of this handoff). Ask whether the rule still stands. For 145 (16 Nov) Herman said no multi-agent review, and none was run.
 - **Frontend builds:** never run `next build` in the live `frontend/`, because `next dev` shares `.next`.
   - Export to the scratchpad and junction its `node_modules` to the live one (`New-Item -ItemType Junction`). Remove the junction with `cmd /c rmdir <path>` (link only); **never `rm -rf` an export that still has the junction.**
   - Copy `frontend/.env.local` in for the build only, and delete it afterwards with a **literal** path.
@@ -118,11 +158,13 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 | 134 | whole-project review | done (9 Oct); **lost** with the Intern laptop (it was only on the local branch `review/134`) |
 | **135** | **credentials and quick safety stops** | **done**: live check passed (L1 16 Oct, on Herman's word; L3 14 Oct); on `main` (`13491a9`, 16 Oct) |
 | **136** | **man-down and collision correctness** | **built** on `fix/136-man-down-collision` (7 commits); V1–V5 passed 20 Oct; **live check V6 not run**; on GitHub inside `fix/142-floors-aps`, not on `main` |
-| **142** | **floors and APs** (several active floors, AP colours, calibration memory, AP removal) | **built** on `fix/142-floors-aps` (8 commits, stacked on 136); map fix confirmed live 3 Nov; **live check V5 (L1–L6) not run**; pushed 14 Nov, not on `main` |
+| **142** | **floors and APs** (several active floors, AP colours, calibration memory, AP removal) | **built** on `fix/142-floors-aps` (8 commits, stacked on 136); map fix confirmed live 3 Nov; **live check V5 (L1–L6) not run**; pushed 14 Nov (`9f28798` isn't on GitHub's 142 branch yet), not on `main` |
 | — | stuck AUTHENTICATING screen (13 Nov) | fixed in `5f70fb7` on `fix/142-floors-aps` (14 Nov); see Open #24 |
-| — | camera status colours (3 Nov) | in the working tree, **uncommitted**; the 9th 142 commit only if Herman says |
+| — | camera status colours (3 Nov) | committed 16 Nov as `9f28798` on `fix/142-floors-aps`; public since 17 Nov inside `fix/145-alerts-stay-dismissed`; GitHub's 142 branch needs its own push after 142's live check |
+| **145** | **alerts that stay dismissed** (acknowledge for everyone, the pop-up banner, no stillness repeat after a restart; the review's FE-02) | **built** on `fix/145-alerts-stay-dismissed` (5 commits, stacked on 142); V1–V4 passed; **live check V5 passed 17 Nov** (L1, L2; L3 skipped); pushed 17 Nov, not on `main` |
+| 143 | Herman has the spec. Its D5 fixes Safety Settings showing 5 min and 2 m when the backend is down (Open #29) | **next**, stacked on 145 |
 | 133 | Ghost Patrol (evaluator, verdicts, `departed_at`, patrol enabled), plus the review's prerequisites | after 136 and 142 are merged |
-| 137–141 | rules and account controls; reports and simulator; positioning; reliability; docs | planned, in that order |
+| 137–141 | rules and account controls (FE-02 moved to 145); reports and simulator; positioning; reliability; docs | planned, in that order |
 
 ## VIGI camera
 
@@ -276,7 +318,7 @@ The rest of this section is the Intern laptop and the 5 Oct camera, up to 16 Oct
   - **The recent events list** scrolls in a box about 10 rows tall, with a sticky header and up to 200 rows.
 - **`CctvIcon` / `CctvMarker`** (`components/map/CctvIcon.tsx`):
   - One glyph, a camera tilted down on a wall bracket, used in every place a camera is drawn.
-  - On the maps it sits in a round chip with a red ring; the dashboard keeps the status dot. (The uncommitted 3 Nov change makes the icon and ring follow the status, like the APs, and drops the dashboard's dot.)
+  - On the maps it sits in a round chip. Since `9f28798` (16 Nov) the icon and its ring follow the status, like the APs, and the dashboard's status dot is gone.
 - **Device editor:**
   - Camera add and edit, with the "online but not placed" list and Scan now.
   - **AP rename** (pencil on each AP row; the MAC is shown read-only).
@@ -301,6 +343,12 @@ The rest of this section is the Intern laptop and the 5 Oct camera, up to 16 Oct
 | 3 Nov | The three placeholder APs on TPLink were Herman's to handle (gone by 22:20) | done |
 | 14 Nov | The AUTHENTICATING self-recovery fix: approved, then committed by Herman (`5f70fb7`) | done |
 | 14 Nov | go2rtc 1.9.14 and ffmpeg 9.0.2 installed on this PC; `fix/142-floors-aps` pushed, not `main` | done |
+| 16 Nov | The camera status colours committed (`9f28798`), not pushed | done |
+| 16 Nov | 145: option (c), a change of strongest AP counts only after a hold, with E1, E2 and `MAN_DOWN_AP_CHANGE_HOLD_S` kept; the restart check looks back 12 h (`MAN_DOWN_RESTART_MATCH_H`); no multi-agent review | done (`a886862`) |
+| 17 Nov | 145: the hold defaults to 120 s, timed from the first reading away from the run's AP (a third AP doesn't restart it) | done (`1c5f206`) |
+| 17 Nov | Parked: restart repeats that only show at the 1-minute test setting (option (b), alerts storing every AP); one missed report restarting the 120 s hold; the 22 s Firebase hang after a reload (for 140); the camera's `ClientDisconnect` alarms | standing (Open #28, #27, #15, #22) |
+| 17 Nov | 145's live check passed, L3 skipped; 145 pushed with `-u` (Claude ran it), not merged; HANDOFF v9 committed and pushed on 145 | done |
+| 17 Nov | Safety Settings showing 5 min and 2 m when the backend is down: to be fixed in 143 (D5) | 143 |
 
 The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patrol) and section 8 (live view; **section 8 is partly superseded**, see Open #10).
 
@@ -323,6 +371,9 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
    - `_still_alerted` in `safety_service.py`: one stillness alert per episode, cleared wherever the anchor is (re)seeded (cold start, approximate→exact upgrade, movement past the epsilon). The 30 s gate stays.
    - A beacon that goes dark and comes back still within epsilon of the same anchor is the same episode, so there's no second stillness alert. A resolved alert doesn't re-fire until the person moves.
    - Test: `tools/harness/man_down_latch_inprocess.py` (6/6; the code before the fix fails 4, with 116 extra alerts in an hour).
+   - **Since 145 (D3) the latch holds across a restart** for someone who hasn't moved since. Before raising a stillness `man_down` or `possible_man_down`, a restarted backend reads `/alerts` once. An unresolved alert (acknowledged or not) of the same type, for the same person, floor and spot (any AP the run had as the strongest), raised in the last 12 hours, isn't raised again, and the latch is set. Once the person has moved, alerting is as before. If the read fails, the alert is raised.
+   - It logs one line per check: `[SAFETY] restart check for <person>'s <type>: read /alerts (N alerts) in M ms; already raised for this spot, not raised again`, or `…; nothing earlier for this spot in the last 12 h`. The read holds `pipeline_lock`: 34–71 ms live on 17 Nov, with 58–60 alerts.
+   - **Live-checked on 17 Nov for the amber path only** (see "Prompt 145"). **Still to do on a dock day:** a live test of the red `man_down`'s restart check, which needs three APs placed (exact fixes), so it waits for the third AP.
 2. **`/alerts` was cleared before 5 Oct 11:13:** Herman did it (answered 9 Oct). Resolved.
 3. **Prompt 127** needs ground truth for the Sep 30 and Oct 1 captures. The captures themselves were in the Intern laptop's archive and aren't on this PC.
 4. **Prompt 129,** the null-RSSI grace period, is not started.
@@ -356,6 +407,7 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
     - `frontend/package*.json`: don't modify them. Herman updated the lockfile himself in `13491a9`. The root `package-lock.json` is gone (`73b0e3f`).
 14. **DHCP:** on the Intern laptop the `.5` reservation didn't hold, the APs had no reservations, and the camera's `.101` reservation was never verified (see "Hardware and network"). Live view adapts by itself; check the camera's Alarm Server target if alarms stop, because it names the laptop's address. On this PC the target is one of this PC's lab addresses (the two alarms that arrived carried the right secret); none is known to be reserved, and on 14 Nov the PC left the lab network (see "Where things stand").
 15. **Reload noise:** right after every backend reload there's a 1–2 s burst of 3–15 "RuntimeError: No response returned" tracebacks. These are requests queued during the reload, in Starlette's BaseHTTPMiddleware. It's pre-existing (also seen 5 Oct) and harmless, but noisy.
+    - **17 Nov, 02:26: a 22 s Firebase hang after a reload.** Right after one reload, an RTDB heartbeat write on a fresh connection was reset and retried. About 20 s of AP posts have no log line; every one logged answered 200. **Parked for 140** (Herman, 17 Nov).
 16. **`docs/go2rtc-sei-issue.md`: not posting** (Herman, 9 Oct). The ffmpeg workaround is enough for SKYE; don't raise it again unless he asks. The draft is kept: it cites `master` `c245815` (bug still there on 9 Oct) and links #2277 ("VIGI no video"). Its `/api/streams` figures come from the MP4 consumer, not WebRTC.
 17. **Signal-loss man-downs after a backend restart or an AP outage** (REL-01, COR-06): restarts and AP outages can raise man-downs for everyone who is still present. **Fixed in 136** (`d64c72d`, `a971584`); until 136 is merged, `main` still does this, so clear them by hand.
 18. **Collisions against stale positions** (COR-04): collision checks don't look at a record's age or floor. In L3, 17 of the 30 collision alerts were the simulated forklift against the real worker's old position. **Fixed in 136** (`ce2e719`).
@@ -365,19 +417,33 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
     - its missed-checkpoint event isn't guaranteed in every cycle;
     - simulations write heartbeats for the real APs, so offline APs look online (REL-07).
 21. **`backend/payload.json`** is untracked since 135, but the file stays in history. No history rewrite: that's Herman's call, and the token in it was rotated on 13 Oct.
-22. **The camera's alarms don't get through (14 Nov, under investigation).**
+22. **The camera's alarms don't get through (14 Nov; parked 17 Nov).**
+    - **16–17 Nov:** alarms now arrive often in the daytime and still fail the same way. On 17 Nov, 164 requests failed between 07:27 and 14:09, with two `ClientDisconnect` lines each; the traceback opened was at `routes/vigi_routes.py:35`. There were similar bursts on 16 Nov. **Parked** (Herman, 17 Nov). The notes below are from 14 Nov.
     - Only two alarm POSTs arrived, at 02:25:00 and 02:26:24: the first about 2 min 10 s after the 02:22:44 backend start, the second about 18 s after the 02:26:02 start. Each came 7–15 s after a live-view open (02:24:53 and 02:26:10). Both carried the right secret (the 404 check at `routes/vigi_routes.py:32-33` comes first), and both failed with `starlette.requests.ClientDisconnect` at `routes/vigi_routes.py:35` (`await request.body()`). Each is logged twice, by SKYE's error handler and by uvicorn: about 475 lines per alarm.
     - **Mechanism:** once the client has hung up, uvicorn 0.30.1 (`uvicorn/protocols/http/httptools_impl.py`, `receive()`) returns `http.disconnect` and drops a body it has already buffered. So SKYE only gets alarms from a camera that waits for the reply. The 5 Oct camera did (it reset about 0.5 s after the reply); this camera is a different one.
     - **Not known yet:** whether those two were Test-button presses (the 5 Oct camera's Test sent no HTTP request at all) or real detections, whether the live-view opens just before them matter, and why only two arrived (a person in view should give an event every 1–7 s).
     - **Next:** start the backend, have Herman walk in view for 30 s with human detection on, and count the POSTs and how each ends. If real alarms fail the same way, capture one with `tools/vigi-listener/listener.py` (on another port; it refuses 8000–8003) before changing how SKYE receives alarms. Either way, `vigi_alarm` should log one line instead of the traceback on `ClientDisconnect` (offered, not done).
 23. **This camera's OpenAPI is off** (14 Nov): port 20443 refused, so the camera panel says "Camera API not reachable". Herman turns it on in the camera's web UI: Settings > Network Settings > OpenAPI (TP-Link FAQ 5198). No password was sent, so no lockout marker exists; the next 5-minute check logs in once.
 24. **The AUTHENTICATING fix (`5f70fb7`): what wasn't checked.**
-    - `tsc --noEmit` wasn't run (0.9 GB free at the time). Run it, or `next build` in an export, before the demo.
+    - `tsc --noEmit` wasn't run (0.9 GB free at the time). It has since exited 0 on two trees that contain the fix, both on 16 Nov: `9f28798`'s (the camera colours) and 145's frontend commit `794261a`'s. A `next build` in an export before the demo is still worth doing.
     - The error screen and the login-page changes were tested only in a harness (32 cases) driving the real `useAuth.ts`, not live. Live: a normal load (no console errors, no reload in 37 s) and a copy of `/dashboard` with its scripts stripped (reloaded once at 20.04 s, then the hint, no loop).
     - If the `users/{uid}` read hangs (a network that doesn't answer), the error screen comes at about 40 s or later: the loader is still up at 20 s, so the page reloads once, and the reloaded page waits for Firebase Auth's start-up and then the 15 s read limit. The 25 s hint can only show on the reloaded page (about 45 s), so it may never appear. With no network at all, Firestore fails at once and the error screen comes within seconds, with no reload. Both come from reading the SDK source in the 14 Nov review, not from live tests.
     - The scratch copies and tests were in the 13 Nov session's scratchpad (`authfix2`), which is temporary.
 25. **The camera panel's header sits under the Navbar** (142's report, L6): close the panel with Escape or a click on the map, and don't click the top-right corner, where Sign out is. Whether to fix it is Herman's call.
-26. **Docs left stale by 136, 142 and the camera colours** (each report lists them under its stale docs): `README.md:467` (the simulators and several active floors), `SYSTEM_OVERVIEW.md`, `skye-presentation.html:1266-1267` ("8 s AP, 15 s CCTV", but both hooks use 10 s; examiners read it, so it's Herman's call), and the `probe_ok_at` notes in `backend/services/camera_health_service.py:11-12` and `docs/vigi-integration-design.md:122`. v8 covers the HANDOFF lines.
+26. **Docs left stale by 136, 142 and the camera colours** (each report lists them under its stale docs): `README.md:467` (the simulators and several active floors), `SYSTEM_OVERVIEW.md`, `skye-presentation.html:1266-1267` ("8 s AP, 15 s CCTV", but both hooks use 10 s; examiners read it, so it's Herman's call), and the `probe_ok_at` notes in `backend/services/camera_health_service.py:11-12` and `docs/vigi-integration-design.md:122`. v8 and v9 cover the HANDOFF lines.
+27. **One missed report restarts the 120 s hold (17 Nov; parked).**
+    - With one or two APs, a change of strongest AP counts only once the run's AP has gone 120 s without being the strongest. Any single reading where it wins again restarts the 120 s.
+    - In L2, `guard-001` sat right next to the EAP770 (median -46 dBm). The EAP660 HD still heard it (median -62 dBm) and won the few readings, about 2%, where the EAP770 missed the beacon. So the move took 4.7 minutes to count instead of 2.
+    - With more misses, a real move might not count for a long time, and the run, already alerted, raises nothing new at the new spot.
+    - Options are in 145's report: cancel a change only after two or more readings back in a row, or don't let a reading cancel it when the new AP is absent from that reading.
+28. **Restart repeats at the 1-minute test setting (17 Nov; parked).**
+    - In a replay of the night of 16–17 Nov at man-down 1 minute (89% of readings from one AP), 4 of 213 simulated restarts repeated an amber within 3 minutes. In the daytime it was 0 of 286.
+    - In each, the old alert was at the AP heard least, and the new run hadn't had that AP before it came due.
+    - Herman: they only show at the 1-minute test setting, so no fix now. **Option (b), alerts storing every AP their run had, is parked for later.**
+29. **Safety Settings shows 5 min and 2 m when the backend is down (17 Nov).**
+    - When the load fails, the form keeps its starting values (`frontend/components/dashboard/SafetySettings.tsx:17-18`). Save Changes stays enabled, so a click would overwrite the real values.
+    - Until it's fixed, reload the page once the backend is up before reading or saving it.
+    - **To be fixed in 143 (D5)** (Herman, 17 Nov).
 
 ## Test harness (`tools/harness/`; `tools/harness/README.md` has the commands)
 - **Point it at a `git archive` export, never the live `backend/`:**
@@ -404,7 +470,7 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
   | `cor01_timestamps_inprocess.py` | 7/7 |
   | `cor08_ap_delete_inprocess.py` | 6/6 |
   | `rel01_ap_outage_inprocess.py` (136) | 7/7 |
-  | `cor03_coverage_edge_inprocess.py` (136) | 7/7 |
+  | `cor03_coverage_edge_inprocess.py` (136, 145) | **12/12** since 145 (it sets the AP-change hold to 30 s) |
   | `cor06_restart_dedup_inprocess.py` (136) | 6/6 |
   | `cor04_collision_age_floor_inprocess.py` (136) | 6/6 |
   | `con03_sweep_lock_inprocess.py` (136) | 5/5 |
@@ -414,11 +480,13 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
   | `f142_sweep_inactive_inprocess.py` (142) | 7/7 |
   | `f142_calibration_inprocess.py` (142) | 8/8 |
   | `f142_ap_delete_inprocess.py` (142) | 7/7 |
+  | `f145_acknowledge_inprocess.py` (145) | 7/7 |
+  | `f145_stillness_restart_inprocess.py` (145) | 19/19 (it sets the AP-change hold to 30 s) |
 
   - The 135 tests are `sec04`, `sec01`, `cor05`, `cor12`, `cor01` and `cor08`. All six fail or crash on `2f00309`, the code before 135.
   - COR-05 and COR-12 fake the simulators' HTTP client and send them to a dead port. The harness tripwire doesn't cover `localhost`, and `localhost:8000` is the live backend.
   - The review's fix plan asks every later prompt to add an in-process test for each finding it closes.
-  - The 136 and 142 suites exist only on the fix branches. Their reports have each suite's result on the code before the change.
+  - The 136, 142 and 145 suites exist only on the fix branches. Their reports have each suite's result on the code before the change.
   - Since 136, `run_smoke.py`'s sweeper also raises `positioning_offline` for the seeded stale worker.
   - **Never pass `--backend-dir` to `selftest.py`:** its first argument is a scratch folder, and a runner once wrote a `--backend-dir/` folder into the repo root.
 
@@ -434,10 +502,10 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
   - **Node:** `D:\DOWNLOAD\node.exe` (v24.19.0). It's on PowerShell's PATH but not Git Bash's, so run `node`, `npx` and `tsc` from PowerShell.
   - **Firebase key:** `backend\serviceAccountKey.json` is key `213bcd91` (since 22 Oct; checked 3 Nov). The revoked `6f81d665` made `create_app()` retry Firestore for 300 s and then fail.
   - **go2rtc:** `tools/go2rtc/bin/` holds go2rtc 1.9.14 and ffmpeg 9.0.2, installed on 14 Nov from the official releases. The zip and exe SHA-256 match the values under "Live view".
-  - **Outside the repo:** `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\` holds `136\report.md`, `136\scan_env.py`, `136\venv-freeze-before.txt`, `142\report.md`, `142\live-check-findings.md`, `142\floormap-harness-results.md`, `142\camera-status\` (`stage.patch`, `msg.txt` and the 3 Nov reviews, for the camera-colour commit) and `142\auth-fix\msg.txt`. There's no `skye-log-archive` here.
+  - **Outside the repo:** `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\` holds `136\report.md`, `136\scan_env.py`, `136\venv-freeze-before.txt`, `142\report.md`, `142\live-check-findings.md`, `142\floormap-harness-results.md`, `142\camera-status\` (`stage.patch`, `msg.txt` and the 3 Nov reviews, for the camera-colour commit), `142\auth-fix\msg.txt`, `145\report.md` and `145\stages\` (145's stage patches and commit messages, and scratch scripts that print counts only). There's no `skye-log-archive` here.
   - **The `.env` scan** (PowerShell): `git diff origin/main...<branch> | backend\venv\Scripts\python.exe -I D:\DOWNLOAD\Y3S2\FYP\skye-scratch\136\scan_env.py .` prints key names only. In Git Bash, use forward slashes.
   - **Line endings:** `HANDOFF.md` is CRLF here (the Intern-laptop note below says LF). Check with `git ls-files --eol`.
-  - **Logs:** the 13 Nov backend logs split into 50 MB `.partNNN.log` files.
+  - **Logs:** backend logs split into 50 MB `.partNNN.log` files (about 75 minutes each on 16–17 Nov). The names are in UTC (`skye-YYYYMMDD-HHMMSS`), one file per process start or reload; local time is UTC+8. A directory listing can show a stale size for the file being written, so open the file to check it.
   - **Claude in Chrome:** the extension can open a new window, and a tab behind another window throttles timers, which spoils load timings.
 - **Intern laptop (to 16 Oct):** the rest of this section, except where it says otherwise.
 - **Shells:** PowerShell is primary; the Bash tool is Git Bash.
@@ -471,7 +539,7 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
 - **Identities:**
   - real beacons: `guard-001`, `worker-001`;
   - simulated: `sim-*`, `test-*`; the simulator's fake camera heartbeat is `A8:57:4E:3C:11:01`.
-- **Hardware:** APs `40:AE:30:9D:34:5A`, `40:AE:30:9D:34:5C` (EAP660 HD) and `A8:29:48:C3:88:A0` (EAP770). The active floor was "TPLink" (`fc6e663e…`) in building `53c3872f…` until 13 Nov, when it was emptied and deactivated. Since 142 several floors can be active; since 14 Nov the active one is `355d6a73…`, with two of these APs (see "Where things stand").
+- **Hardware:** APs `40:AE:30:9D:34:5A`, `40:AE:30:9D:34:5C` (EAP660 HD) and `A8:29:48:C3:88:A0` (EAP770). The active floor was "TPLink" (`fc6e663e…`) in building `53c3872f…` until 13 Nov, when it was emptied and deactivated. Since 142 several floors can be active; since 14 Nov the active one is `355d6a73…`, with two of these APs (see "Where things stand"). Since 16 Nov a third AP, probably `…34:5C`, posts from `.51` but isn't placed. On 17 Nov the readings put (2.92, 2.61) at the EAP660 HD `…34:5A` and (4.4, 9.36) at the EAP770.
 - **Diagnostic scripts from 6–7 Oct** live in that session's scratchpad (`webrtc-diag/`, `e2e/`). They're useful as patterns:
   - a minimal RTSP client that logs NAL types and marker bits;
   - a headless-Chrome WebRTC stats page;
@@ -480,10 +548,9 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
   The scratchpad is temporary.
 
 ## Suggested first message in the new chat
-"Continue from HANDOFF.md v8. Before anything else:
-1. Run `git status`, `git log --oneline -20` and `git ls-remote --heads origin` fresh. The live tree is on `fix/142-floors-aps` (`5f70fb7`, pushed), stacked on `fix/136-man-down-collision` (`3ab8adc`, local); `main` is `2975863`. The camera-colour change is uncommitted in 7 frontend files: leave it alone. Ask me before committing anything.
-2. Read `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\136\report.md` and `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\142\report.md` for the live checks and merge steps.
-3. Check what's running (backend on :8000, `next dev` on :3000, go2rtc on :1984) and this PC's network address (it left the lab network on 14 Nov), and don't start, stop or restart my servers.
-4. Note the floor change before any live check: TPLink was emptied on 13 Nov, and the active floor `355d6a73…` has two APs and the new camera.
+"Continue from HANDOFF.md v9. Before anything else:
+1. Run `git status`, `git log --oneline -20` and `git ls-remote --heads origin` fresh. The live tree is on `fix/145-alerts-stay-dismissed` (pushed; its tip is the v9 commit), stacked on `fix/142-floors-aps` (`9f28798`, one ahead of GitHub's `5bb495f`) and `fix/136-man-down-collision` (`3ab8adc`, local). `main` is `2975863`. Ask me before committing or pushing anything, and don't merge.
+2. Read `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\145\report.md` (its status, V5 and merge steps), and Open #1 and #27–#29 here.
+3. Check what's running (backend on :8000, `next dev` on :3000, go2rtc on :1984), this PC's network address and the free memory, and don't start, stop or restart my servers.
 
-Then help me get the camera's alarms through (Open #22), and run 136's V6 and 142's V5 with me, adapted to the new floor. Leave `man_down_minutes` and `backend/encode.py` alone, keep secrets out of all output, and no multi-agent workflows."
+Then start Prompt 143, stacked on `fix/145-alerts-stay-dismissed`; I'll paste its spec. Its D5 fixes Safety Settings showing 5 min and 2 m when the backend is down (Open #29). After 143, on a dock day: 136's V6 and 142's V5, adapted to the floor `355d6a73…`, and a live test of the red man-down's restart check once the third AP is placed. Then the merges, in the order 136, 142, 145, 143. Leave `man_down_minutes` and `backend/encode.py` alone, keep secrets out of all output, and no multi-agent workflows."
