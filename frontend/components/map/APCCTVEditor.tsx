@@ -13,11 +13,13 @@ import { cctvStatus, useCCTVHeartbeats } from "@/hooks/useCCTVHeartbeats";
 import MacAddressInput from "@/components/shared/MacAddressInput";
 import ApIcon, { apStatusColor } from "./ApIcon";
 import CctvIcon, { CctvMarker, cctvStatusColor } from "./CctvIcon";
+import CameraCone, { CameraDirectionFields, useConeRotation } from "./CameraCone";
 import {
   PlaceDistanceFields, WALL_STEP_HINT, WallGuidesOverlay, useStoredWallGuides, useWallSetup, type TypedDistances,
 } from "./WallGuides";
 import { isCompleteMac, isValidMac } from "@/utils/macUtils";
 import { distancesM, formatMetres, guideImageSize, parseMetres, pointAtDistances, type Frac, type ImageSize } from "@/utils/wallGuides";
+import { parseFacing, parseFov } from "@/utils/cameraFacing";
 
 const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
@@ -48,6 +50,10 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const [cctvFormError, setCctvFormError] = useState("");
   const [editingCctvId, setEditingCctvId] = useState<string | null>(null);
   const [editingApId, setEditingApId] = useState<string | null>(null);
+  // Prompt 143, D2: which way the camera faces, as typed in its dialog.
+  const [cctvFacing, setCctvFacing] = useState("");
+  const [cctvFov, setCctvFov] = useState("");
+  const [cctvDirectionError, setCctvDirectionError] = useState("");
   const { heartbeats: apHeartbeats, loaded: apHeartbeatsLoaded } = useAPHeartbeats();
   const { heartbeats: cctvHeartbeats, loaded: cctvHeartbeatsLoaded } = useCCTVHeartbeats();
 
@@ -90,6 +96,13 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const pxPerM = floor.scale_pixels_per_meter;
   const guidesOn = !!(walls && guideSize && pxPerM);
   const metresAt = (p: Frac) => (walls && guideSize && pxPerM ? distancesM(walls, p, guideSize, pxPerM) : null);
+
+  // Turning a camera by the handle at its cone's tip saves facing_deg through
+  // the update route (Prompt 143, D2.3).
+  const rotation = useConeRotation(imgRef, async (id, deg) => {
+    try { await updateCCTV(buildingId, floor.id, id, { facing_deg: deg }); }
+    catch (err: unknown) { toast.error(backendSentence(err) ?? "Couldn't turn the camera"); }
+  });
   useEffect(() => { if (!pendingPct) setTyped(null); }, [pendingPct]);
   useEffect(() => { if (!placementMode) setHoverFrac(null); }, [placementMode]);
   useEffect(() => {
@@ -127,7 +140,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const handleMarkerPointerDown =
     (type: "ap" | "cctv", id: string, xPct: number, yPct: number) => (e: React.PointerEvent) => {
       if ((e.target as HTMLElement).closest("button")) return;
-      if (placementMode || dragTarget || wallSetup.step) return;
+      if (placementMode || dragTarget || wallSetup.step || rotation.turning) return;
       e.preventDefault();
       e.stopPropagation();
       dragOriginRef.current = { clientX: e.clientX, clientY: e.clientY, xPct, yPct };
@@ -303,6 +316,7 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
   const resetCctvForm = () => {
     setCctvName(""); setCctvMac(""); setCctvMacError(""); setCctvIp(""); setCctvIpError("");
     setCctvCheckpoint(""); setCctvFormError(""); setEditingCctvId(null);
+    setCctvFacing(""); setCctvFov(""); setCctvDirectionError("");
   };
 
   const openEditCCTV = (cctv: CCTVRecord) => {
@@ -311,7 +325,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     setCctvMac((cctv.device_mac ?? cctv.mac ?? "").toUpperCase());
     setCctvIp(cctv.ip ?? "");
     setCctvCheckpoint(cctv.checkpoint_ap_id ?? "");
-    setCctvMacError(""); setCctvIpError(""); setCctvFormError("");
+    setCctvFacing(cctv.facing_deg != null ? String(cctv.facing_deg) : "");
+    setCctvFov(cctv.facing_deg != null && cctv.fov_deg != null ? String(cctv.fov_deg) : "");
+    setCctvMacError(""); setCctvIpError(""); setCctvFormError(""); setCctvDirectionError("");
     setEditingCctvId(cctv.id);
   };
 
@@ -321,13 +337,18 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
     if (!isCompleteMac(cctvMac)) { setCctvMacError("Please complete all 6 MAC address segments"); return; }
     if (!isValidMac(cctvMac))    { setCctvMacError("Invalid MAC address format"); return; }
     if (!IPV4_REGEX.test(cctvIp.trim())) { setCctvIpError("Enter the camera's IPv4 address, e.g. 192.168.0.101"); return; }
-    setCctvMacError(""); setCctvIpError(""); setCctvFormError("");
+    const facing = parseFacing(cctvFacing), fov = parseFov(cctvFov);
+    if (!facing.ok) { setCctvDirectionError("Facing: degrees from 0 to under 360, or empty"); return; }
+    if (!fov.ok && facing.value !== null) { setCctvDirectionError("Field of view: degrees from 10 to 360, or empty for 90"); return; }
+    setCctvMacError(""); setCctvIpError(""); setCctvFormError(""); setCctvDirectionError("");
     setSaving(true);
     const fields = {
       name: cctvName.trim() || "CCTV",
       mac: cctvMac,
       ip: cctvIp.trim(),
       checkpoint_ap_id: cctvCheckpoint || null,
+      // Facing empty: not set, which clears both on an edit. The field of view goes only with a facing (D2).
+      ...(facing.value === null ? { facing_deg: null } : { facing_deg: facing.value, fov_deg: fov.ok ? fov.value : null }),
     };
     try {
       if (editingCctvId) {
@@ -674,6 +695,20 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
           );
         })}
 
+        {/* Which way each camera faces, with a handle at the cone's tip to turn it (Prompt 143, D2.3) */}
+        {cctvs.map((cctv) => {
+          const facing = rotation.shownFacing(cctv.id) ?? cctv.facing_deg;
+          if (facing == null) return null;
+          const at = (dragTarget?.type === "cctv" && dragTarget.id === cctv.id && dragPct) || { x: cctv.x_pct, y: cctv.y_pct };
+          const status = cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, (cctv.device_mac ?? cctv.mac)?.toUpperCase());
+          const canTurn = !placementMode && !wallSetup.step && !dragTarget;
+          return (
+            <CameraCone key={`cone-${cctv.id}`} xPct={at.x} yPct={at.y} facingDeg={facing} fovDeg={cctv.fov_deg}
+              color={cctvStatusColor(status)}
+              onHandlePointerDown={canTurn ? (e) => rotation.begin(e, cctv.id, at, facing) : undefined} />
+          );
+        })}
+
         {/* CCTV markers, coloured by status like the APs (Prompt 142, D2) — drag an existing one to reposition it */}
         {cctvs.map((cctv) => {
           const isDragging = dragTarget?.type === "cctv" && dragTarget.id === cctv.id;
@@ -923,6 +958,9 @@ export default function APCCTVEditor({ buildingId, floor, onClose }: Props) {
                   ))}
                 </select>
               </div>
+              <CameraDirectionFields facing={cctvFacing} fov={cctvFov} error={cctvDirectionError}
+                onFacing={(t) => { setCctvFacing(t); setCctvDirectionError(""); setCctvFormError(""); }}
+                onFov={(t) => { setCctvFov(t); setCctvDirectionError(""); setCctvFormError(""); }} />
               {typed && pendingPct && !editingCctvId && (
                 <PlaceDistanceFields typed={typed} reads={metresAt(pendingPct)} onType={typeDistance} />
               )}

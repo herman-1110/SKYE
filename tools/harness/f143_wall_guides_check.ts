@@ -11,6 +11,12 @@
 //   8  metres shown to 2 decimal places; typed metres parsed
 //   9  the pixel size used: the floor's stored size, else the image's natural size
 //
+// And for D2, the camera's direction (frontend/utils/cameraFacing.ts):
+//  10  0 is up and angles go clockwise, with y growing downward: 90 right, 180 down
+//  11  the angle from a camera to the cursor is worked out in pixels, not fractions
+//  12  rounding for the handle wraps 359.6 to 0; compass words; the "135° (SE)" label
+//  13  the cone's outline and the handle's tip point the right way; the dialog's boxes
+//
 // Run with Node, which strips the types itself (Node 23.6 or later; this PC has 24):
 //   node tools/harness/f143_wall_guides_check.ts
 // (from PowerShell on this PC: Node isn't on Git Bash's PATH). Exit 1 on a failure.
@@ -21,6 +27,10 @@ import {
   parseMetres, parseWallGuides, pointAtDistances, rectFromCorners, serialiseWallGuides, wallGuidesKey,
 } from "../../frontend/utils/wallGuides.ts";
 import type { EndWall, Frac, ImageSize, SideWall, WallGuides } from "../../frontend/utils/wallGuides.ts";
+import {
+  compassWord, conePath, facingBetween, facingFromVector, facingLabel, facingVector, normaliseFacing,
+  parseFacing, parseFov, roundFacing,
+} from "../../frontend/utils/cameraFacing.ts";
 
 const results: { check: number; name: string; ok: boolean }[] = [];
 
@@ -205,6 +215,65 @@ const walls = (xWall: SideWall, yWall: EndWall): WallGuides => ({ rect: RECT, xW
     JSON.stringify(stored) === JSON.stringify({ w: 597, h: 450 }) && JSON.stringify(fallback) === JSON.stringify({ w: 1194, h: 900 })
       && JSON.stringify(zero) === JSON.stringify({ w: 640, h: 480 }) && none === null,
     `stored ${JSON.stringify(stored)} fallback ${JSON.stringify(fallback)}`);
+}
+
+// 10. The convention, in the image's pixels with y growing downward.
+{
+  const dirs: [string, number, number, number][] = [
+    ["up", 0, -1, 0], ["right", 1, 0, 90], ["down", 0, 1, 180], ["left", -1, 0, 270],
+    ["down-right", 1, 1, 135], ["up-left", -1, -1, 315], ["up-right", 1, -1, 45], ["down-left", -1, 1, 225],
+  ];
+  const wrong = dirs.filter(([, dx, dy, deg]) => !near(facingFromVector(dx, dy), deg));
+  check(10, "0 is up and angles go clockwise (y down): right 90, down 180, left 270", wrong.length === 0,
+    dirs.map(([n, dx, dy]) => `${n} ${facingFromVector(dx, dy).toFixed(1)}`).join(", "));
+}
+
+// 11. From a camera to the cursor on the 597 x 450 floor: 0.1 across and 0.1 down is
+// 59.7 px right and 45 px down, so about 127°, not the 135° that fractions would give.
+{
+  const got = facingBetween({ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.6 }, REAL);
+  const want = 180 - Math.atan(59.7 / 45) * 180 / Math.PI;
+  const square = facingBetween({ x: 0.5, y: 0.5 }, { x: 0.6, y: 0.6 }, { w: 500, h: 500 });
+  check(11, "the camera-to-cursor angle is worked out in the image's pixels", near(got, want, 1e-9) && near(square, 135, 1e-9)
+    && !near(got, 135, 1), `597 x 450: ${got.toFixed(2)}° (want ${want.toFixed(2)}°); square image: ${square.toFixed(2)}°`);
+}
+
+// 12. Rounding, compass words and the label.
+{
+  const rounded = [359.6, -0.4, 359.4, 720.2, 89.5, -90].map(roundFacing);
+  const words = [0, 22.4, 22.5, 45, 90, 135, 180, 225, 270, 315, 337.4, 337.5, 359].map(compassWord);
+  const ok = JSON.stringify(rounded) === JSON.stringify([0, 0, 359, 0, 90, 270])
+    && JSON.stringify(words) === JSON.stringify(["N", "N", "NE", "NE", "E", "SE", "S", "SW", "W", "NW", "NW", "N", "N"])
+    && facingLabel(135) === "135° (SE)" && facingLabel(90.5) === "90.5° (E)" && facingLabel(0) === "0° (N)"
+    && normaliseFacing(-0) === 0 && Object.is(normaliseFacing(-0), 0) && normaliseFacing(360) === 0;
+  check(12, "the handle's whole degrees wrap 359.6 to 0 (never 360); compass words; \"135° (SE)\"", ok,
+    `rounded ${JSON.stringify(rounded)}; words ${words.join(" ")}; label ${facingLabel(135)}`);
+}
+
+// 13. The cone and the handle as drawn, and the dialog's Facing and Field of view boxes.
+{
+  const right = facingVector(90), down = facingVector(180);
+  const path = conePath(100, 100, 78, 90, 90);
+  // Facing right with 90°: from the centre to 45° and round to 135°, both on the right-hand side.
+  const nums = (path.match(/-?\d+(\.\d+)?(e-?\d+)?/g) ?? []).map(Number);
+  const [mx, my, lx, ly] = nums;
+  const ex = nums[nums.length - 2], ey = nums[nums.length - 1];
+  const full = conePath(100, 100, 78, 0, 360);
+  const facings = ["", "0", "90", "359.9", "360", "-1", "abc", "45.5"].map((t) => {
+    const p = parseFacing(t);
+    return p.ok ? p.value : "bad";
+  });
+  const fovs = ["", "10", "360", "9", "361", "120"].map((t) => {
+    const p = parseFov(t);
+    return p.ok ? p.value : "bad";
+  });
+  const ok = near(right.x, 1) && near(right.y, 0) && near(down.x, 0) && near(down.y, 1)
+    && mx === 100 && my === 100 && lx > 100 && ly < 100 && ex > 100 && ey > 100 && path.includes(" 0 0 1 ")
+    && full.split(" A ").length === 3 && conePath(0, 0, 1, 0, 270).includes(" 0 1 1 ")
+    && JSON.stringify(facings) === JSON.stringify([null, 0, 90, 359.9, "bad", "bad", "bad", 45.5])
+    && JSON.stringify(fovs) === JSON.stringify([null, 10, 360, "bad", "bad", 120]);
+  check(13, "a cone facing 90° opens to the right, the handle at 90° is right and at 180° down; the dialog's boxes", ok,
+    `start (${lx.toFixed(1)}, ${ly.toFixed(1)}) end (${ex.toFixed(1)}, ${ey.toFixed(1)}); facings ${JSON.stringify(facings)}; fovs ${JSON.stringify(fovs)}`);
 }
 
 const failed = results.filter((r) => !r.ok).length;

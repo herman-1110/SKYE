@@ -10,6 +10,7 @@ import { useDashboardStore } from "@/store/dashboardStore";
 import WorkerMarker from "./WorkerMarker";
 import PatrolRouteOverlay from "./PatrolRouteOverlay";
 import CameraPanel from "./CameraPanel";
+import CameraCone from "./CameraCone";
 import ApIcon, { apStatusColor } from "./ApIcon";
 import { CctvMarker, cctvStatusColor } from "./CctvIcon";
 import { subscribeToAPs, subscribeToCCTVs, type APRecord, type CCTVRecord } from "@/services/floorService";
@@ -324,6 +325,17 @@ export default function FloorMap({ positions, buildingId, activeFloor }: Props) 
               >
                 <ApIcon size={22} style={{ color: apStatusColor(status) }} />
               </div>
+            );
+          })}
+
+          {/* Which way each camera faces (Prompt 143, D2.4): a translucent cone under its marker,
+              always about three markers long on screen. It shows a direction, not coverage. */}
+          {cctvs.map((cctv) => {
+            if (cctv.facing_deg == null) return null;
+            const status = cctvStatus(cctvHeartbeats, cctvHeartbeatsLoaded, (cctv.device_mac ?? cctv.mac)?.toUpperCase());
+            return (
+              <CameraCone key={`cone-${cctv.id}`} xPct={cctv.x_pct} yPct={cctv.y_pct} facingDeg={cctv.facing_deg}
+                fovDeg={cctv.fov_deg} color={cctvStatusColor(status)} />
             );
           })}
 

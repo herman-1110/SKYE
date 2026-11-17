@@ -259,6 +259,9 @@ export interface CCTVRecord {
   checkpoint_ap_id?: string | null;  // the AP (checkpoint) this camera covers
   timezone?: string | null;          // read from the camera at registration, e.g. "UTC+08:00"
   camera_key?: string | null;        // API responses only: "ipc:98BA5F8B1003:1"
+  // Prompt 143, D2 — absent or null until set (and on records written before it).
+  facing_deg?: number | null;        // degrees clockwise from up on the floor plan, 0 to under 360
+  fov_deg?: number | null;           // field of view, 10-360; 90 when a facing is set without one
 }
 
 /** One alarm event in a camera's last 15 minutes (backend memory only). */
@@ -323,16 +326,21 @@ export const createCCTV = (
   body: {
     name: string; x_pct: number; y_pct: number;
     mac?: string | null; ip?: string | null; checkpoint_ap_id?: string | null;
+    facing_deg?: number | null; fov_deg?: number | null;
   },
 ): Promise<CCTVRecord> =>
   req("POST", `/api/buildings/${buildingId}/floors/${floorId}/cctvs`, body);
 
 // Only the fields sent change; send null to clear ip or checkpoint_ap_id.
+// facing_deg null clears the facing and the field of view together (Prompt 143, D2).
 export const updateCCTV = (
   buildingId: string,
   floorId: string,
   cctvId: string,
-  body: { name?: string; mac?: string | null; ip?: string | null; checkpoint_ap_id?: string | null },
+  body: {
+    name?: string; mac?: string | null; ip?: string | null; checkpoint_ap_id?: string | null;
+    facing_deg?: number | null; fov_deg?: number | null;
+  },
 ): Promise<CCTVRecord> =>
   req("PATCH", `/api/buildings/${buildingId}/floors/${floorId}/cctvs/${cctvId}`, body);
 

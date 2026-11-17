@@ -10,6 +10,7 @@ import {
 import type { CCTVHeartbeat, CCTVStatus } from "@/hooks/useCCTVHeartbeats";
 import CameraLiveView from "./CameraLiveView";
 import { cctvStatusColor } from "./CctvIcon";
+import { DEFAULT_FOV_DEG, degreesText, facingLabel } from "@/utils/cameraFacing";
 
 // Prompt 131 T9: opened by clicking a camera marker on the floor map. Status
 // comes from the /cctv_heartbeats subscription (cctvStatus, passed in);
@@ -170,6 +171,12 @@ export default function CameraPanel({ buildingId, cctv, aps, heartbeat, status, 
             })()}
           </Row>
           <Row label="Checkpoint">{checkpoint ? checkpoint.name : cctv.checkpoint_ap_id ? "(AP no longer on this floor)" : "None"}</Row>
+          {/* Prompt 143, D2.4 */}
+          <Row label="Facing">
+            {cctv.facing_deg != null
+              ? `${facingLabel(cctv.facing_deg)} · field of view ${degreesText(cctv.fov_deg ?? DEFAULT_FOV_DEG)}°`
+              : "Not set (Manage Devices, Edit camera)"}
+          </Row>
           <Row label="MAC / IP">
             <span className="font-mono">{cctv.device_mac ?? cctv.mac ?? "-"}</span>
             <span className="text-s-muted"> · </span>
