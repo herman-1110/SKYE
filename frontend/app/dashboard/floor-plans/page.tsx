@@ -216,8 +216,9 @@ function DeactivateFloorModal({
           <button onClick={onClose} disabled={working} className="flex-1 py-2 rounded-lg border border-s-border text-xs text-s-muted hover:text-s-text transition-colors disabled:opacity-40">
             Cancel
           </button>
-          <button onClick={handleConfirm} disabled={working} className="flex-1 py-2 rounded-lg bg-s-accent text-s-base font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
-            {working && <span className="h-3 w-3 rounded-full border-2 border-s-base border-t-transparent animate-spin" />}
+          {/* Red, like Delete Floor's (Prompt 143, D3) */}
+          <button onClick={handleConfirm} disabled={working} className="flex-1 py-2 rounded-lg bg-s-danger text-white font-bold text-xs hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-1.5">
+            {working && <span className="h-3 w-3 rounded-full border-2 border-white border-t-transparent animate-spin" />}
             {working ? "Deactivating…" : "Deactivate"}
           </button>
         </div>
@@ -288,7 +289,7 @@ function ActivationConflictModal({
                   ) : (
                     <button
                       onClick={() => onDeactivate(c)}
-                      className="shrink-0 px-2.5 py-1 rounded-lg border border-s-border text-[11px] text-s-text hover:border-s-accent transition-colors"
+                      className="shrink-0 px-2.5 py-1 rounded-lg border border-s-danger text-[11px] text-s-danger hover:bg-s-danger/10 transition-colors"
                     >
                       Deactivate {c.floor_name}
                     </button>
@@ -925,7 +926,7 @@ function FloorCard({
                 Set as Active
               </button>
             ) : (
-              <button onClick={handleDeactivate} disabled={busy} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-muted hover:bg-s-elevated transition-colors flex items-center gap-2">
+              <button onClick={handleDeactivate} disabled={busy} style={{ fontSize: 13, padding: "6px 12px" }} className="w-full text-left text-s-danger hover:bg-s-elevated transition-colors flex items-center gap-2">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg>
                 Deactivate
               </button>
