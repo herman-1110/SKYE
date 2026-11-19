@@ -1,5 +1,6 @@
 import ipaddress
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class Settings:
     MAN_DOWN_UPGRADE_CONFIRM_S: float
     MAN_DOWN_AP_CHANGE_HOLD_S: float
     MAN_DOWN_RESTART_MATCH_H: float
+    MAN_DOWN_MOVE_CONFIRM_FIXES: int
     AP_SILENT_AFTER_S: float
     AP_ALIVE_GRACE_S: float
     COLLISION_DISTANCE_M: float
@@ -87,6 +89,17 @@ def _ipv4_list(name: str, value: str) -> tuple:
         except ValueError:
             raise ValueError(f"{name}: {part!r} is not an IPv4 address") from None
     return tuple(out)
+
+
+def _whole_number(name: str, value: str, minimum: int) -> int:
+    """A whole number of at least minimum, written as plain digits. Anything
+    else (a fraction, a sign, a word, an empty value, too small) stops startup
+    with one sentence naming the setting, rather than falling back to the
+    default without a word."""
+    text = (value or "").strip()
+    if not re.fullmatch(r"[0-9]+", text) or int(text) < minimum:
+        raise ValueError(f"{name} must be a whole number of at least {minimum}, not {value!r}.")
+    return int(text)
 
 
 def _load() -> Settings:
@@ -181,6 +194,17 @@ def _load() -> Settings:
         # only if it was raised within this many hours: an old one left
         # unresolved at someone's usual spot mustn't hide a new episode there.
         MAN_DOWN_RESTART_MATCH_H=float(os.environ.get("MAN_DOWN_RESTART_MATCH_H", "12")),
+        # How many exact fixes in a row must each land
+        # MAN_DOWN_MOVEMENT_EPSILON_M or more from the exact anchor before they
+        # count as movement (Prompt 147, Herman's decision, 19 Nov). A beacon
+        # lying still still gets the odd single fix 2 m or more away, and
+        # counting that one fix restarted the stillness clock: on 19 Nov two
+        # beacons that lay still for over an hour never reached 60 minutes.
+        # Exact fixes come about every 2 s, so 3 is about 6 s of being away.
+        # 1 gives the behaviour before this setting. A whole number of at
+        # least 1; anything else stops startup.
+        MAN_DOWN_MOVE_CONFIRM_FIXES=_whole_number("MAN_DOWN_MOVE_CONFIRM_FIXES",
+                                                  os.environ.get("MAN_DOWN_MOVE_CONFIRM_FIXES", "3"), 1),
         # An AP whose last report is older than this (seconds) is silent
         # (Prompt 136, REL-01). The signal-loss sweep holds a person's alert
         # while none of the APs that last heard them is reporting, and raises

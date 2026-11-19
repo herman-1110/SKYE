@@ -8,7 +8,9 @@ three-AP fixes can upgrade to a red man_down.
      and _last_man_down isn't touched
   3  the upgrade: exact fixes within epsilon for 30 s after the alert raise one
      man_down (clock taken from the run's start), and nothing more after that
-  4  movement on return: an exact fix past epsilon cancels the upgrade
+  4  movement on return: exact fixes past epsilon cancel the upgrade (since
+     Prompt 147, MAN_DOWN_MOVE_CONFIRM_FIXES of them in a row): the run ends,
+     the person is seen moving, and the anchor is where they went
   5  the strongest AP changes (Prompt 145, decision (c)): nothing changes until
      the new AP has been the strongest for 30 s, and nothing is raised from
      its readings meanwhile; then a new run, timed from the new AP's first
@@ -168,13 +170,19 @@ def main() -> int:
           and saved(B) == [("possible_man_down", True, "stillness"), ("man_down", False, "stillness")],
           f"fired={fired(ev)} saved={saved(B)}")
 
-    # 4: movement on return
+    # 4: movement on return. The move is MAN_DOWN_MOVE_CONFIRM_FIXES exact
+    # fixes in a row at (8, 8), 2 s apart from 90 (Prompt 147; one before it):
+    # the run is gone, the person is seen moving, and the anchor is there.
     M = "test-cor03-moved"
+    n_move = getattr(ss.settings, "MAN_DOWN_MOVE_CONFIRM_FIXES", 1)
     ev = [approx(t, M) for t in range(0, 71, 10)]
-    ev += [exact(80, M, (2.5, 2.5)), exact(90, M, (8.0, 8.0)), exact(125, M, (8.1, 8.0))]
+    ev += [exact(80, M, (2.5, 2.5))] + [exact(90 + 2 * i, M, (8.0, 8.0)) for i in range(n_move)]
+    ev += [exact(125, M, (8.1, 8.0))]
+    tracker4 = ss._man_down_tracker.get(M)
     check(4, "movement on return: an exact fix past epsilon cancels the upgrade",
-          fired(ev) == [(60, "possible_man_down", True)] and saved(M) == [("possible_man_down", True, "stillness")],
-          f"fired={fired(ev)} saved={saved(M)}")
+          fired(ev) == [(60, "possible_man_down", True)] and saved(M) == [("possible_man_down", True, "stillness")]
+          and run_of(M) is None and M in ss._seen_moving and tracker4 is not None and tracker4[:2] == (8.0, 8.0),
+          f"fired={fired(ev)} saved={saved(M)} run={run_of(M)} moving={M in ss._seen_moving} anchor={tracker4}")
 
     # 5: the strongest AP changes. AP1's run is due at 60, but AP2's readings
     # raise nothing; AP2 has held 29 s at 84 and 30 s at 85.

@@ -17,6 +17,8 @@ is safety_service.utcnow_iso.
    4  a resolved alert: a new alert
    5  the person moved after the restart and stopped somewhere new: a new alert
    6  the person moved, then came back to the old spot: a new alert
+      (in 5 and 6, since Prompt 147, each move is MAN_DOWN_MOVE_CONFIRM_FIXES
+      exact fixes in a row, 2 s apart)
    7  an alert without an anchor (raised before 145): a new alert
    8  the same spot on another floor: a new alert
    9  possible_man_down at the same AP: none, and the run is latched
@@ -167,7 +169,7 @@ def main() -> int:
 
     def restart():
         for name in ("_stale_alerted", "_last_man_down", "_still_alerted", "_man_down_tracker",
-                     "_approx_runs", "_last_fresh_mono", "_held_logged", "_seen_moving"):
+                     "_approx_runs", "_last_fresh_mono", "_held_logged", "_seen_moving", "_move_count"):
             if hasattr(ss, name):
                 getattr(ss, name).clear()
         reads["n"] = 0
@@ -204,6 +206,13 @@ def main() -> int:
 
     def moving(pid):
         return pid in getattr(ss, "_seen_moving", set())   # none before 145
+
+    n_move = getattr(ss.settings, "MAN_DOWN_MOVE_CONFIRM_FIXES", 1)   # one fix before 147
+
+    def move(pid, t_last, xy):
+        """A move (Prompt 147): MAN_DOWN_MOVE_CONFIRM_FIXES exact fixes in a
+        row at xy, 2 s apart, the last of them at t_last."""
+        return [e for e in (at(t_last - 2 * (n_move - 1 - i), pid, xy) for i in range(n_move)) if e]
 
     n_reads = {}
 
@@ -260,7 +269,7 @@ def main() -> int:
     P4 = "test-f145-moved"
     red_before(P4)
     restart()
-    p4_after = [e for e in (at(1000, P4, SPOT), at(1010, P4, FAR)) if e] + still(P4, 1020, 1100, FAR)
+    p4_after = [e for e in [at(1000, P4, SPOT)] if e] + move(P4, 1010, FAR) + still(P4, 1020, 1100, FAR)
     n_reads[P4] = reads["n"]
     new4 = stored(P4)[-1]
     check(5, "moved after the restart and stopped somewhere new: a new alert",
@@ -271,7 +280,7 @@ def main() -> int:
     P5 = "test-f145-back"
     red_before(P5)
     restart()
-    p5_after = [e for e in (at(1000, P5, SPOT), at(1010, P5, FAR), at(1020, P5, SPOT)) if e] \
+    p5_after = [e for e in [at(1000, P5, SPOT)] if e] + move(P5, 1010, FAR) + move(P5, 1020, SPOT) \
         + still(P5, 1030, 1100, SPOT)
     n_reads[P5] = reads["n"]
     check(6, "moved, then came back to the old spot: a new alert",

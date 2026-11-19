@@ -4,7 +4,8 @@ one stillness alert per stillness episode instead of one every 30 s.
   1  still past the threshold -> exactly one stillness alert
   2  staying still for another hour -> no further alert
   3  moving past the epsilon ends the episode; still past the threshold
-     again -> a second alert
+     again -> a second alert (since Prompt 147 the move is
+     MAN_DOWN_MOVE_CONFIRM_FIXES fixes in a row, 2 s apart)
   4  an approximate -> exact upgrade re-seeds the anchor and starts a new
      episode; an exact -> approximate reading does not
   5  a beacon that went dark (signal-loss latch set) and comes back still at
@@ -106,16 +107,19 @@ def main() -> int:
           all(f is None for f in later) and len(a) == 1,
           f"extra alerts returned={sum(f is not None for f in later)} saved={len(a)}")
 
-    # 3: move past epsilon, then still past the threshold again
+    # 3: move past epsilon, then still past the threshold again. A move is
+    # MAN_DOWN_MOVE_CONFIRM_FIXES fixes in a row (Prompt 147; one before it),
+    # here 2 s apart from t + 5; the last of them is the new anchor.
     t = clock["t"]
-    moved = at(t + 5, P, 5.0 + eps + 0.5, 5.0)
+    n_move = getattr(ss.settings, "MAN_DOWN_MOVE_CONFIRM_FIXES", 1)
+    moved = [at(t + 5 + 2 * i, P, 5.0 + eps + 0.5, 5.0) for i in range(n_move)]
     early = at(t + 35, P, 5.0 + eps + 0.5, 5.0)
     again = at(t + 70, P, 5.0 + eps + 0.6, 5.0)
     after = at(t + 101, P, 5.0 + eps + 0.5, 5.0)
     a = saved(P)
     check(3, "moving past the epsilon starts a new episode -> exactly one more alert",
-          moved is None and early is None and again is not None and after is None and len(a) == 2,
-          f"move={moved is not None} early={early is not None} again={again is not None} after={after is not None} saved={len(a)}")
+          all(m is None for m in moved) and early is None and again is not None and after is None and len(a) == 2,
+          f"move={[m is not None for m in moved]} early={early is not None} again={again is not None} after={after is not None} saved={len(a)}")
 
     # 4: approximate anchor alerts; exact solve upgrades -> new episode; downgrade doesn't reset
     Q = "test-latch-guard"
