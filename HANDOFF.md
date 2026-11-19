@@ -1,6 +1,6 @@
 # SKYE Sentinel-AI — Handoff (v11, after the combined live checks and the merge into `main`; updated 2026-11-19)
 
-Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTDB/Storage) backend, Next.js/TypeScript frontend. Indoor BLE positioning → safety alerting (man-down, collision, patrol compliance) → real-time patrol tracking and reporting. Plus a VIGI camera integration: alarm events, health, discovery and live video. **Next up:** Prompt 147, the fix for the stillness clock that single noisy positions keep restarting (Open #31): a move will count only after three fixes in a row. It decides whether the red man-down works at long timers. Then Prompt 148, the dashboard and editor fixes: remembering the chosen floor (Open #34) and the calibration rounding (Open #35). After those come the backup floor's clean-up (Open #32) and Open #33 and #36, in the order Herman picks, then 133 (Ghost Patrol).
+Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTDB/Storage) backend, Next.js/TypeScript frontend. Indoor BLE positioning → safety alerting (man-down, collision, patrol compliance) → real-time patrol tracking and reporting. Plus a VIGI camera integration: alarm events, health, discovery and live video. **Next up:** Prompt 147, the fix for the stillness clock that single noisy positions keep restarting (Open #31): a move will count only after three fixes in a row. It decides whether the red man-down works at long timers. Then Prompt 148, the dashboard and editor fixes: remembering the chosen floor (Open #34) and the calibration rounding (Open #35). 148's live check removes the backup floor's three test APs (Open #32). After those come 139 (positioning), the camera work (146 for the alarms, 133a, 133-prep and 133), and then 137, 144, 138, 140 and 141; the full order is under "Where things stand".
 
 **This replaces v10** (18 Nov), which is in git history: `git show a6ee040:HANDOFF.md`. v9 is `git show a1121ea:HANDOFF.md`, v8 is `git show 5bb495f:HANDOFF.md`, v7 `git show 2975863:HANDOFF.md`, v6 `git show 2f00309:HANDOFF.md` and v5 `git show 56882ff:HANDOFF.md`. **v8 to v11 were written on a different PC from v7** (see "This PC" under "Environment quirks"); the parts marked "Intern laptop" describe the old machine. **Since v10 this file holds no device addresses, MACs, key IDs, device UUIDs, the project ID or real floor and building names** (Herman, 18 Nov): read them live, from the Firestore records, the heartbeats and `ipconfig`. **Check every claim here against the current code, git history and data before relying on it.**
 
@@ -28,7 +28,7 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 - **The camera on this PC** isn't the one measured on 5 Oct (see "Hardware and network"). Live view works since go2rtc and ffmpeg were installed on 14 Nov. It runs firmware 3.4.0 Build 260910 (Herman, 18 Nov). Its alarms and OpenAPI now work: on 19 Nov, 107 alarm requests between 00:04 and 02:03 all answered 200, and its health check logs in (Open #22, #23).
 - **The floor set-up changed on 13–14 Nov and again on 19 Nov** (backend logs). At 19:44 on 13 Nov the old floor's three APs and its camera were removed through the dashboard, and that floor was deactivated. Since 00:30 on 14 Nov the active floor is another floor of the same building. **Since 00:02 on 19 Nov all three APs are placed on it** (two EAP660 HD and the EAP770), with the camera, so a beacon heard by all three gets exact fixes. The simulators need an active floor with at least three APs placed.
 - **Last full check at 04:23 on 19 Nov:** the backend on :8000 (this process since 03:04) was taking AP posts, and all three APs, the camera and both beacons were live. `next dev` (:3000) and go2rtc (:1984) served the dashboard and live video that night. **The PC is on Wi-Fi only, with Ethernet unplugged. That link runs through the third AP and also carries Firebase.** So don't power that AP off in a test. To stop every AP's reports, use the IoT Transport Stream switch in the Omada controller. The camera's Alarm Server target, the APs' push URL and go2rtc's WebRTC address all name this PC's address, so check the address before anything else.
-- **The 134 fix plan, in order** (the review's own titles):
+- **The 134 fix plan, in the review's own order and titles** (the order from here follows it):
   1. 135: credentials and quick safety stops (**done**, on `main`).
   2. 136: man-down and collision correctness (**done**, on `main`; live check passed 19 Nov).
   3. 133: Ghost Patrol, plus its prerequisites.
@@ -40,12 +40,19 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 
   142 (floors and APs, from Herman's 20 Oct list) came after 136 and is stacked on it. 145 (alerts that stay dismissed) is stacked on 142, and 143 (the Floor Plans tab) on 145. All four are on `main` now.
 
-  **Next: Prompt 147,** the fix for the stillness-timer bug (Open #31): a move counts only after three fixes in a row. **Then Prompt 148,** the dashboard and editor fixes, which cover remembering the chosen floor (Open #34) and the calibration rounding (Open #35). Herman set this order on 19 Nov.
+  **The order from here** (Herman, 19 Nov):
+  1. 147, the stillness-timer fix (Open #31): a move counts only after three fixes in a row.
+  2. 148, the dashboard and editor fixes: remembering the chosen floor (Open #34) and the calibration rounding (Open #35). Its live check removes the backup floor's three test APs (Open #32).
+  3. 139, positioning: a grace period for a missed AP report, ignoring lone jumps, holding a still position, tuning the filter, and per-AP calibration.
+  4. The camera work: 146 for the alarms, 133a, 133-prep and 133.
+  5. 137, 144, 138, 140 and 141. Zone shapes (Open #33) come after 144, and only if a real zone needs a slanted edge.
+
+  The test-feedback clean-up (Open #36) is a short job before any real AI report or the demo.
 
 ## Git
 
 - **Branches:**
-  - `main` = `origin/main` = the v11 commit, on top of **`a6ee040`** (19 Nov), which is 40 commits ahead of `2975863` (16 Oct, the v7 docs commit) with no merge commits. Herman fast-forwarded `main` to `a6ee040` with pushes on 19 Nov and reset the local `main` to `origin/main` at about 04:09. The live tree is on `main`.
+  - `main` = `origin/main`: **`a6ee040`** (19 Nov), 40 commits ahead of `2975863` (16 Oct, the v7 docs commit) with no merge commits, then two HANDOFF commits, v11 (`075e9a6`) and its follow-up with the order after Prompt 148. Herman fast-forwarded `main` to `a6ee040` with pushes on 19 Nov and reset the local `main` to `origin/main` at about 04:09. The live tree is on `main`.
   - `fix/136-man-down-collision` (`3ab8adc`): local only, fully contained in `main`. Its upstream is `origin/main`, so git reports it as behind.
   - `fix/142-floors-aps` (`9f28798`), `fix/145-alerts-stay-dismissed` (`a1121ea`) and `fix/143-floor-plans-tab` (`a6ee040`): each level with its GitHub branch and contained in `main`.
   - **The merges are done.** Treat the merge steps at the end of 136's, 142's, 145's and 143's reports as history. New work starts from `main`.
@@ -95,7 +102,8 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
   | `ffd6a7d` | HANDOFF v10 |
   | `f12b968` | `SYSTEM_OVERVIEW.md` brought up to date with the code |
   | `a6ee040` | HANDOFF.md names floors and APs in plain words |
-  | the v11 commit | HANDOFF v11 (this file), committed straight onto `main` at Herman's word, as the v7 docs were |
+  | `075e9a6` | HANDOFF v11, committed straight onto `main` at Herman's word, as the v7 docs were |
+  | the next commit | HANDOFF v11's follow-up (this file): the order after Prompt 148, and where the stillness replay is kept |
 
 ## Prompt 143: the Floor Plans tab (17–18 Nov)
 
@@ -211,9 +219,9 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 | **145** | **alerts that stay dismissed** (acknowledge for everyone, the pop-up banner, no stillness repeat after a restart; the review's FE-02) | **on `main`** (5 commits); V1–V4 passed; **live check V5 passed 17 Nov** (L1, L2; L3 skipped) |
 | **143** | **the Floor Plans tab** (placement guides from the room's walls, camera direction, red Deactivate, names from the IP; its D5 fixes Open #29) | **on `main`** (13 commits); V1–V4 passed; **live check V5 passed 17–18 Nov, and L6 on 19 Nov** (its optional L6.4 didn't run) |
 | **147** | **the stillness-timer fix:** a move counts only after three fixes in a row (Open #31) | **next** |
-| **148** | **dashboard and editor fixes:** remembering the chosen floor and the calibration rounding (Open #34, #35) | after 147 |
-| 133 | Ghost Patrol (evaluator, verdicts, `departed_at`, patrol enabled), plus the review's prerequisites | after 147 and 148; 136 and 142 are on `main` |
-| 137–141 | rules and account controls (FE-02 moved to 145); reports and simulator; positioning; reliability; docs | planned, in that order |
+| **148** | **dashboard and editor fixes:** remembering the chosen floor and the calibration rounding (Open #34, #35) | after 147; its live check removes the backup floor's three test APs |
+| 133 | Ghost Patrol (evaluator, verdicts, `departed_at`, patrol enabled), plus the review's prerequisites | in the camera work after 139, with 146, 133a and 133-prep; 136 and 142 are on `main` |
+| 137–141 | rules and account controls (FE-02 moved to 145); reports and simulator; positioning; reliability; docs | planned: 139 right after 148; then, after the camera work, 137, 144, 138, 140 and 141 |
 
 ## VIGI camera
 
@@ -408,6 +416,7 @@ The rest of this section is the Intern laptop and the 5 Oct camera, up to 16 Oct
 | 19 Nov | 136, 142, 145 and 143 merged into `main` with fast-forward pushes, and the local `main` reset to `origin/main` at about 04:09 (Herman ran both); HANDOFF v11 committed straight onto `main`, as the v7 docs were, and pushed (Claude ran it) | done |
 | 19 Nov | 142-L2.2 and L4.1 passed on an earlier run, so only the backup floor's clean-up stays open from the live checks | standing (Open #32) |
 | 19 Nov | Next: Prompt 147, the stillness-timer fix (a move counts only after three fixes in a row), then Prompt 148, the dashboard and editor fixes (the chosen floor remembered, the calibration rounding) | planned (Open #31, #34, #35) |
+| 19 Nov | After 148: 139 (positioning), the camera work (146 for the alarms, 133a, 133-prep and 133), then 137, 144, 138, 140 and 141; zone shapes (Open #33) after 144, and only if a real zone needs a slanted edge; the test-feedback clean-up (Open #36) before any real AI report or the demo; the backup floor's three test APs removed in 148's live check | planned |
 
 The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patrol) and section 8 (live view; **section 8 is partly superseded**, see Open #10).
 
@@ -514,13 +523,13 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
     - So the 60-minute setting raised nothing, and the red expected at about 01:02 never came. The 1-minute live tests can't show this.
     - A 5-minute timer would still have fired, at about 00:07. But the same jumps can repeat a still person's alert at short timers, and they count as "seen moving", which skips the restart check (#1). In 136-L2.6 a 4.3 m jump at 02:17:14 ended `guard-001`'s upgrade from amber to red.
     - **Replay:** if a move needed 3 fixes in a row (about 6 s), the clocks would have restarted 0 and 2 times, and the 60-minute reds would have come at 01:02:14 and 01:05:47. Two in a row is enough for `guard-001` only (`worker-001` still restarts 71 times).
-    - **Method:** the `[MEMBERSHIP-128]` log lines hold the x and y that `run_all_checks()` receives. The replay reproduced every stillness alert and restart check of 19 Nov, with the same anchors.
+    - **Method:** the `[MEMBERSHIP-128]` log lines hold the x and y that `run_all_checks()` receives. The replay reproduced every stillness alert and restart check of 19 Nov, with the same anchors. The replay scripts, the log slice they read and a README are in `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\replay\`.
     - **Decided** (Herman, 19 Nov): a move counts only after three fixes in a row. Prompt 147, next, makes that change.
-32. **The backup floor's clean-up (19 Nov; still to do).** The backup floor still has the three test APs and its zone `Test`: remove them. The floor is inactive, so they do no harm meanwhile. The floor names are in `combined.md`.
-33. **Zones lose their drawn shape (Herman's request, 19 Nov).** Herman wants a zone to keep the shape drawn, as the walls do. A zone record stores only `x_min`, `x_max`, `y_min` and `y_max`, and `handleRightClick` in `ZoneEditor.tsx` saves the rectangle around the clicked corners. No version has stored the corners: it has worked this way since May (`9f98dc9`), and 143 only moved the drawing code. It's a new feature touching `models/zone.py`, `schemas/zone_schema.py`, `utils/zone_utils.py` (which zone a position is in), `FloorMap.tsx`, `ZoneEditor.tsx` and AI Detect, which returns rectangles. Search for `x_min` before planning it.
+32. **The backup floor's clean-up (19 Nov; still to do).** The backup floor still has the three test APs and its zone `Test`. The APs are removed in Prompt 148's live check (Herman, 19 Nov); the zone still needs removing too, with no time set. The floor is inactive, so they do no harm meanwhile. The floor names are in `combined.md`.
+33. **Zones lose their drawn shape (Herman's request, 19 Nov).** Herman wants a zone to keep the shape drawn, as the walls do. A zone record stores only `x_min`, `x_max`, `y_min` and `y_max`, and `handleRightClick` in `ZoneEditor.tsx` saves the rectangle around the clicked corners. No version has stored the corners: it has worked this way since May (`9f98dc9`), and 143 only moved the drawing code. It's a new feature touching `models/zone.py`, `schemas/zone_schema.py`, `utils/zone_utils.py` (which zone a position is in), `FloorMap.tsx`, `ZoneEditor.tsx` and AI Detect, which returns rectangles. Search for `x_min` before planning it. **When:** after 144, and only if a real zone needs a slanted edge (Herman, 19 Nov).
 34. **The dashboard forgets the chosen floor (Herman's request, 19 Nov).** With two active floors, leaving the dashboard and coming back shows the first active floor again. `FloorMapArea.tsx` keeps `selectedFloorId` in component state, so it's lost when the page unmounts. Herman wants the choice remembered. It's a small frontend change, in Prompt 148.
 35. **Recalibrate moves the scale slightly when the distance isn't edited (19 Nov).** `CalibrationTool.tsx` rounds the suggested distance to 1 cm and recalculates the scale from it, so a short line shifts the scale: on the backup floor 37.11 became 37.18 with 1.79 m, then 37.09 with 1.81 m. Points far apart make it tiny. A small fix could keep the current scale when the suggested distance is saved unedited. Herman asked why it happens. Prompt 148 covers it.
-36. **Test feedback is in the AI reports' context (19 Nov).** All 45 documents in Firestore `feedback` come from the live checks: 43 `fixed` and 2 `confirmed`, none `false_alarm`. `rag_service.py` offers them to the reports as "Similar past incidents". Removing them before a real report is Herman's call.
+36. **Test feedback is in the AI reports' context (19 Nov).** All 45 documents in Firestore `feedback` come from the live checks: 43 `fixed` and 2 `confirmed`, none `false_alarm`. `rag_service.py` offers them to the reports as "Similar past incidents". **When:** a short clean-up before any real AI report or the demo (Herman, 19 Nov).
 
 ## Test harness (`tools/harness/`; `tools/harness/README.md` has the commands)
 - **Point it at a `git archive` export, never the live `backend/`:**
@@ -629,8 +638,8 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
 
 ## Suggested first message in the new chat
 "Continue from HANDOFF.md v11. Before anything else:
-1. Run `git status`, `git log --oneline -20` and `git ls-remote --heads origin` fresh. The live tree is on `main` (the v11 commit, on top of `a6ee040`), which holds 136, 142, 145 and 143. Ask me before committing or pushing anything, don't merge, and don't prune (keep `origin/claude/repo-review-r1fviz`).
+1. Run `git status`, `git log --oneline -20` and `git ls-remote --heads origin` fresh. The live tree is on `main` (two HANDOFF commits, v11 `075e9a6` and its follow-up, on top of `a6ee040`), which holds 136, 142, 145 and 143. Ask me before committing or pushing anything, don't merge, and don't prune (keep `origin/claude/repo-review-r1fviz`).
 2. Read `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\live-checks\combined.md`, and Open #1, #22 and #31–#36 here.
 3. Check what's running (backend on :8000, `next dev` on :3000, go2rtc on :1984), this PC's network address and the free memory, and don't start, stop or restart my servers.
 
-Then I'll give you Prompt 147, the stillness-timer fix (Open #31); change nothing before it. After it come Prompt 148 (Open #34 and #35), the backup floor's clean-up (Open #32), Open #33 and #36, and then Prompt 133. Leave `man_down_minutes` and `backend/encode.py` alone, keep secrets out of all output and addresses, MACs, key IDs and real names out of tracked files, no multi-agent workflows or subagents, and don't use my Chrome without asking; a browser test touches only test devices on an inactive floor."
+Then I'll give you Prompt 147, the stillness-timer fix (Open #31); change nothing before it. After it come Prompt 148, 139, the camera work (146, 133a, 133-prep and 133), then 137, 144, 138, 140 and 141, as the plan here lists. Leave `man_down_minutes` and `backend/encode.py` alone, keep secrets out of all output and addresses, MACs, key IDs and real names out of tracked files, no multi-agent workflows or subagents, and don't use my Chrome without asking; a browser test touches only test devices on an inactive floor."
