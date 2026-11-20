@@ -204,179 +204,183 @@ export default function PatrolReportsPage() {
   const noRoute = !!activeFloor && (!activeFloor.patrol_enabled || routeAps.length === 0);
 
   return (
-    <div className="max-w-[1100px] mx-auto space-y-4">
-      {/* Selectors + print button — hidden entirely when printed */}
-      <div className="no-print flex flex-wrap items-center gap-3">
-        <h1 className="font-mono text-xs text-s-muted tracking-widest uppercase mr-2">Patrol Reports</h1>
-        {buildings.length > 1 && (
-          <SelectDropdown
-            label="Building" items={buildings} selectedId={buildingId}
-            getId={(b) => b.id} getLabel={(b) => b.name}
-            onSelect={(id) => { setBuildingId(id); setFloorId(null); }}
-          />
-        )}
-        {floors.length > 1 && (
-          <SelectDropdown
-            label="Floor" items={floors} selectedId={floorId}
-            getId={(f) => f.id} getLabel={(f) => f.name}
-            onSelect={setFloorId}
-          />
-        )}
-        {distinctGuardIds.length > 0 && (
-          <SelectDropdown
-            label="Guard" items={distinctGuardIds.map((id) => ({ id }))} selectedId={guardId}
-            getId={(g) => g.id} getLabel={(g) => g.id}
-            onSelect={setGuardId}
-          />
-        )}
-        {cycles.length > 0 && (
-          <SelectDropdown
-            label="Cycle" items={cycles} selectedId={cycleKey}
-            getId={(c) => c.key} getLabel={(c) => fmtDate(c.start)}
-            onSelect={setCycleKey}
-            scrollable
-          />
-        )}
-        {guardId && (
+    // Full width, so the map can match the dashboard's map (globals.css,
+    // "Patrol report map size").
+    <div className="patrol-report-sizer">
+      <div className="max-w-[1100px] mx-auto space-y-4">
+        {/* Selectors + print button — hidden entirely when printed */}
+        <div className="no-print flex flex-wrap items-center gap-3">
+          <h1 className="font-mono text-xs text-s-muted tracking-widest uppercase mr-2">Patrol Reports</h1>
+          {buildings.length > 1 && (
+            <SelectDropdown
+              label="Building" items={buildings} selectedId={buildingId}
+              getId={(b) => b.id} getLabel={(b) => b.name}
+              onSelect={(id) => { setBuildingId(id); setFloorId(null); }}
+            />
+          )}
+          {floors.length > 1 && (
+            <SelectDropdown
+              label="Floor" items={floors} selectedId={floorId}
+              getId={(f) => f.id} getLabel={(f) => f.name}
+              onSelect={setFloorId}
+            />
+          )}
+          {distinctGuardIds.length > 0 && (
+            <SelectDropdown
+              label="Guard" items={distinctGuardIds.map((id) => ({ id }))} selectedId={guardId}
+              getId={(g) => g.id} getLabel={(g) => g.id}
+              onSelect={setGuardId}
+            />
+          )}
+          {cycles.length > 0 && (
+            <SelectDropdown
+              label="Cycle" items={cycles} selectedId={cycleKey}
+              getId={(c) => c.key} getLabel={(c) => fmtDate(c.start)}
+              onSelect={setCycleKey}
+              scrollable
+            />
+          )}
+          {guardId && (
+            <button
+              onClick={() => setRefreshKey((k) => k + 1)}
+              title="Refresh cycle list"
+              aria-label="Refresh cycle list"
+              className="h-7 w-7 flex items-center justify-center rounded-lg bg-s-elevated border border-s-border text-s-muted hover:border-s-accent hover:text-s-text transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+            </button>
+          )}
           <button
-            onClick={() => setRefreshKey((k) => k + 1)}
-            title="Refresh cycle list"
-            aria-label="Refresh cycle list"
-            className="h-7 w-7 flex items-center justify-center rounded-lg bg-s-elevated border border-s-border text-s-muted hover:border-s-accent hover:text-s-text transition-colors"
+            onClick={() => window.print()}
+            disabled={!selectedCycle}
+            className="ml-auto px-3 py-1.5 rounded-lg bg-s-accent text-s-base text-xs font-bold font-mono disabled:opacity-40 hover:opacity-90 transition-opacity"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
+            Print / Save as PDF
           </button>
-        )}
-        <button
-          onClick={() => window.print()}
-          disabled={!selectedCycle}
-          className="ml-auto px-3 py-1.5 rounded-lg bg-s-accent text-s-base text-xs font-bold font-mono disabled:opacity-40 hover:opacity-90 transition-opacity"
-        >
-          Print / Save as PDF
-        </button>
-      </div>
-
-      {noBuildings ? (
-        <p className="text-s-muted text-sm font-mono">No buildings configured.</p>
-      ) : noRoute ? (
-        <p className="text-s-muted text-sm font-mono">This floor has no patrol route configured.</p>
-      ) : !selectedCycle ? (
-        <p className="text-s-muted text-sm font-mono">No patrol cycles recorded for this floor yet.</p>
-      ) : (
-        <div className="patrol-report-root bento-card space-y-4">
-          {/* Header — factual only. No "complete", no completion percentage:
-              there is no completion flag, and a finished round can legitimately
-              be one log short (the never-written final-checkpoint case). */}
-          <div className="space-y-1">
-            <h2 className="font-mono text-sm font-bold text-s-text">
-              Patrol Checkpoint Sequence — {guardId}
-            </h2>
-            <p className="font-mono text-xs text-s-muted">
-              {activeFloor?.name} · cycle started {fmtDate(selectedCycle.start)}
-              {elapsedStart && elapsedEnd && (
-                <> · elapsed {fmtTime(elapsedStart)}–{fmtTime(elapsedEnd)}</>
-              )}
-              {" · "}{loggedCount} of {routeAps.length} checkpoints logged
-            </p>
-          </div>
-
-          {/* Map — deterministic rendering from known checkpoint coordinates.
-              This is "checkpoint sequence", not "path taken": no position
-              history exists, only straight segments between checkpoints. */}
-          <div className="patrol-report-map relative w-full rounded-xl overflow-hidden border border-s-border bg-s-elevated">
-            {activeFloor?.url && (
-              <img
-                src={activeFloor.url}
-                alt={activeFloor.name}
-                className="w-full h-auto block"
-                onLoad={(e) => {
-                  const img = e.currentTarget;
-                  setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
-                }}
-              />
-            )}
-            {naturalSize && activeFloor?.scale_pixels_per_meter && (
-              <div className="absolute inset-0">
-                <PatrolRouteOverlay
-                  aps={aps}
-                  route={activeFloor.patrol_route ?? []}
-                  logs={selectedCycle.logs}
-                  positions={[]}
-                  naturalSize={naturalSize}
-                  scale={activeFloor.scale_pixels_per_meter}
-                  proximityRadiusM={activeFloor.patrol_proximity_radius_m ?? 1.0}
-                  showDetails
-                />
-              </div>
-            )}
-            {!activeFloor?.scale_pixels_per_meter && (
-              <div className="absolute bottom-0 inset-x-0 px-4 py-2.5 bg-s-elevated/95 border-t border-s-border">
-                <p className="font-mono text-[10px] text-s-muted">
-                  Floor plan not calibrated — checkpoint positions cannot be plotted.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Checkpoint table — route order, "No record" kept distinct from
-              "Missed": Missed means the tracker observed a skip; No record
-              means nothing was ever written for that checkpoint this cycle. */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs font-mono">
-              <thead>
-                <tr className="text-left text-s-muted border-b border-s-border">
-                  <th className="py-1.5 pr-3">#</th>
-                  <th className="py-1.5 pr-3">Checkpoint</th>
-                  <th className="py-1.5 pr-3">Timer from</th>
-                  <th className="py-1.5 pr-3">Arrived</th>
-                  <th className="py-1.5 pr-3">Dwell</th>
-                  <th className="py-1.5 pr-3">Required</th>
-                  <th className="py-1.5 pr-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routeAps.map((ap, idx) => {
-                  const summary = visitSummaryByMac.get(ap.mac.toUpperCase());
-                  const log = summary?.best;
-                  const status = rowStatus(log);
-                  const shortfall = log && !log.compliant && log.actual_arrival !== null
-                    ? Math.max(0, log.min_dwell_required - log.dwell_time_seconds)
-                    : null;
-                  return (
-                    <tr key={ap.id} className="border-b border-s-border/50">
-                      <td className="py-1.5 pr-3 text-s-muted">{idx + 1}</td>
-                      <td className="py-1.5 pr-3 text-s-text">
-                        {ap.name}
-                        {summary && summary.visitCount > 1 && (
-                          <span className="text-s-muted font-normal"> ({summary.visitCount} visits)</span>
-                        )}
-                      </td>
-                      <td className="py-1.5 pr-3 text-s-muted">
-                        {log && log.actual_arrival !== null ? fmtTime(log.expected_arrival) : "—"}
-                      </td>
-                      <td className="py-1.5 pr-3 text-s-muted">
-                        {log ? (log.actual_arrival ? fmtTime(log.actual_arrival) : "Not reached") : "—"}
-                      </td>
-                      <td className="py-1.5 pr-3 text-s-muted">{log ? `${log.dwell_time_seconds}s` : "—"}</td>
-                      <td className="py-1.5 pr-3 text-s-muted">{log ? `${log.min_dwell_required}s` : "—"}</td>
-                      <td className={`py-1.5 pr-3 font-semibold ${STATUS_STYLE[status]}`}>
-                        {status}
-                        {shortfall !== null && shortfall > 0 && (
-                          <span className="text-s-muted font-normal"> (short by {shortfall}s)</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
         </div>
-      )}
+
+        {noBuildings ? (
+          <p className="text-s-muted text-sm font-mono">No buildings configured.</p>
+        ) : noRoute ? (
+          <p className="text-s-muted text-sm font-mono">This floor has no patrol route configured.</p>
+        ) : !selectedCycle ? (
+          <p className="text-s-muted text-sm font-mono">No patrol cycles recorded for this floor yet.</p>
+        ) : (
+          <div className="patrol-report-root bento-card space-y-4">
+            {/* Header — factual only. No "complete", no completion percentage:
+                there is no completion flag, and a finished round can legitimately
+                be one log short (the never-written final-checkpoint case). */}
+            <div className="space-y-1">
+              <h2 className="font-mono text-sm font-bold text-s-text">
+                Patrol Checkpoint Sequence — {guardId}
+              </h2>
+              <p className="font-mono text-xs text-s-muted">
+                {activeFloor?.name} · cycle started {fmtDate(selectedCycle.start)}
+                {elapsedStart && elapsedEnd && (
+                  <> · elapsed {fmtTime(elapsedStart)}–{fmtTime(elapsedEnd)}</>
+                )}
+                {" · "}{loggedCount} of {routeAps.length} checkpoints logged
+              </p>
+            </div>
+
+            {/* Map — deterministic rendering from known checkpoint coordinates.
+                This is "checkpoint sequence", not "path taken": no position
+                history exists, only straight segments between checkpoints. */}
+            <div className="patrol-report-map relative rounded-xl overflow-hidden border border-s-border bg-s-elevated">
+              {activeFloor?.url && (
+                <img
+                  src={activeFloor.url}
+                  alt={activeFloor.name}
+                  className="w-full h-auto block"
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+                  }}
+                />
+              )}
+              {naturalSize && activeFloor?.scale_pixels_per_meter && (
+                <div className="absolute inset-0">
+                  <PatrolRouteOverlay
+                    aps={aps}
+                    route={activeFloor.patrol_route ?? []}
+                    logs={selectedCycle.logs}
+                    positions={[]}
+                    naturalSize={naturalSize}
+                    scale={activeFloor.scale_pixels_per_meter}
+                    proximityRadiusM={activeFloor.patrol_proximity_radius_m ?? 1.0}
+                    showDetails
+                  />
+                </div>
+              )}
+              {!activeFloor?.scale_pixels_per_meter && (
+                <div className="absolute bottom-0 inset-x-0 px-4 py-2.5 bg-s-elevated/95 border-t border-s-border">
+                  <p className="font-mono text-[10px] text-s-muted">
+                    Floor plan not calibrated — checkpoint positions cannot be plotted.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Checkpoint table — route order, "No record" kept distinct from
+                "Missed": Missed means the tracker observed a skip; No record
+                means nothing was ever written for that checkpoint this cycle. */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="text-left text-s-muted border-b border-s-border">
+                    <th className="py-1.5 pr-3">#</th>
+                    <th className="py-1.5 pr-3">Checkpoint</th>
+                    <th className="py-1.5 pr-3">Timer from</th>
+                    <th className="py-1.5 pr-3">Arrived</th>
+                    <th className="py-1.5 pr-3">Dwell</th>
+                    <th className="py-1.5 pr-3">Required</th>
+                    <th className="py-1.5 pr-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {routeAps.map((ap, idx) => {
+                    const summary = visitSummaryByMac.get(ap.mac.toUpperCase());
+                    const log = summary?.best;
+                    const status = rowStatus(log);
+                    const shortfall = log && !log.compliant && log.actual_arrival !== null
+                      ? Math.max(0, log.min_dwell_required - log.dwell_time_seconds)
+                      : null;
+                    return (
+                      <tr key={ap.id} className="border-b border-s-border/50">
+                        <td className="py-1.5 pr-3 text-s-muted">{idx + 1}</td>
+                        <td className="py-1.5 pr-3 text-s-text">
+                          {ap.name}
+                          {summary && summary.visitCount > 1 && (
+                            <span className="text-s-muted font-normal"> ({summary.visitCount} visits)</span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-3 text-s-muted">
+                          {log && log.actual_arrival !== null ? fmtTime(log.expected_arrival) : "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-s-muted">
+                          {log ? (log.actual_arrival ? fmtTime(log.actual_arrival) : "Not reached") : "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-s-muted">{log ? `${log.dwell_time_seconds}s` : "—"}</td>
+                        <td className="py-1.5 pr-3 text-s-muted">{log ? `${log.min_dwell_required}s` : "—"}</td>
+                        <td className={`py-1.5 pr-3 font-semibold ${STATUS_STYLE[status]}`}>
+                          {status}
+                          {shortfall !== null && shortfall > 0 && (
+                            <span className="text-s-muted font-normal"> (short by {shortfall}s)</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

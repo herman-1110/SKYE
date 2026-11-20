@@ -527,6 +527,24 @@ input[type='number']::-webkit-outer-spin-button {
   margin-bottom: 10px;
 }
 
+/* ─── Patrol report map size ─────────────────────────────────────────────────
+   The report draws the floor plan as wide as the dashboard does
+   (app/dashboard/page.tsx): from lg (1024px) up, 8 of the 12 columns of a
+   grid with gap-4 (1rem) that is at most 1600px wide; below lg, the full
+   width, as on the dashboard. .patrol-report-sizer is the report page's
+   full-width wrapper, so 100cqw is the width the dashboard layout gives both
+   pages. The map is never wider than the report card (the min with 100%).
+   Screen only: container-type also makes the wrapper the containing block
+   of positioned descendants, and in print .patrol-report-root is
+   position: absolute (below), so print keeps its layout and full-width map. */
+@media screen and (min-width: 1024px) {
+  .patrol-report-sizer { container-type: inline-size; }
+  .patrol-report-map {
+    width: min(100%, calc((min(100cqw, 1600px) - 11rem) * 8 / 12 + 7rem));
+    margin-inline: auto;
+  }
+}
+
 /* ─── Patrol report print (Prompt 115) ──────────────────────────────────────
    Scoped to .patrol-report-root so this never leaks into any other page's
    print output. Forces light colours regardless of the active theme — this
