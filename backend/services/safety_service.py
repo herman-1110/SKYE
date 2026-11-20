@@ -1,3 +1,4 @@
+import bisect
 import math
 import time
 import uuid
@@ -26,19 +27,11 @@ _last_collision: Dict[str, str] = {}   # "worker_id|forklift_id" → ISO timesta
 # Only exact solves move this anchor or its clock. An approximate anchor is
 # only ever a cold-start placeholder: the first exact solve replaces it
 # (Prompt 113). Approximate readings are timed separately, in _approx_runs
-# (Prompt 136, COR-03). Genuine movement is MAN_DOWN_MOVE_CONFIRM_FIXES exact
-# fixes in a row past epsilon (Prompt 147, _move_count).
+# (Prompt 136, COR-03). Genuine movement is MAN_DOWN_MOVE_CONFIRM_FIXES of the
+# last MAN_DOWN_MOVE_WINDOW_FIXES exact fixes past epsilon, and the anchor
+# settles once MAN_DOWN_ANCHOR_SETTLE_S pass without a move; settling moves x
+# and y only, never the clock (Prompt 147b, _anchor_fixes).
 _man_down_tracker: Dict[str, tuple[float, float, str, bool]] = {}
-# person_id -> how many exact fixes in a row have landed
-# MAN_DOWN_MOVEMENT_EPSILON_M or more from their exact anchor (Prompt 147,
-# Herman's decision, 19 Nov). A beacon lying still gets the odd single fix 2 m
-# or more away, and counting that one fix as movement kept restarting the
-# stillness clock. So a move counts only on the MAN_DOWN_MOVE_CONFIRM_FIXES-th
-# such fix in a row (_completes_move); the ones before it change nothing. An
-# exact fix within epsilon of the anchor sets it back to 0, approximate
-# readings leave it as it is, and it's 0 again wherever the exact anchor is
-# seeded or re-seeded. Per-process, in-memory, like the rest.
-_move_count: Dict[str, int] = {}
 # person_ids that have already fired a signal-loss man-down and haven't been
 # seen again since. Prevents the stale sweep from re-alerting every tick for
 # a beacon that's simply staying dead. Cleared in check_man_down() the moment
@@ -56,8 +49,9 @@ _still_alerted: Set[str] = set()
 # Until someone is in here, their stillness is their first episode since the
 # start, and a stillness raise first checks /alerts for the same episode
 # raised by an earlier process (_alerted_before_restart). Added only where
-# movement clears the latches, never where an anchor is merely seeded; a
-# change of strongest AP counts only once it has held (see _ApproxRun).
+# movement clears the latches, never where an anchor is merely seeded or
+# settles; a change of strongest AP counts only once it has held (see
+# _ApproxRun).
 _seen_moving: Set[str] = set()
 # person_id (or /positions key) -> monotonic time its unreadable timestamp was
 # last logged by check_man_down_stale() (Prompt 135, COR-01): once an hour each.
@@ -66,6 +60,41 @@ _BAD_TIMESTAMP_LOG_EVERY_S = 3600.0
 # The same once-an-hour log for check_collision() (Prompt 136, COR-04), kept
 # apart so the sweep's log and this one don't silence each other.
 _collision_bad_timestamp_logged: Dict[str, float] = {}
+
+
+@dataclass
+class _AnchorFixes:
+    """One person's exact fixes since their exact anchor was last seeded
+    (Prompt 147b, the rule Herman chose on 20 Nov from a sweep of every logged
+    case). Seeded wherever the exact anchor is: a cold start, an approximate
+    anchor becoming exact, the first exact fix after an amber, and a counted
+    move. Approximate readings never enter it.
+
+    A move counts when the latest exact fix and at least
+    MAN_DOWN_MOVE_CONFIRM_FIXES of the last MAN_DOWN_MOVE_WINDOW_FIXES (window,
+    the seeding fix left out) are MAN_DOWN_MOVEMENT_EPSILON_M or more from the
+    anchor as it is at that fix (_completes_move). 147's 3 in a row missed
+    someone walking back and forth through an anchor in the middle of their
+    path, whose fixes seldom land 3 in a row 2 m from it.
+
+    The anchor stays at its seeding fix until MAN_DOWN_ANCHOR_SETTLE_S have
+    passed since seeded_at, so while moves keep coming it's the end of the
+    last one. From then on, each exact fix that isn't a move moves it to the
+    median, x and y separately, of every exact fix since the seed, the seeding
+    fix and fixes away from it included (_settle_anchor): a stray seeding fix
+    at the edge of a still beacon's spread no longer lets the next stray fix
+    on the other side count. xs and ys hold those coordinates sorted. They
+    aren't capped: someone who doesn't move adds one to each about every 2 s
+    (about 0.1 MB an hour) until their next move or a restart."""
+    seeded_at: str                                   # ISO 8601: when the anchor was seeded
+    window: List[Tuple[float, float]] = field(default_factory=list)
+    xs: List[float] = field(default_factory=list)    # sorted
+    ys: List[float] = field(default_factory=list)    # sorted
+
+
+# person_id -> their _AnchorFixes (Prompt 147b). Per-process, in-memory, like
+# the rest.
+_anchor_fixes: Dict[str, _AnchorFixes] = {}
 
 
 @dataclass
@@ -182,17 +211,60 @@ def _is_coord(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
-def _completes_move(pid: str) -> bool:
-    """Count an exact fix MAN_DOWN_MOVEMENT_EPSILON_M or more from pid's exact
-    anchor (Prompt 147). True if it's the MAN_DOWN_MOVE_CONFIRM_FIXES-th in a
-    row: a move, and the count starts again. Otherwise it's only counted, and
-    the caller changes nothing else."""
-    n = _move_count.get(pid, 0) + 1
-    if n >= settings.MAN_DOWN_MOVE_CONFIRM_FIXES:
-        _move_count.pop(pid, None)
-        return True
-    _move_count[pid] = n
-    return False
+def _seed_anchor_fixes(pid: str, x: float, y: float, now: str) -> None:
+    """pid's exact anchor was (re)seeded at (x, y) (Prompt 147b): its window
+    starts empty, and the fixes it settles to start with this one."""
+    _anchor_fixes[pid] = _AnchorFixes(seeded_at=now, xs=[x], ys=[y])
+
+
+def _fixes_for(pid: str, now: str) -> _AnchorFixes:
+    """pid's _AnchorFixes. Every exact anchor is seeded with them, so they're
+    always there on the exact path; if they ever weren't, they start now,
+    empty, rather than raise inside the ingest."""
+    fixes = _anchor_fixes.get(pid)
+    if fixes is None:
+        fixes = _anchor_fixes[pid] = _AnchorFixes(seeded_at=now)
+    return fixes
+
+
+def _completes_move(pid: str, x: float, y: float, anchor_x: float, anchor_y: float, now: str) -> bool:
+    """An exact fix at (x, y) joins pid's window (Prompt 147b). True if it's a
+    move: it is MAN_DOWN_MOVEMENT_EPSILON_M or more from the exact anchor
+    (anchor_x, anchor_y), and so are at least MAN_DOWN_MOVE_CONFIRM_FIXES of
+    the window's last MAN_DOWN_MOVE_WINDOW_FIXES fixes, this one included, each
+    judged against the anchor as it is now. Otherwise the caller changes
+    nothing because of it: a lone jump, or a fix within epsilon."""
+    eps = settings.MAN_DOWN_MOVEMENT_EPSILON_M
+    window = _fixes_for(pid, now).window
+    window.append((x, y))
+    del window[:-settings.MAN_DOWN_MOVE_WINDOW_FIXES]
+    if math.hypot(x - anchor_x, y - anchor_y) < eps:
+        return False
+    away = sum(1 for wx, wy in window if math.hypot(wx - anchor_x, wy - anchor_y) >= eps)
+    return away >= settings.MAN_DOWN_MOVE_CONFIRM_FIXES
+
+
+def _median(ordered: List[float]) -> float:
+    """The median of a sorted, non-empty list: its middle value, or the mean of
+    the two middle ones (statistics.median's rule, so the anchor matches the
+    sweep's model of this rule to the last bit)."""
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def _settle_anchor(pid: str, x: float, y: float, now: str) -> None:
+    """An exact fix at (x, y) that isn't a move joins the fixes pid's exact
+    anchor settles to (Prompt 147b). Once MAN_DOWN_ANCHOR_SETTLE_S have passed
+    since the anchor was seeded, the anchor is their median, x and y
+    separately; its clock, its latch and whether pid was seen moving stay as
+    they are."""
+    fixes = _fixes_for(pid, now)
+    bisect.insort(fixes.xs, x)
+    bisect.insort(fixes.ys, y)
+    prev = _man_down_tracker.get(pid)
+    if prev is None or seconds_between(fixes.seeded_at, now) < settings.MAN_DOWN_ANCHOR_SETTLE_S:
+        return
+    _man_down_tracker[pid] = (_median(fixes.xs), _median(fixes.ys), prev[2], prev[3])
 
 
 def _note_spot(spots: List[Tuple[float, float]], x: float, y: float) -> None:
@@ -308,9 +380,13 @@ class SafetyService:
         (b), 16 Oct). An exact fix after that alert can upgrade it to a red
         man_down: see _check_upgrade().
 
-        A move on the exact path takes MAN_DOWN_MOVE_CONFIRM_FIXES exact fixes
-        in a row, each epsilon or more from the exact anchor (Prompt 147). A
-        lone jump is counted and changes nothing else.
+        A move on the exact path takes MAN_DOWN_MOVE_CONFIRM_FIXES of the last
+        MAN_DOWN_MOVE_WINDOW_FIXES exact fixes epsilon or more from the exact
+        anchor, the latest among them (Prompt 147b). Fewer, a lone jump,
+        change nothing else. The anchor stays at the fix that completed the
+        last move, and once MAN_DOWN_ANCHOR_SETTLE_S pass without another it
+        settles to the median of the exact fixes since; a cold start settles
+        the same way (see _AnchorFixes).
         """
         # A fresh position means this beacon is transmitting again — let it
         # fire a signal-loss alert a second time if it goes dark again later.
@@ -348,7 +424,7 @@ class SafetyService:
         if prev is None:
             _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
-            _move_count.pop(pid, None)
+            _seed_anchor_fixes(pid, current.x, current.y, now)
             return None
 
         anchor_x, anchor_y, since_iso, anchor_is_approximate = prev
@@ -371,28 +447,30 @@ class SafetyService:
             # is an exact fix after a possible_man_down: _check_upgrade().)
             _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
-            _move_count.pop(pid, None)
+            _seed_anchor_fixes(pid, current.x, current.y, now)
             return None
 
         moved = math.hypot(current.x - anchor_x, current.y - anchor_y)
 
-        # Genuine movement: MAN_DOWN_MOVE_CONFIRM_FIXES exact fixes in a row
-        # past epsilon (Prompt 147). The last of them re-anchors to the new
-        # spot and resets the clock. Do NOT re-anchor on every call — only
-        # when epsilon is broken — or the anchor chases position jitter and
-        # the person never appears still. A fix past epsilon that doesn't
-        # complete a move is only counted: the anchor, its clock and the latch
-        # stay as they are, and nothing is raised from it.
-        if moved >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
-            if not _completes_move(pid):
-                return None
+        # Genuine movement: MAN_DOWN_MOVE_CONFIRM_FIXES of the last
+        # MAN_DOWN_MOVE_WINDOW_FIXES exact fixes past epsilon (Prompt 147b).
+        # The fix that completes it re-anchors to the new spot and resets the
+        # clock. Do NOT re-anchor on every call, only on a move, or the anchor
+        # chases position jitter and the person never appears still.
+        if _completes_move(pid, current.x, current.y, anchor_x, anchor_y, now):
             _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
             _seen_moving.add(pid)
+            _seed_anchor_fixes(pid, current.x, current.y, now)
             return None
 
-        # Back within epsilon: a run of fixes away has ended short of a move.
-        _move_count.pop(pid, None)
+        # Not a move. The fix joins the ones the anchor settles to, which may
+        # move it (never its clock). One past epsilon is a lone jump: the
+        # clock and the latch stay as they are, and nothing is raised from it.
+        _settle_anchor(pid, current.x, current.y, now)
+        if moved >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
+            return None
+        anchor_x, anchor_y = _man_down_tracker[pid][0], _man_down_tracker[pid][1]
         return self._stillness_alert(current, cfg, now, since_iso, anchor_x, anchor_y)
 
     def _check_approximate(self, current: PositionRecord, cfg: SafetySettings, now: str) -> Optional[AlertRecord]:
@@ -468,28 +546,34 @@ class SafetyService:
         start, so the stillness behind the amber alert counts. Exact fixes
         that stay within epsilon of it for MAN_DOWN_UPGRADE_CONFIRM_S raise an
         ordinary stillness man_down, and the run ends. A move past epsilon,
-        MAN_DOWN_MOVE_CONFIRM_FIXES exact fixes in a row (Prompt 147), is
-        ordinary movement: the anchor moves, its clock restarts, and the run
-        ends. A lone jump doesn't end it: the confirmation keeps running from
-        confirming_since, and that fix raises nothing."""
+        MAN_DOWN_MOVE_CONFIRM_FIXES of the last MAN_DOWN_MOVE_WINDOW_FIXES
+        exact fixes (Prompt 147b), is ordinary movement: the anchor moves, its
+        clock restarts, and the run ends. A lone jump doesn't end it: the
+        confirmation keeps running from confirming_since, and that fix raises
+        nothing. The first exact fix seeds the anchor's fixes, timed from that
+        fix, so the anchor settles as after a cold start; the red carries the
+        anchor as it is when it's raised."""
         pid = current.person_id
         if run.confirming_since is None:
             _man_down_tracker[pid] = (current.x, current.y, run.started_at, False)
             _still_alerted.discard(pid)
-            _move_count.pop(pid, None)
+            _seed_anchor_fixes(pid, current.x, current.y, now)
             run.confirming_since = now
             return None
 
         anchor_x, anchor_y, since_iso, _ = _man_down_tracker[pid]
-        if math.hypot(current.x - anchor_x, current.y - anchor_y) >= settings.MAN_DOWN_MOVEMENT_EPSILON_M:
-            if not _completes_move(pid):
-                return None
+        away = math.hypot(current.x - anchor_x, current.y - anchor_y) >= settings.MAN_DOWN_MOVEMENT_EPSILON_M
+        if _completes_move(pid, current.x, current.y, anchor_x, anchor_y, now):
             _man_down_tracker[pid] = (current.x, current.y, now, False)
             _still_alerted.discard(pid)
             _seen_moving.add(pid)
             del _approx_runs[pid]
+            _seed_anchor_fixes(pid, current.x, current.y, now)
             return None
-        _move_count.pop(pid, None)
+        _settle_anchor(pid, current.x, current.y, now)
+        if away:
+            return None
+        anchor_x, anchor_y = _man_down_tracker[pid][0], _man_down_tracker[pid][1]
         if seconds_between(run.confirming_since, now) < settings.MAN_DOWN_UPGRADE_CONFIRM_S:
             return None
 

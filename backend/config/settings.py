@@ -1,4 +1,5 @@
 import ipaddress
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -34,6 +35,8 @@ class Settings:
     MAN_DOWN_AP_CHANGE_HOLD_S: float
     MAN_DOWN_RESTART_MATCH_H: float
     MAN_DOWN_MOVE_CONFIRM_FIXES: int
+    MAN_DOWN_MOVE_WINDOW_FIXES: int
+    MAN_DOWN_ANCHOR_SETTLE_S: float
     AP_SILENT_AFTER_S: float
     AP_ALIVE_GRACE_S: float
     COLLISION_DISTANCE_M: float
@@ -102,7 +105,39 @@ def _whole_number(name: str, value: str, minimum: int) -> int:
     return int(text)
 
 
+def _positive_seconds(name: str, value: str) -> float:
+    """A positive, finite number of seconds. Anything else (0, a negative
+    number, inf, nan, a word, an empty value) stops startup with one sentence
+    naming the setting, rather than falling back to the default without a
+    word."""
+    text = (value or "").strip()
+    try:
+        seconds = float(text)
+    except ValueError:
+        seconds = math.nan
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise ValueError(f"{name} must be a positive number of seconds, not {value!r}.")
+    return seconds
+
+
+def _move_fixes(confirm_value: str, window_value: str) -> tuple:
+    """MAN_DOWN_MOVE_CONFIRM_FIXES and MAN_DOWN_MOVE_WINDOW_FIXES (Prompt 147b):
+    each a whole number of at least 1 (_whole_number), and a move can't need
+    more away fixes than the window holds. Anything else stops startup with
+    one sentence."""
+    confirm = _whole_number("MAN_DOWN_MOVE_CONFIRM_FIXES", confirm_value, 1)
+    window = _whole_number("MAN_DOWN_MOVE_WINDOW_FIXES", window_value, 1)
+    if confirm > window:
+        raise ValueError(f"MAN_DOWN_MOVE_CONFIRM_FIXES ({confirm}) can't be larger than "
+                         f"MAN_DOWN_MOVE_WINDOW_FIXES ({window}).")
+    return confirm, window
+
+
 def _load() -> Settings:
+    # Checked together, so read before the rest (see the comment at
+    # MAN_DOWN_MOVE_CONFIRM_FIXES below).
+    move_confirm, move_window = _move_fixes(os.environ.get("MAN_DOWN_MOVE_CONFIRM_FIXES", "3"),
+                                            os.environ.get("MAN_DOWN_MOVE_WINDOW_FIXES", "5"))
     return Settings(
         FIREBASE_KEY_PATH=os.environ["FIREBASE_KEY_PATH"],
         FIREBASE_RTDB_URL=os.environ["FIREBASE_RTDB_URL"],
@@ -194,17 +229,34 @@ def _load() -> Settings:
         # only if it was raised within this many hours: an old one left
         # unresolved at someone's usual spot mustn't hide a new episode there.
         MAN_DOWN_RESTART_MATCH_H=float(os.environ.get("MAN_DOWN_RESTART_MATCH_H", "12")),
-        # How many exact fixes in a row must each land
-        # MAN_DOWN_MOVEMENT_EPSILON_M or more from the exact anchor before they
-        # count as movement (Prompt 147, Herman's decision, 19 Nov). A beacon
-        # lying still still gets the odd single fix 2 m or more away, and
-        # counting that one fix restarted the stillness clock: on 19 Nov two
-        # beacons that lay still for over an hour never reached 60 minutes.
-        # Exact fixes come about every 2 s, so 3 is about 6 s of being away.
-        # 1 gives the behaviour before this setting. A whole number of at
-        # least 1; anything else stops startup.
-        MAN_DOWN_MOVE_CONFIRM_FIXES=_whole_number("MAN_DOWN_MOVE_CONFIRM_FIXES",
-                                                  os.environ.get("MAN_DOWN_MOVE_CONFIRM_FIXES", "3"), 1),
+        # A move on the exact path: at least MAN_DOWN_MOVE_CONFIRM_FIXES of
+        # the last MAN_DOWN_MOVE_WINDOW_FIXES exact fixes land
+        # MAN_DOWN_MOVEMENT_EPSILON_M or more from the exact anchor, the latest
+        # of them among them (Prompt 147b, Herman's decision, 20 Nov). A beacon
+        # lying still gets the odd single fix 2 m or more away, and counting
+        # that one fix restarted the stillness clock: on 19 Nov two beacons
+        # that lay still for over an hour never reached 60 minutes. Prompt
+        # 147's 3 in a row stopped that, but someone walking back and forth
+        # through an anchor in the middle of their path seldom lands 3 in a
+        # row 2 m from it, and on 20 Nov a walk got a red; 3 of the last 5
+        # counts that walk. Exact fixes come about every 2 s. Whole numbers of
+        # at least 1, the first no larger than the second; anything else
+        # stops startup. 1 of 1 counts a single fix, as before 147, though
+        # the anchor still settles (MAN_DOWN_ANCHOR_SETTLE_S).
+        MAN_DOWN_MOVE_CONFIRM_FIXES=move_confirm,
+        MAN_DOWN_MOVE_WINDOW_FIXES=move_window,
+        # How long (seconds) the exact anchor stays at the fix that seeded it
+        # (the last fix of a counted move, or a cold start's first) before it
+        # settles to the median, x and y separately, of the exact fixes since
+        # then, updated with each one until the next move (Prompt 147b).
+        # While moves keep being counted it stays frozen, so a walker isn't
+        # measured from the middle of their path; once they stop, a stray
+        # first fix no longer decides where they lie. Settling restarts
+        # neither the stillness clock nor the latch. 60 from the sweep of
+        # 20 Nov: 45 to 120 passed every logged case, and 30 settled mid-walk.
+        # A positive, finite number; anything else stops startup.
+        MAN_DOWN_ANCHOR_SETTLE_S=_positive_seconds("MAN_DOWN_ANCHOR_SETTLE_S",
+                                                   os.environ.get("MAN_DOWN_ANCHOR_SETTLE_S", "60")),
         # An AP whose last report is older than this (seconds) is silent
         # (Prompt 136, REL-01). The signal-loss sweep holds a person's alert
         # while none of the APs that last heard them is reporting, and raises

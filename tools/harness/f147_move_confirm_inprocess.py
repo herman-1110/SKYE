@@ -1,17 +1,25 @@
-"""In-process checks for Prompt 147: on the exact path, a move needs
-MAN_DOWN_MOVE_CONFIRM_FIXES (3) exact fixes in a row, each epsilon (2 m) or
-more from the exact anchor. One fix like that alone (a lone jump) is counted
-and changes nothing else.
+"""In-process checks for Prompt 147, as Prompt 147b changed its rule. Under 147
+a move on the exact path needed MAN_DOWN_MOVE_CONFIRM_FIXES (3) exact fixes in
+a row, each epsilon (2 m) or more from the exact anchor, and a fix within
+epsilon reset the count. Since 147b a move is 3 of the last
+MAN_DOWN_MOVE_WINDOW_FIXES (5) exact fixes, so a fix back within epsilon no
+longer resets it, and once MAN_DOWN_ANCHOR_SETTLE_S (60 s) pass without a
+move the anchor settles to the median of the fixes since it was seeded
+(f147b_move_window_inprocess.py checks that). Fewer away fixes, a lone jump,
+change nothing else.
 
    1  a still person with lone jumps (one fix away and back, then two away and
-      back) keeps their anchor and clock, and gets their red at
-      man_down_minutes; a jump that lands when the red is due raises nothing,
-      and the red comes on the next fix back
+      back) keeps their clock, and gets their red at man_down_minutes; the
+      anchor stays at the first fix until it settles at 60 s; a fix back
+      within epsilon doesn't reset the count (147b); a jump that lands when
+      the red is due raises nothing, and the red comes on the next fix back
    2  three fixes in a row epsilon or more away: the first two change nothing
       (the anchor, its clock and the latch stay, not seen moving); the third
       re-anchors there, restarts the clock, clears the latch and marks the
       person as seen moving, and the next red comes man_down_minutes after it
-   3  a fix within epsilon between away fixes resets the count
+   3  a fix within epsilon between away fixes doesn't reset the count (147b;
+      under 147 it did): two away, one back, and the next away fix completes
+      the move, 3 of the last 5
    4  approximate readings between away fixes neither count nor reset it, and
       leave the exact anchor alone
    5  someone walking steadily (1.2 m/s, a fix every 2 s) is re-anchored at
@@ -22,18 +30,24 @@ and changes nothing else.
       movement
    7  after a simulated restart, lone jumps don't count as having moved, so an
       unresolved alert for the same spot still stops a repeat (Prompt 145, D3)
-   8  with the setting at 1, the same inputs give the results of the code
-      before 147 (recorded on e632d13 with --print-n1)
+   8  with a single fix away counting as a move (1 of 1) and the anchor never
+      settling, the same inputs give the results of the code before 147
+      (recorded on e632d13 with --print-n1)
    9  the setting: 3 by default; 1 and 4 accepted; 0, a negative number, a
       fraction, a word or an empty value stop startup with one sentence
       naming it, in _load() and in a fresh process importing config.settings
    0  the fakes: nothing unimplemented, no tripwire
 
+"count" is how many away fixes the rule is holding against the anchor: since
+147b, the fixes in the move window epsilon or more from it; under 147, the
+away fixes in a row.
+
 man_down_minutes is patched to 1 and the clock is driven by patching
 safety_service.utcnow_iso; epsilon and the confirmation time are the defaults
 (2.0 m, 30 s). Exact fixes come 2 s apart, as they did live on 19 Nov. All
 coordinates are made up. On e632d13 (before 147), checks 1, 2, 3, 4, 6, 7 and
-9 fail; 5 and 8 pass there too.
+9 fail; 5 and 8 pass there too. On 2a627af (147 as built), 1 and 3 fail: they
+check 147b's rule.
 
 usage (Git Bash, repo root):
   "$py" -B tools/harness/f147_move_confirm_inprocess.py --backend-dir "$exp/backend"
@@ -42,6 +56,7 @@ No server, no port, no network; the real backend/.env is never read.
 """
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -165,6 +180,15 @@ def main() -> int:
         s = (datetime.fromisoformat(iso) - BASE_T).total_seconds()
         return int(s) if s == int(s) else s
 
+    def away_count(pid, tr):
+        """Since 147b: the fixes in the move window epsilon or more from the
+        anchor. Under 147: the away fixes in a row. None before 147."""
+        fixes = getattr(ss, "_anchor_fixes", {}).get(pid)
+        if fixes is None:
+            return getattr(ss, "_move_count", {}).get(pid, 0)
+        eps = ss.settings.MAN_DOWN_MOVEMENT_EPSILON_M
+        return sum(1 for x, y in fixes.window if tr and math.hypot(x - tr[0], y - tr[1]) >= eps)
+
     def snap(pid):
         tr = ss._man_down_tracker.get(pid)
         run = ss._approx_runs.get(pid)
@@ -172,7 +196,7 @@ def main() -> int:
             "anchor": (tr[0], tr[1], secs(tr[2]), tr[3]) if tr else None,
             "latched": pid in ss._still_alerted,
             "moving": pid in ss._seen_moving,
-            "count": getattr(ss, "_move_count", {}).get(pid, 0),   # none before 147
+            "count": away_count(pid, tr),
             "run": (run.x, run.y, secs(run.started_at), secs(run.confirming_since), run.alerted) if run else None,
         }
 
@@ -186,7 +210,8 @@ def main() -> int:
 
     def restart():
         for name in ("_stale_alerted", "_last_man_down", "_still_alerted", "_man_down_tracker",
-                     "_approx_runs", "_last_fresh_mono", "_held_logged", "_seen_moving", "_move_count"):
+                     "_approx_runs", "_last_fresh_mono", "_held_logged", "_seen_moving", "_move_count",
+                     "_anchor_fixes"):
             if hasattr(ss, name):
                 getattr(ss, name).clear()
         reads["n"] = 0
@@ -277,13 +302,17 @@ def main() -> int:
     print(f"[INFO] {NAME} = {n_setting} (None: the code before 147)", flush=True)
     out = scenarios("test-f147-")
 
-    # 1
+    # 1. Since 147b the anchor settles at 60 s (to the median of the fixes,
+    # so its x and y may change; its clock never does), and the jumps stay in
+    # the move window after a fix back: the counts were 1, 0, 1, 2, 0 under 147.
     a, b = by_t(out["1a"]), by_t(out["1b"])
-    check(1, "lone jumps while still (one away and back, two away and back): the anchor and its clock stay, "
-             "the red comes at man_down_minutes; a jump when it's due raises nothing, the next fix does",
+    check(1, "lone jumps while still (one away and back, two away and back): the clock stays, the red comes at "
+             "man_down_minutes, the anchor stays at the first fix until it settles at 60 s, and a fix back doesn't "
+             "reset the count (147b); a jump when it's due raises nothing, the next fix does",
           fired(out["1a"]) == [(60, "man_down")]
-          and all(s["anchor"] == (SPOT[0], SPOT[1], 0, False) for s in out["1a"])
-          and (a[20]["count"], a[22]["count"], a[40]["count"], a[42]["count"], a[44]["count"]) == (1, 0, 1, 2, 0)
+          and all(s["anchor"][2:] == (0, False) for s in out["1a"])
+          and all(s["anchor"] == (SPOT[0], SPOT[1], 0, False) for s in out["1a"] if s["t"] < 60)
+          and (a[20]["count"], a[22]["count"], a[40]["count"], a[42]["count"], a[44]["count"]) == (1, 1, 1, 2, 2)
           and not any(s["moving"] for s in out["1a"]) and a[70]["latched"]
           and fired(out["1b"]) == [(62, "man_down")] and b[60]["alert"] is None
           and all(s["anchor"] == (SPOT[0], SPOT[1], 0, False) for s in out["1b"]),
@@ -302,15 +331,16 @@ def main() -> int:
           f"at 70 and 72={first_two} at 74={(s[74]['anchor'], s[74]['latched'], s[74]['moving'], s[74]['count'])} "
           f"fired={fired(out['2'])}")
 
-    # 3
+    # 3. Under 147 the fix back at 14 reset the count and the move came at 20,
+    # the third away fix in a row; since 147b the move is 3 of the last 5.
     s = by_t(out["3"])
-    check(3, "a fix within epsilon between away fixes resets the count: two away, one back, then the move needs "
-             "three more",
-          (s[12]["count"], s[14]["count"], s[18]["count"]) == (2, 0, 2)
-          and s[18]["anchor"] == (SPOT[0], SPOT[1], 0, False) and not s[18]["moving"]
-          and s[20]["anchor"] == (FAR[0], FAR[1], 20, False) and s[20]["moving"] and fired(out["3"]) == [],
-          f"counts at 12, 14, 18={[s[t]['count'] for t in (12, 14, 18)]} anchor at 18={s[18]['anchor']} "
-          f"at 20={s[20]['anchor']} moving={s[20]['moving']}")
+    check(3, "a fix within epsilon between away fixes doesn't reset the count (147b): two away, one back, and the "
+             "next away fix completes the move, 3 of the last 5",
+          (s[12]["count"], s[14]["count"]) == (2, 2)
+          and s[14]["anchor"] == (SPOT[0], SPOT[1], 0, False) and not s[14]["moving"]
+          and s[16]["anchor"] == (FAR[0], FAR[1], 16, False) and s[16]["moving"] and fired(out["3"]) == [],
+          f"counts at 12, 14={[s[t]['count'] for t in (12, 14)]} anchor at 14={s[14]['anchor']} "
+          f"at 16={s[16]['anchor']} moving={s[16]['moving']}")
 
     # 4
     s = by_t(out["4"])
@@ -355,21 +385,29 @@ def main() -> int:
           f"fired={fired(steps)} stored={out['7-stored']} reads={out['7-reads']} "
           f"moving={any(x['moving'] for x in after)} latched={after[-1]['latched']}")
 
-    # 8: the same inputs with the setting at 1
-    had = hasattr(ss.settings, NAME)
-    before_value = getattr(ss.settings, NAME, None)
-    object.__setattr__(ss.settings, NAME, 1)
+    # 8: the same inputs with a single fix away counting as a move, 1 of 1,
+    # and the anchor never settling: since 147b a settled anchor sits at the
+    # median of the fixes, which the code before 147 never did, so 1 alone
+    # is that code's rule only until the anchor settles. Settings the code
+    # doesn't have are added for the run and taken away again.
+    patch = {NAME: 1, "MAN_DOWN_MOVE_WINDOW_FIXES": 1, "MAN_DOWN_ANCHOR_SETTLE_S": 1e9}
+    missing = object()
+    saved_settings = {n: getattr(ss.settings, n, missing) for n in patch}
+    for n, v in patch.items():
+        object.__setattr__(ss.settings, n, v)
     try:
         n1 = summary(scenarios("test-f147-n1-"))
     finally:
-        if had:
-            object.__setattr__(ss.settings, NAME, before_value)
-        else:
-            object.__delattr__(ss.settings, NAME)
+        for n, v in saved_settings.items():
+            if v is missing:
+                object.__delattr__(ss.settings, n)
+            else:
+                object.__setattr__(ss.settings, n, v)
     if args.print_n1:
         print("TODAY = " + repr(n1), flush=True)
     diff = sorted(k for k in set(n1) | set(TODAY or {}) if (TODAY or {}).get(k) != n1.get(k))
-    check(8, "with the setting at 1, the inputs of checks 1-7 give the results of the code before 147",
+    check(8, "with 1 of 1 and the anchor never settling, the inputs of checks 1-7 give the results of the code "
+             "before 147",
           TODAY is not None and not diff, f"differs in {diff}" if TODAY is not None else "TODAY not recorded")
 
     # 9: the setting
