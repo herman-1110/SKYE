@@ -156,7 +156,7 @@ The browser never writes RTDB or Firestore: it streams live data from Firebase a
 
 | Alert type (`cause`) | Trigger | On the dashboard |
 |---|---|---|
-| `man_down` (`stillness`) | A worker's or guard's exact (≥3-AP) position stays within `MAN_DOWN_MOVEMENT_EPSILON_M` of its anchor for `man_down_minutes`. Moving away takes `MAN_DOWN_MOVE_CONFIRM_FIXES` exact fixes in a row past it, so a single stray fix doesn't restart the clock. Also raised when exact fixes confirm a `possible_man_down`. | Red pop-up |
+| `man_down` (`stillness`) | A worker's or guard's exact (≥3-AP) position stays within `MAN_DOWN_MOVEMENT_EPSILON_M` of its anchor for `man_down_minutes`. Moving away takes `MAN_DOWN_MOVE_CONFIRM_FIXES` of the last `MAN_DOWN_MOVE_WINDOW_FIXES` exact fixes past it, so a single stray fix doesn't restart the clock; once `MAN_DOWN_ANCHOR_SETTLE_S` pass without a move, the anchor settles to the median of the fixes since. Also raised when exact fixes confirm a `possible_man_down`. | Red pop-up |
 | `man_down` (`signal_loss`) | The sweep finds a worker's or guard's `/positions` record older than `MAN_DOWN_STALE_SECONDS` but not older than `MAN_DOWN_STALE_MAX_AGE_S`, unless none of the APs that last heard them is alive | Red pop-up |
 | `possible_man_down` (`stillness`, `approximate=true`) | Stillness seen by only one or two APs: an approximate run at one strongest AP lasts `man_down_minutes` | Amber pop-up |
 | `positioning_offline` (no person or zone) | The sweep finds that no AP placed on an active floor has reported within `AP_SILENT_AFTER_S`, though at least one has reported before | Amber pop-up |
@@ -169,24 +169,27 @@ The browser never writes RTDB or Firestore: it streams live data from Firebase a
 | Setting | Default | Meaning |
 |---|---|---|
 | `MAN_DOWN_MOVEMENT_EPSILON_M` | 2.0 m | movement below this counts as still |
-| `MAN_DOWN_MOVE_CONFIRM_FIXES` | 3 | exact fixes in a row, each ε or more from the anchor, that make a move |
+| `MAN_DOWN_MOVE_CONFIRM_FIXES` / `MAN_DOWN_MOVE_WINDOW_FIXES` | 3 / 5 | how many of the last exact fixes must be ε or more from the anchor to make a move |
+| `MAN_DOWN_ANCHOR_SETTLE_S` | 60 s | without a move for this long, the anchor settles to the median of the fixes since |
 | `MAN_DOWN_UPGRADE_CONFIRM_S` | 30 s | exact stillness that turns an amber alert red |
 | `MAN_DOWN_STALE_SECONDS` / `MAN_DOWN_STALE_MAX_AGE_S` | 120 s / 3600 s | the record age window for a signal-loss alert |
 | `AP_SILENT_AFTER_S` / `AP_ALIVE_GRACE_S` | 10 s / 30 s | an AP counts as reporting / as alive again after a gap |
 | `COLLISION_ALERT_SECONDS` | 3 s | how far ahead the Kalman prediction looks |
 
-**Man-down.** Below, ε is `MAN_DOWN_MOVEMENT_EPSILON_M` and N is `MAN_DOWN_MOVE_CONFIRM_FIXES` (3).
+**Man-down.** Below, ε is `MAN_DOWN_MOVEMENT_EPSILON_M`, "K of N" is `MAN_DOWN_MOVE_CONFIRM_FIXES` (3) of `MAN_DOWN_MOVE_WINDOW_FIXES` (5), and T is `MAN_DOWN_ANCHOR_SETTLE_S` (60 s).
 
 ```
 fresh position ─► check_man_down()                          (forklifts skipped)
   exact (≥3 APs) ─► one anchor (x, y, since) per person
-      N fixes in a row ≥ ε ─► new anchor at the last one; the clock restarts
-      fewer in a row, then one within ε ─► nothing changes; the count starts again
+      this fix and K of the last N ≥ ε ─► new anchor at this one; the clock restarts
+      fewer ─► nothing changes (a lone jump)
+      T without a move ─► the anchor settles to the median of the fixes since;
+                          the clock doesn't restart (a cold start settles the same way)
       still for man_down_minutes ─► red man_down (stillness), once per episode
-  approximate (1–2 APs) ─► a run at the strongest AP; it doesn't touch the count
+  approximate (1–2 APs) ─► a run at the strongest AP; it never enters the fixes
       lasts man_down_minutes ─► amber possible_man_down, once per run
       then exact fixes within ε for MAN_DOWN_UPGRADE_CONFIRM_S ─► red man_down
-      (a single fix ≥ ε doesn't end that; N in a row end the run as movement)
+      (a lone jump doesn't end that; K of the last N end the run as movement)
 
 every 60 s ─► check_man_down_stale()
   record stale, and an AP that last heard them is alive ─► red man_down (signal_loss)
@@ -1106,8 +1109,9 @@ PositioningService.compute_position()          [§3.1; three or more readings]
         ↓
 SafetyService.run_all_checks(position)          [§3.2, §3.3]
   ├─ check_man_down(): exact fixes still within MAN_DOWN_MOVEMENT_EPSILON_M for
-  │    man_down_minutes (Firestore settings/safety) → red man_down, where only
-  │    MAN_DOWN_MOVE_CONFIRM_FIXES fixes in a row past it count as a move; approximate runs →
+  │    man_down_minutes (Firestore settings/safety) → red man_down, where a move takes
+  │    MAN_DOWN_MOVE_CONFIRM_FIXES of the last MAN_DOWN_MOVE_WINDOW_FIXES fixes past it,
+  │    and the anchor settles after MAN_DOWN_ANCHOR_SETTLE_S without one; approximate runs →
   │    amber possible_man_down, which later exact fixes can upgrade; one alert per
   │    stillness episode, and a restarted backend checks /alerts before raising one again
   ├─ patrol_tracker_service.check_patrol_progress(): exact guard positions on a floor
@@ -1247,7 +1251,11 @@ By convention, MAC-shaped keys (`/ap_heartbeats`, `/cctv_heartbeats`, simulated 
 
 ### One Stillness Alert per Episode, and the AP-Change Hold
 - **Latch:** one stillness alert per episode (there had been one every 30 s), re-armed only when the person moves. After a restart, the backend checks `/alerts` once and doesn't repeat an unresolved alert for the same person and spot from the last 12 h (`MAN_DOWN_RESTART_MATCH_H`); a failed read raises the alert.
-- **A move takes three fixes in a row:** a beacon lying still still gets the odd single exact fix 2 m or more from its anchor, and the next fix comes back. When one such fix counted as a move, it restarted the clock, re-armed the latch and marked the person as moving, which also skipped the restart check. In a replay of a night when two beacons lay still for over an hour, their clocks restarted 32 and 177 times, the longest stillness was under 18 minutes, and a 60-minute timer never fired. So a move now needs `MAN_DOWN_MOVE_CONFIRM_FIXES` (3) exact fixes in a row, each ε or more away; on the same night both 60-minute alerts come. Exact fixes arrive about every 2 s, so a real move counts about 6 s later. Approximate readings don't count towards it (§3.2).
+- **A move takes 3 of the last 5 fixes, and the anchor settles:** a beacon lying still still gets the odd single exact fix 2 m or more from its anchor, and the next fix comes back. When one such fix counted as a move, it restarted the clock, re-armed the latch and marked the person as moving, which also skipped the restart check. In a replay of a night when two beacons lay still for over an hour, their clocks restarted 32 and 177 times, the longest stillness was under 18 minutes, and a 60-minute timer never fired.
+  - **3 in a row (Prompt 147)** fixed that, but it failed a walk. The new anchor was the one fix that completed a move, and walking end to end through an anchor in the middle of the floor seldom lands 3 fixes in a row 2 m from it: a 3-minute walk got a red at the 1-minute timer. A stray edge-of-spread fix as the anchor also let noise complete a move for a beacon nobody touched.
+  - **So since Prompt 147b:** a move is this exact fix and at least `MAN_DOWN_MOVE_CONFIRM_FIXES` (3) of the last `MAN_DOWN_MOVE_WINDOW_FIXES` (5), each ε or more from the anchor. The fix that completes it is the new anchor, and the anchor stays there while moves keep coming, so a walker is measured from the end of their last move rather than the middle of their path. Once `MAN_DOWN_ANCHOR_SETTLE_S` (60 s) pass without a move, the anchor settles to the median, x and y separately, of the exact fixes since; a cold start settles the same way. Settling restarts neither the clock nor the latch. Approximate readings don't count (§3.2).
+  - **How it was chosen:** 27 move rules were replayed through the real code over every logged walk, carry and still hour. On those logs this one gave no red while walking (at most 44 s without a move at the 1-minute timer), every still hour's red 60.0–60.8 minutes after its stillness began, and neither the noise-made red nor the small-shift move that 3 in a row allowed. Settling after 30 s settled mid-walk; 45 to 120 s all passed.
+  - **Its known cost:** for 60 s after a move the anchor is still one fix, so noise near the edge of 2 m can still complete a move there; in one 1-minute test that put the red 106 s after the beacon was set down instead of about 60 s. The list the median is taken over isn't capped: one entry per exact fix, about every 2 s, until the person moves.
 - **AP-change hold:** with one or two APs the strongest AP flips while a beacon sits still, so a change counts only after `MAN_DOWN_AP_CHANGE_HOLD_S` (120 s) without a reading back at the run's AP. In a replay, a beacon on a desk "moved" up to hourly at 30 s, and never at 120 s (§3.2, §9b).
 
 ### Critical Alert Banner vs. Toast
@@ -1415,7 +1423,9 @@ Right after every backend reload comes a 1–2 s burst of 3–15 "RuntimeError: 
 | `MAN_DOWN_UPGRADE_CONFIRM_S` | `30` | Seconds of exact fixes within the epsilon that upgrade an amber `possible_man_down` to a red `man_down` |
 | `MAN_DOWN_AP_CHANGE_HOLD_S` | `120` | With one or two APs: a change of strongest AP counts as movement only after this long (s) without a reading back at the AP the stillness run is timed at |
 | `MAN_DOWN_RESTART_MATCH_H` | `12` | After a restart, an unresolved stillness alert for the same person and spot raised within this many hours isn't raised again |
-| `MAN_DOWN_MOVE_CONFIRM_FIXES` | `3` | How many exact fixes in a row, each at least the epsilon from the stillness anchor, count as a move; fewer change nothing. A whole number of at least 1 (anything else stops startup); 1 counts a single fix, as before |
+| `MAN_DOWN_MOVE_CONFIRM_FIXES` | `3` | How many of the last `MAN_DOWN_MOVE_WINDOW_FIXES` exact fixes, the latest among them, must be at least the epsilon from the stillness anchor to count as a move; fewer change nothing. A whole number of at least 1, no larger than the window (anything else stops startup); 1 of 1 counts a single fix, as before Prompt 147, though the anchor still settles |
+| `MAN_DOWN_MOVE_WINDOW_FIXES` | `5` | How many of the latest exact fixes since the anchor was seeded the move test looks at. A whole number of at least 1 (anything else stops startup) |
+| `MAN_DOWN_ANCHOR_SETTLE_S` | `60` | Seconds the stillness anchor stays at the fix that seeded it (a move's last fix, or a cold start's first) before it settles to the median, x and y separately, of the exact fixes since, updated with each one until the next move. A positive, finite number (anything else stops startup) |
 | `AP_SILENT_AFTER_S` | `10` | An AP whose last report is older than this (s) is silent |
 | `AP_ALIVE_GRACE_S` | `30` | An AP that reports again counts as alive only once it has been reporting for this long (s) |
 | `COLLISION_DISTANCE_M` † | `2.0` | Predicted worker–forklift distance (m) under which a collision alert is raised |
