@@ -247,7 +247,7 @@ exact guard position (POST /telemetry/omada or POST /telemetry)
 - `ghost_patrol` comes only from the `events` simulator (§3.4, §9b).
 
 **Viewing patrols**
-- **Patrol Reports page** (`/dashboard/patrol-reports`, any approved user): a per-guard, per-cycle checkpoint report built in the browser, with no LLM. It is not the AI Reports page's "Patrol Reports" tab (§3.8).
+- **Patrol Reports page** (`/dashboard/patrol-reports`, any approved user): a per-guard, per-cycle checkpoint report built in the browser, with no LLM. On screens 1024 px and wider its floor plan is drawn as wide as the dashboard's (8 of 12 columns of a grid at most 1600 px wide; `globals.css`, "Patrol report map size"); in print it takes the page's full width. It is not the AI Reports page's "Patrol Reports" tab (§3.8).
 - **AI patrol audit reports** (§3.8) are offered per `shift_id`, so they cover simulator-written shifts only; tracker cycles (`shift_id=""`) aren't listed.
 
 ### 3.4 Simulation System
