@@ -1,40 +1,36 @@
-# SKYE Sentinel-AI — Handoff (v12, Prompt 147 on hold, F5t60 chosen for Prompt 147b; updated 2026-11-20)
+# SKYE Sentinel-AI — Handoff (v13, Prompt 147b accepted after its live check; updated 2026-11-22)
 
 Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTDB/Storage) backend, Next.js/TypeScript frontend. Indoor BLE positioning → safety alerting (man-down, collision, patrol compliance) → real-time patrol tracking and reporting. Plus a VIGI camera integration: alarm events, health, discovery and live video. **Where it stands:**
-- Prompt 147 fixes the stillness clock that single noisy positions kept restarting (Open #31): a move counts only after three exact fixes in a row. It's built and in the live tree, on its local branch `fix/147-man-down-still`.
-- Still beacons now get their 60-minute reds. **But its live check failed at L1.3.** On 20 Nov, a 3-minute walk end to end along the floor got a red while walking at the 1-minute timer.
-- **Herman called a STOP. 147 is on hold until its move rule is revised, and nothing is pushed.**
-- **Herman chose the revised rule on 20 Nov: F5t60, from a DIAGNOSE sweep.**
-  - A move counts when 3 of the last 5 exact fixes are 2 m or more from the anchor.
-  - The anchor stays frozen at the completing fix while moves are being counted, and settles to the median of the fixes once 60 s pass without one.
-  - **Prompt 147b builds it, in a fresh session. The push stays on hold.** See "Prompt 147".
+- **Prompt 147b is accepted (Herman, 22 Nov).** It fixes the stillness clock that single noisy positions kept restarting (Open #31), with F5t60, the rule Herman chose on 20 Nov:
+  - a move counts when 3 of the last 5 exact fixes are 2 m or more from the anchor;
+  - a move re-anchors at its completing fix, which stays frozen for 60 s and then settles to the median of the exact fixes since.
+- It's built and in the live tree, on the local branch `fix/147b-man-down-moves`, which is stacked on Prompt 147's `fix/147-man-down-still`. **Neither branch is pushed.** Both go up together with `-u`, on Herman's word.
+- **Its live check (V5) is complete.** L3's guard failure (STOP 3, 21 Nov) led to an offline sweep, a side-by-side beacon test and two reruns. Herman's reading: the weaker guard beacon at a weak spot. The guard beacon is to be replaced. See "Prompt 147b".
 - Man-down is back at 60.
 
-**Next up:** Prompt 147b, which builds F5t60, then Prompt 148, the dashboard and editor fixes: remembering the chosen floor (Open #34) and the calibration rounding (Open #35). 148's live check removes the backup floor's three test APs (Open #32). After those come 139 (positioning, with a note from 147, Open #38), the camera work (146 for the alarms, 133a, 133-prep and 133), and then 137, 144, 138, 140 and 141; the full order is under "Where things stand".
+**Next up:** Prompt 148, the dashboard and editor fixes: remembering the chosen floor (Open #34) and the calibration rounding (Open #35). 148's live check removes the backup floor's three test APs (Open #32). After it come 139 (positioning, with the findings from 147 and 147b, Open #38 and #39), the camera work (146 for the alarms, 133a, 133-prep and 133), and then 137, 144, 138, 140 and 141; the full order is under "Where things stand".
 
-**This replaces v11** (19 Nov), which is in git history: `git show e632d13:HANDOFF.md` (its first commit was `075e9a6`). v10 is `git show a6ee040:HANDOFF.md`, v9 `git show a1121ea:HANDOFF.md`, v8 `git show 5bb495f:HANDOFF.md`, v7 `git show 2975863:HANDOFF.md`, v6 `git show 2f00309:HANDOFF.md` and v5 `git show 56882ff:HANDOFF.md`. **v12 was written on 20 Nov and committed on `fix/147-man-down-still`** as its own docs commit, at Herman's word. It isn't pushed (see "Git"). **v8 to v12 were written on a different PC from v7** (see "This PC" under "Environment quirks"); the parts marked "Intern laptop" describe the old machine. **Since v10 this file holds no device addresses, MACs, key IDs, device UUIDs, the project ID or real floor and building names** (Herman, 18 Nov): read them live, from the Firestore records, the heartbeats and `ipconfig`. **Check every claim here against the current code, git history and data before relying on it.**
+**This replaces v12** (20 Nov), which is in git history: `git show 2a627af:HANDOFF.md`, on `fix/147-man-down-still`. v11 is `git show e632d13:HANDOFF.md` (its first commit was `075e9a6`), v10 `git show a6ee040:HANDOFF.md`, v9 `git show a1121ea:HANDOFF.md`, v8 `git show 5bb495f:HANDOFF.md`, v7 `git show 2975863:HANDOFF.md`, v6 `git show 2f00309:HANDOFF.md` and v5 `git show 56882ff:HANDOFF.md`. **v13 was written on 22 Nov and committed on `fix/147b-man-down-moves`** as its own docs commit, at Herman's word. It isn't pushed (see "Git"). **v8 to v13 were written on a different PC from v7** (see "This PC" under "Environment quirks"); the parts marked "Intern laptop" describe the old machine. **Since v10 this file holds no device addresses, MACs, key IDs, device UUIDs, the project ID or real floor and building names** (Herman, 18 Nov): read them live, from the Firestore records, the heartbeats and `ipconfig`. **Check every claim here against the current code, git history and data before relying on it.**
 
-## Where things stand (20 Nov)
+## Where things stand (22 Nov)
 
-- **Prompt 147 (a move needs three fixes in a row) is built and in the live tree, but on hold: its live check failed at L1.3, and Herman called a STOP (20 Nov).** Nothing is pushed or merged. See "Prompt 147" below.
-  - **The commits:** three on the local branch `fix/147-man-down-still`, cut from `main` at `e632d13`:
-    - `e3f9256`, the code and suites;
-    - `a635117`, `SYSTEM_OVERVIEW.md`;
-    - HANDOFF v12, this file.
-  - **The live tree:** 147 was copied into it on 19 Nov at 16:58, at Herman's word, so it's on `fix/147-man-down-still`, not `main`. The backend ran 147's code from 10:02:18 until Herman stopped it at 14:59:30 on 20 Nov.
-  - **The live check:**
-    - V1–V4 passed on 19 Nov.
-    - In V5, still beacons got their 60-minute reds: at 21:47:57 and 21:47:58 on 19 Nov, and at 11:11:33 and 11:22:16 on 20 Nov.
-    - **L1.3 failed** in Herman's 14:39 rerun on 20 Nov. He walked `guard-001` end to end for 3 minutes at the 1-minute timer, and no move was counted for 114 s. The red came at 14:41:39, while he was walking (his alert card confirms it).
-  - **Herman's decisions (20 Nov):**
-    - it's a STOP;
-    - the single-position anchor behind it, which also caused the untouched 23:33:04 red, is part of 147's revision;
-    - the 10:22:16 move is a note for 139 (he may have been near the beacon);
-    - later, `guard-001`'s L2 hour is counted from the end of the 10:11 carry, not his 10:19 note;
-    - **F5t60 is the revised rule, Prompt 147b builds it in a fresh session, and the push stays on hold.**
-  - **The revision:** a DIAGNOSE sweep (`skye-scratch\147\sweep\`) replayed every logged case through 27 rules, and F5t60 is the one that passes (see "Prompt 147"). The branch's code is unchanged, and nothing from the sweep was copied into the live tree.
-  - **Man-down is back at 60:** saved at 14:51:49 on 20 Nov (the value is from Herman).
-  - **Report:** `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\report.md`, with the results under "V5 results, checked against the logs".
+- **Prompt 147b (a move is 3 of the last 5 fixes, and the anchor settles) is built, in the live tree and accepted. Herman called V5 complete on 22 Nov.** Nothing is pushed or merged. See "Prompt 147b" below.
+  - **The commits:** five on the local branch `fix/147b-man-down-moves`, cut from `fix/147-man-down-still` at `2a627af` (HANDOFF v12):
+    - `9788ddf`, the rule, the settings and the suites;
+    - `2013683`, `SYSTEM_OVERVIEW.md`;
+    - `b5f100d` and `3235c32`, the Patrol Reports map fix and its `SYSTEM_OVERVIEW.md` line;
+    - HANDOFF v13, this file.
+  - **The live tree:** at Herman's word, 147b was copied in on 20 Nov at 22:57:53, with the backend stopped (6 files, verified byte-identical), and the map fix on 21 Nov at 00:43:20. So the live tree is on `fix/147b-man-down-moves`, not `main`. Every backend start since 20 Nov 23:04 has run 147b's code.
+  - **The live check (V5), 20–22 Nov:**
+    - L1 passed.
+    - L2 passed, in a redo on 22 Nov.
+    - L3 passed for `worker-001` and failed for `guard-001` (STOP 3). The reruns point to the weaker guard beacon at a weak spot. That's Herman's reading; the one detail that fits less cleanly is under "Prompt 147b".
+  - **Herman's decisions (22 Nov):** 147b is accepted, F5t60s25 is kept as a candidate rule, and the guard beacon is to be replaced.
+  - **Man-down is back at 60:** saved at 11:59:49 on 22 Nov. The log has the save, and the value is from Herman's check of the page.
+  - **Reports** (`D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147b\`):
+    - `report.md`: the build and V1–V4;
+    - V5 and what followed: `v5\`, `sweep2\`, `side-by-side\` and `worker-far-spot\`, each with a README.
+- **Prompt 147 (three fixes in a row) is superseded by 147b.** Its live check failed at L1.3 on 20 Nov, and Herman called a STOP. Its three commits sit under 147b's, on `fix/147-man-down-still`, which is also local only. See "Prompt 147".
 - **`main` holds everything up to 143.** Herman merged it on 19 Nov with fast-forward pushes, which took GitHub's `main` to `a6ee040`, 40 commits ahead of the old `2975863` with no merge commits; the two v11 commits followed. So 136, 142, 145 and 143 are all on it. At about 04:09 Herman reset the local `main` to `origin/main`. The live tree stayed on `main` until 147's branch (above).
 - **The hardware is live every day** (Herman, 18 Nov), so the "dock day" of earlier versions no longer applies.
 - **The combined live checks ran on 19 Nov, from about 00:00 to 03:17.** Herman ran them and wrote the results in `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\live-checks\combined.md`, which stays out of the repo because it names devices and floors. Claude checked the results against the backend logs and Firebase.
@@ -56,11 +52,10 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 - **The camera status colours are committed** as `9f28798` (16 Nov, at Herman's word), the newest commit on `fix/142-floors-aps`, in 7 frontend files (`DeviceStatusPanel.tsx`, `APCCTVEditor.tsx`, `ApIcon.tsx`, `CameraPanel.tsx`, `CctvIcon.tsx`, `FloorMap.tsx` and `useCCTVHeartbeats.ts`). Camera icons go green, red or grey like the APs. Green means port 554 answers at the registered IP; the login state stays in the panel's Health check row.
 - **The camera on this PC** isn't the one measured on 5 Oct (see "Hardware and network"). Live view works since go2rtc and ffmpeg were installed on 14 Nov. It runs firmware 3.4.0 Build 260910 (Herman, 18 Nov). Its alarms and OpenAPI now work: on 19 Nov, 107 alarm requests between 00:04 and 02:03 all answered 200, and its health check logs in (Open #22, #23).
 - **The floor set-up changed on 13–14 Nov and again on 19 Nov** (backend logs). At 19:44 on 13 Nov the old floor's three APs and its camera were removed through the dashboard, and that floor was deactivated. Since 00:30 on 14 Nov the active floor is another floor of the same building. **Since 00:02 on 19 Nov all three APs are placed on it** (two EAP660 HD and the EAP770), with the camera, so a beacon heard by all three gets exact fixes. The simulators need an active floor with at least three APs placed.
-- **Last check at about 15:33 on 20 Nov** (read-only):
-  - The backend (:8000) and `next dev` (:3000) weren't listening. The backend had shut down cleanly at 14:59:30, and it had run 147's code since 10:02:18.
-  - All 53,185 AP posts in that run answered 200. One 22-s backend hang at 14:35:49 raised a false POSITIONING OFFLINE (Open #15).
-  - go2rtc (:1984) was listening. The camera wasn't checked.
-  - 2.35 GB of 15.7 GB was free.
+- **Last check at about 12:02 on 22 Nov** (read-only):
+  - The backend (:8000), `next dev` (:3000) and go2rtc (:1984) were listening. The camera wasn't checked.
+  - The backend's process had started at 10:03:45. A first start at 10:03:18 failed on the `from google import genai` import, as on 20 Nov (see "This PC").
+  - 2.8 GB of 15.7 GB was free.
 - **The last full check was at 04:23 on 19 Nov:** all three APs, the camera and both beacons were live, and `next dev` and go2rtc served the dashboard and live video that night. **On 19 Nov the PC was on Wi-Fi only, with Ethernet unplugged. That link runs through the third AP and also carries Firebase.** So don't power that AP off in a test. To stop every AP's reports, use the IoT Transport Stream switch in the Omada controller. The camera's Alarm Server target, the APs' push URL and go2rtc's WebRTC address all name this PC's address, so check the address before anything else.
 - **Herman's FYP2 monitoring-session deck** (`D:\DOWNLOAD\Y3S2\FYP\FYP2 Monitoring Session.pptx`, outside the repo): on 20 Nov Claude reviewed its screenshots and blanks in chat. For slide 21's stationary precision, the suggested figures come from the first hour on 147's code (19 Nov, 20:48–21:48, both beacons untouched). Precision here is how tightly a still beacon's fixes cluster around their own centre, not the distance from the true spot.
   - `guard-001`: 0.28 m from the centre on average, 95% within 0.63 m (1,567 fixes).
@@ -81,11 +76,11 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
   142 (floors and APs, from Herman's 20 Oct list) came after 136 and is stacked on it. 145 (alerts that stay dismissed) is stacked on 142, and 143 (the Floor Plans tab) on 145. All four are on `main` now.
 
   **The order from here** (Herman, 19 Nov):
-  1. 147, the stillness-timer fix (Open #31). **On hold (STOP, 20 Nov): L1.3 failed. Next is Prompt 147b,** in a fresh session. It builds F5t60, the rule Herman chose from the sweep (see "Prompt 147"). The push stays on hold.
+  1. 147, the stillness-timer fix (Open #31). **Done as Prompt 147b, accepted on 22 Nov after its live check** (see "Prompt 147b"). The push of both 147 branches is on Herman's word.
   2. 148, the dashboard and editor fixes: remembering the chosen floor (Open #34) and the calibration rounding (Open #35). Its live check removes the backup floor's three test APs (Open #32).
-     - **Its base is Herman's call:** 147's branch (stacked, as 142, 145 and 143 were), or `main` once 147 is merged.
+     - **Its base is Herman's call:** 147b's branch (stacked, as 142, 145 and 143 were), or `main` once 147b is merged.
      - Switching the live tree to `main` as it stands would bring back the one-fix rule, and a running backend would reload.
-  3. 139, positioning: a grace period for a missed AP report, ignoring lone jumps, holding a still position, tuning the filter, per-AP calibration, and a note from 147 (Open #38).
+  3. 139, positioning: a grace period for a missed AP report, ignoring lone jumps, holding a still position, tuning the filter, per-AP calibration, and the findings from 147 and 147b (Open #38, #39).
   4. The camera work: 146 for the alarms, 133a, 133-prep and 133.
   5. 137, 144, 138, 140 and 141. Zone shapes (Open #33) come after 144, and only if a real zone needs a slanted edge.
 
@@ -95,16 +90,17 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 
 - **Branches:**
   - `main` = `origin/main`: **`e632d13`** (19 Nov). That's `a6ee040`, 40 commits ahead of `2975863` (16 Oct, the v7 docs commit) with no merge commits, then two HANDOFF commits, v11 (`075e9a6`) and its follow-up (`e632d13`) with the order after Prompt 148. Herman fast-forwarded `main` to `a6ee040` with pushes on 19 Nov and reset the local `main` to `origin/main` at about 04:09.
-  - **`fix/147-man-down-still`: the live tree is on it.**
-    - Cut from `main` at `e632d13` on 19 Nov, and 3 commits ahead: `e3f9256`, `a635117`, and the HANDOFF v12 commit.
-    - **Local only:** not pushed, and no upstream. `git ls-remote --heads origin` on 20 Nov listed no `fix/147`.
-    - **On hold:** Herman's STOP, 20 Nov. Prompt 147b builds F5t60, and its prompt sets the base. Nothing is pushed until Herman says so.
+  - **`fix/147b-man-down-moves`: the live tree is on it.**
+    - Cut from `fix/147-man-down-still` at `2a627af` on 20 Nov, and 5 commits ahead of it: `9788ddf`, `2013683`, `b5f100d`, `3235c32`, and the HANDOFF v13 commit.
+    - **Local only:** not pushed, and no upstream. `git ls-remote --heads origin` on 22 Nov listed no `fix/147` branch, and `main` at `e632d13`.
+    - **The push, on Herman's word:** both 147 branches together, after the range scan (Open #37): `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git push -u origin fix/147-man-down-still fix/147b-man-down-moves`. Merging into `main` is his call.
+  - `fix/147-man-down-still` (`2a627af`): cut from `main` at `e632d13` on 19 Nov, and 3 commits ahead: `e3f9256`, `a635117` and the HANDOFF v12 commit. All three are inside `fix/147b-man-down-moves`. Local only, with no upstream.
   - `fix/136-man-down-collision` (`3ab8adc`): local only, fully contained in `main`. Its upstream is `origin/main`, so git reports it as behind.
   - `fix/142-floors-aps` (`9f28798`), `fix/145-alerts-stay-dismissed` (`a1121ea`) and `fix/143-floor-plans-tab` (`a6ee040`): each level with its GitHub branch and contained in `main`.
-  - **The merges of 136, 142, 145 and 143 are done.** Treat the merge steps at the end of their reports as history. New work starts from `main` once 147 is merged. Until then, 148's base is Herman's call (see "Where things stand"), and the live tree stays on `fix/147-man-down-still`.
+  - **The merges of 136, 142, 145 and 143 are done.** Treat the merge steps at the end of their reports as history. New work starts from `main` once 147b is merged. Until then, 148's base is Herman's call (see "Where things stand"), and the live tree stays on `fix/147b-man-down-moves`.
   - Gone: `review/134` (with the Intern laptop) and `fix/135-credentials-safety-stops` (locally and on GitHub). Someone deleted `claude/repo-review-r1fviz` on GitHub on 7 Oct, after its merge (`ef1a1d3`); all its commits are on `main`. This clone's `origin/claude/repo-review-r1fviz` (from a 22 Sep fetch) is the last ref with that name: **keep it** (Herman, 18 Nov). Never run `git fetch --prune` or `git remote prune origin`; a plain fetch keeps it.
 - **Fetching and pushing:** use `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git fetch|push origin …`. A plain fetch can hang on a credential prompt.
-- **Commits since v7** (on `main` since 19 Nov, apart from the last three, which are only on `fix/147-man-down-still`):
+- **Commits since v7** (on `main` since 19 Nov, apart from the last eight: three on `fix/147-man-down-still`, and five more only on `fix/147b-man-down-moves`):
 
   | Commit | What |
   |---|---|
@@ -152,13 +148,144 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
   | `e632d13` | HANDOFF v11's follow-up: the order after Prompt 148, and where the stillness replay is kept |
   | `e3f9256` | **147** D1–D3: a move needs three exact fixes in a row (7 files: the rule, the setting, the new suite, three changed suites and the harness README) |
   | `a635117` | **147**: `SYSTEM_OVERVIEW.md`, a move needs three fixes in a row |
-  | the next commit | HANDOFF v12 (this file): 147 on hold after L1.3 failed; the sweep's F5t60, chosen for Prompt 147b; man-down at 60 |
+  | `2a627af` | HANDOFF v12: 147 on hold after L1.3 failed; the sweep's F5t60, chosen for Prompt 147b; man-down at 60 |
+  | `9788ddf` | **147b** D1–D5: a move is 3 of the last 5 exact fixes, and the anchor settles (5 files: the rule, the settings, the new suite, 147's suite and the harness README) |
+  | `2013683` | **147b**: `SYSTEM_OVERVIEW.md`, a move is 3 of the last 5 fixes and the anchor settles |
+  | `b5f100d` (21 Nov) | Frontend: the Patrol Reports route map at the dashboard's size (`patrol-reports/page.tsx`, `globals.css`) |
+  | `3235c32` (21 Nov) | `SYSTEM_OVERVIEW.md`, the Patrol Reports map at the dashboard's size |
+  | the next commit | HANDOFF v13 (this file): 147b accepted after V5; the sweep, the side-by-side test and the reruns; its known limits; the next steps |
 
-## Prompt 147: a move needs three fixes in a row (19–20 Nov; on hold)
+## Prompt 147b: a move is 3 of the last 5 fixes, and the anchor settles (20–22 Nov; accepted)
 
-**On hold since 20 Nov.**
-- L1.3 failed. Herman called a STOP, so nothing is pushed, and the move rule is to be revised (see "The revision" below).
-- The code described next is 147 as built, which the live tree still holds.
+**Accepted by Herman on 22 Nov, after its live check.** Built on 20 Nov, it implements F5t60, the rule Herman chose from 147's sweep that day (see "Prompt 147"). Not pushed.
+
+- **What it does** (`backend/services/safety_service.py`, `backend/config/settings.py`; `SYSTEM_OVERVIEW.md` §3.2, §7, §9 and §10 describe it):
+  - **The move test:** an exact fix counts towards a move when it's 2 m (the epsilon) or more from the anchor. A move counts when the latest exact fix is away and so are 3 of the last 5 (`_completes_move()`, `safety_service.py:230`). Right after a seed, 3 of 3 or 3 of 4 is enough.
+  - **The anchor:** a move re-anchors at its completing fix. That anchor stays frozen for 60 s. Then it settles to the median, x and y separately, of every exact fix since the seed, updated at each fix until the next move (`_settle_anchor()`, `:255`; `_median()`, `:247`). Cold starts and the approximate-to-exact re-seed settle the same way.
+  - **The state:** `_AnchorFixes` (`:66`), one per person in `_anchor_fixes` (`:97`), seeded wherever the exact anchor is (`_seed_anchor_fixes()`, `:214`). It holds:
+    - the seed time;
+    - the move window: up to 5 positions, the seeding fix left out;
+    - the x and y of every exact fix since the seed, in sorted lists.
+    
+    `_move_count` is gone.
+  - **The same rule everywhere,** in `check_man_down()` and `_check_upgrade()`.
+    - A counted move restarts the clock, clears the one-alert latch and marks the person as seen moving, so 145's restart check follows the rule too.
+    - Settling moves only x and y: the clock, the latch and "seen moving" stay.
+    - The one- and two-AP path (`_check_approximate()`) is unchanged.
+  - **The settings** (`settings.py:37-39`):
+    - `MAN_DOWN_MOVE_CONFIRM_FIXES` (3, now "3 of the window"), `MAN_DOWN_MOVE_WINDOW_FIXES` (5) and `MAN_DOWN_ANCHOR_SETTLE_S` (60).
+    - `_move_fixes()` (`:123`) and `_positive_seconds()` (`:108`) stop startup with one sentence on a bad value.
+    - None is in the live `.env`, so the defaults apply. A change needs a restart (Open #8).
+  - **No limit on the median's list** (Herman, 20 Nov).
+    - Someone lying still adds about 1,800 fixes an hour, about 0.1 MB.
+    - The sorted lists cost about 0.05 ms per fix after an hour, and 1.2 ms after 24 hours (measured).
+    - The sweep's `F5t60c1800` (the last 1,800 fixes) gives the same results on every logged case. That's a note for Prompt 140 (Open #39).
+  - **No new log line:** a counted move, a settling or a red logs nothing. To see them, replay the `[MEMBERSHIP-128]` lines (below).
+- **Tests (V1–V4, 20 Nov):**
+  - **The new suite:** `f147b_move_window_inprocess.py` passes 10/10. On 147's tip it fails 8, both walk checks among them, with reds at 62 s and 182 s mid-walk.
+  - **147's suite:** `f147_move_confirm_inprocess.py` keeps its 10 checks. #1, #3 and #8 changed for the new rule (147b's report, "D8").
+  - **Everything else:** all 28 in-process suites passed (249 checks), and so did `selftest.py`, `run_smoke.py` (46/46), `vigi_131_test.py` (34/34) and the Node check (22).
+  - **V3:** over every logged case of 147's sweep, the real code equals F5t60 move for move:
+    - no red while walking, with longest gaps of 42 s and 44 s;
+    - still-hour reds at 60.0–60.8 minutes;
+    - no 23:33:04 red, and no 10:22:16 move.
+- **The live check (V5), 20 Nov 23:04 to 22 Nov.** Herman ran it. Claude checked it against the logs by replaying them through 147b's real code (a `git archive` of `2013683`), which matched every live red checked, to the second.
+  - **L1 (1-minute timer) passed.** Each red came 61–62 s after the put-down's last counted move. The 3-minute walk got no red, with moves at most 36 s apart.
+  - **L2 ran at 1 minute, not 3,** on 20 Nov: the 3 was saved only after the walk. Its walk got no red (moves at most 37 s apart). Its 90 s rest got the 1-minute red, as Herman expected.
+  - **L3 (60 minutes): the worker passed and the guard failed.**
+    - `worker-001`'s red came at 00:26:51, 60.0 minutes after its carry.
+    - `guard-001` lay a few metres from every AP. By 00:45 it had got 12 noise-made moves, in three bursts, and no red.
+    - **That was STOP 3** (21 Nov, 00:50): nothing pushed, and v13 not written. At about 02:15 Herman ruled out a 147c and had the beacons tested instead.
+  - **L2's redo (22 Nov, morning) passed.** Only the worker was used, with the guard off and a 3-minute timer.
+    - **The rest ran about 7 minutes, not 90 s.** The put-down was at 10:06:21 and the walk began at about 10:13:07. Measured from the last counted move (10:07:05), that's about 6 minutes.
+    - So the 10:10:05 red Herman saw is right for that rest: 180 s after the last counted move. The log shows the worker didn't leave until about 10:13:07.
+    - **The walk:** the rest ended on a settled anchor (in place 387 s). The walk went end to end through the spot where the beacon had lain. Its fixes came back within 2 m of the anchor twice, so its first move counted 24 s after it began.
+    - No red while walking, and the longest gap between counted moves was 60 s.
+    - The red after the 10:18:58 put-down came at 10:21:58, 180 s later (Herman's 10:22).
+    - **Herman accepted L2 on what ran, and won't rerun the 90 s rest:**
+      - a red needs 3 minutes since the last counted move;
+      - suite check 5 covers it;
+      - every carry from a settled anchor in the 20–21 Nov logs counted 2–6 s after its first fix 2 m out.
+- **What L3's guard failure turned out to be** (21–22 Nov; `skye-scratch\147b\side-by-side\` and `worker-far-spot\`). AP A and AP B are the two EAP660 HD, and C is the EAP770.
+  - **The side-by-side test** (21 Nov, 13:17–13:56 by the log): the two beacons touching at the guard's L3 spot, then swapped.
+    - The guard was the noisier beacon both ways: 32.6 and 17.4 steps of 2 m or more per 10 minutes, against the worker's 5.9 and 0.8.
+    - It arrived 2–8 dB weaker at A and B.
+  - **Transmit power and battery:**
+    - In V5's L3 the guard was at +4 dBm and the worker at 0 dBm (Herman). He set the guard to 0 dBm at about 01:15 on 21 Nov, and the log shows a 4 dB step then.
+    - The guard's battery read 62–65 in the 13–18 Nov raw dumps, against the worker's 90–93. Herman charged it on 21 Nov.
+    - The log has no transmit-power field, and the battery only while the raw dump is on.
+  - **The overnight replay:** with the powers matched, the guard was no calmer at that spot.
+    - In the quiet night (02:20–11:02), 147b counted 7.4 noise moves an hour. It gave reds only when the guard happened to stay quiet for an hour.
+    - The worker lay beside the EAP770, and in 13.8 hours 147b counted only 2 moves for it, both from one blockage (Open #39).
+  - **The worker at the guard's spot** (21 Nov, evening, 60 minutes): laid where the guard had lain for L3, **it passed live.**
+    - Its replayed red came at 19:06:15, 60.1 minutes after the 18:06:10 put-down, with no counted move. Herman's dashboard showed it about 2 minutes after the guard's red.
+    - **147 as built would have failed it:** 10 counted moves, and no red by 19:09.
+    - **The guard hadn't been switched off, as planned.** It lay beside the worker, where the worker had lain before they traded places. It got its own red at 19:04:42, 60.1 minutes after its put-down there, with no counted move; that red's time is in the replay and on Herman's dashboard.
+    - Whichever beacon lay in the guard's old place read about 6 dB weaker at AP A (about −54 to −55 dBm, against −48 to −49) and was the noisier of the two. In each place the guard was still the noisier one.
+  - **Herman's reading (22 Nov): L3's failure was the weaker guard beacon in a place about 6 dB weaker at AP A.**
+    - One point fits less cleanly. In the side-by-side the guard arrived weaker at A in both arrangements; in the evening the A level went with the place.
+    - The evidence is one floor, one guard unit and short windows.
+- **The offline sweep after STOP 3** (`skye-scratch\147b\sweep2\`, 21 Nov): V5's log and every case of 147's sweep, replayed through 147 as built, 147b as built and a grid of candidates. The real builds were checked against the engine and an independent model.
+  - **No candidate passes everything.**
+    - 4 of 6, 5 of 8, and an epsilon of 2.5 m or 3 m give the guard's L3 hour its red. But each gets a red mid-walk in 147's 14:39 walk.
+    - Re-anchoring at the median of the away fixes doesn't stop the bursts.
+    - 147 as built gets no L3 red either, so this isn't a 147b regression.
+  - **Two two-phase rules** (147b's rule while the anchor is frozen, stricter once it has settled) met the three criteria:
+    - **F5t60s25:** a settled anchor needs 3 of 5 at 2.5 m;
+    - **F5t60k46:** a settled anchor needs 4 of the last 6.
+    
+    Neither counts V5's L1.1 carry (Open #39), so a latched red would stay latched.
+  - **The overnight stays** (`side-by-side\`):
+    - In the guard's quiet night, F5t60s25 counted no move at all; 147 as built counted 30, 147b 64 and F5t60k46 25.
+    - F5t60s25 did count 35 between 01:32 and 02:15, while Herman was still up.
+  - **Herman (22 Nov): F5t60s25 is kept as a candidate, and F5t60k46 is out.**
+- **Known limits** (open threads in Open #39):
+  1. **A move re-anchors at an outlying fix,** turning one noise burst into 4–6 moves (sweep2's trace).
+     - A burst starts from a settled anchor, and its first move re-anchors 2.4–2.6 m from the beacon's real spot.
+     - That anchor is frozen for 60 s, so ordinary noise is 2 m from it, and the anchor ping-pongs.
+     - Re-anchoring at the away fixes' median doesn't help.
+  2. **An 8 s blockage gave a still beacon 2 counted moves.** The worker lay beside the EAP770 at 12:28 on 21 Nov when, for 8 s, its EAP770 reading fell from about −35 to −70 dBm.
+  3. **L1.1's carry showed as 2.3 m.** Herman made it about 5 m. In the computed fixes it was 2.3 m out at most (three fixes at 2.1–2.3 m), then back within a metre of its start. 147b counted it; the two-phase rules don't.
+  4. **The redo's walk had a 60 s gap between counted moves,** while walking: its fixes kept landing within 2 m of the last anchor.
+     - That's a 1-minute timer's whole budget, against 36–37 s in V5's walks.
+     - **So demos should use a 3-minute timer, not 1.**
+  5. **The info slot can't be kept out.**
+     - Each AP reports one entry per beacon, merging all its frame types, with one averaged RSSI. The backend uses that average.
+     - Whether the AP's average includes the info slot's packets (−8 dBm on both beacons) isn't stated anywhere. The log argues against a large share.
+     - A 15-minute test with the info slot off would settle it.
+  6. **The log has no red line for anyone it has seen move.** A raised alert isn't logged, and 145's restart-check line is printed only before the first red for someone the process hasn't seen move. So a live red comes from the dashboard, or from a replay.
+  7. **A Windows update can restart the laptop mid-test.**
+     - At 14:50:52 on 21 Nov the laptop restarted for an update (the OS build changed), and that afternoon's test wasn't recorded.
+     - Pause updates before a long test, as Herman did for the evening rerun.
+- **Herman's decisions:**
+  - **22 Nov:**
+    - V5 is complete, and **147b is accepted**;
+    - **F5t60s25 is kept as a candidate rule**, and F5t60k46 is out;
+    - **the guard beacon is to be replaced** (Open #40);
+    - next comes Prompt 148, then 139 with these findings (Open #38, #39), and the older suites' "fixes in a row" wording in 141 (Open #39).
+  - **20 Nov:**
+    - no cap on the median's list for now, with `F5t60c1800` noted for 140;
+    - the three older suites' wording is left for 141;
+    - both 147 branches are pushed with `-u`, after v13 and the scans, on Herman's word.
+- **The map fix (21 Nov),** committed on this branch at Herman's word:
+  - **`b5f100d`:** the Patrol Reports page's route map is as wide as the dashboard's map from 1024 px up, and never wider than its card.
+    - It uses 8 of the 12 columns of a grid at most 1600 px wide, through a container query (`globals.css`, "Patrol report map size").
+    - Below 1024 px, and in print, nothing changes.
+    - Frontend only: `patrol-reports/page.tsx` and `globals.css`.
+  - **`3235c32`:** its `SYSTEM_OVERVIEW.md` line.
+  - **Part B** of the same request, a checkpoint-dwell setting on Safety Settings, was built and tested in an export only. It stays out (Herman; Open #41).
+- **Reading a live check from the log** (read-only, Git Bash; each folder's README has the commands):
+  - **A window:** `skye-scratch\147b\tools\run_window.sh <export of 2013683> <start> <end> <count from> [<1-min from> <1-min to> ...]` replays it through 147b's real code. It lists every counted move, away fix and red.
+  - **One beacon's stay:** `skye-scratch\147b\worker-far-spot\wfs_run.py` replays it from a put-down through 147, 147b, F5t60s25 and F5t60k46. It gives the wobble, the 2 m steps and the RSSI too.
+  - **The redo's replay:** `l2_redo.py`, in the same folder, with timer stretches.
+  - **Any rule:** `skye-scratch\147b\sweep2\` has the grid, the engine, and `check_f5t60.py --rule <id>`, the independent model for any F5t60-family rule.
+  - **The timers:** the backend logs neither a raised alert nor a settings save's value. Take the timer stretches from the `PUT /settings/safety` times and Herman's notes.
+
+## Prompt 147: a move needs three fixes in a row (19–20 Nov; superseded by 147b)
+
+**Superseded by Prompt 147b, accepted on 22 Nov.**
+- L1.3 failed on 20 Nov. Herman called a STOP, and 147b replaced the move rule with F5t60 (see "Prompt 147b").
+- The code described next is 147 as built, at `a635117` on `fix/147-man-down-still`. The live tree has held 147b's code since 20 Nov.
 
 - **What it does** (`backend/services/safety_service.py`, `backend/config/settings.py`):
   - **D1–D2, the rule:** an exact fix 2 m (the epsilon) or more from the exact anchor counts towards a move, and only the third in a row completes one. That fix re-anchors, restarts the stillness clock, clears the one-alert latch and counts as "seen moving", as a single fix did before.
@@ -196,14 +323,14 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
     - Herman resolved the reruns' reds at 14:38:32 and 14:57:44–46.
   - **Herman's times:** some of his entries are in UTC, and L1.4's is when he acknowledged the pop-ups. The report gives each one in local time.
 - **Herman's decisions (20 Nov):**
-  - **L1.3's failure is a STOP.** Don't push; 147 is on hold until its move rule is revised.
+  - **L1.3's failure is a STOP.** Don't push; 147 is on hold until its move rule is revised. (147b revised it, and was accepted on 22 Nov.)
   - **The single-position anchor is part of 147's revision.** The new anchor is the one fix that completes a move. That anchor lets noise near the 2 m edge complete a "move" for a still beacon: the untouched second red at 23:33:04 on 19 Nov. It also lets a walker who stays within about 2 m of it count as still: both L1.3 reruns.
   - **The 10:22:16 move is a note for 139** (Open #38).
   - **Later the same day:**
     - `guard-001`'s L2 hour is counted from the end of the 10:11 carry (10:11:30), not his 10:19 note: his 10:18 shift was under 2 m, which by design isn't a move;
     - on that reading F5t60 passes every case, so **F5t60 is the revised rule**;
     - **Prompt 147b builds it, in a fresh session**;
-    - **the push stays on hold.**
+    - **the push stays on hold.** (Since 22 Nov, both 147 branches go up together, on Herman's word: Open #37.)
 - **The revision: the DIAGNOSE sweep, 20 Nov** (`D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\sweep\`; its README has every rule, case and number, and how to rerun them).
   - **How it was run:** every logged case was replayed through 27 move rules (26 candidates, and the rule before 147 for reference), with epsilon at 2 m and exact fixes only.
     - Each rule ran in a patched scratch copy of 147's code, in all the places 147 changed. The branch and the live tree are unchanged.
@@ -218,7 +345,7 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
     - **The completing fix as the anchor, with "3 of the last 5":** walks pass, because during a walk that fix is usually an end of the path. But noise completes moves for a still beacon. `worker-001`'s overnight hour got 10 such moves and no red.
     - **A settled anchor (the median of the fixes since the move):** stops the noise. But during a walk in this room it settles mid-floor: the 14:39 walk got a red with every such rule.
     - **147 as built** fails the 14:39 walk, with a longest gap of 114 s.
-  - **Chosen (Herman, 20 Nov): F5t60.** Prompt 147b builds it.
+  - **Chosen (Herman, 20 Nov): F5t60.** Prompt 147b built it, and Herman accepted it on 22 Nov (see "Prompt 147b").
     - A move counts when **3 of the last 5 exact fixes** are 2 m or more from the anchor.
     - The completing fix is the new anchor, **frozen while moves are being counted**.
     - **Once 60 s pass with no counted move, it settles** to the median, x and y separately, of the exact fixes since it was seeded. It updates with each new fix until the next move.
@@ -244,6 +371,7 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
       - So these cases can't show how a walker fares after the anchor has settled.
       - That matters for timers between 1 and 60 minutes, and for someone who pauses over 60 s and then walks on near that spot.
       - The only evidence for that phase is the always-settled rule's 136-s gap in the 14:39 walk.
+      - **Since then:** 147b's L2 redo (22 Nov, 3-minute timer) walked from a settled anchor through the spot where the beacon had lain. Its first move came 24 s in, and its moves were at most 60 s apart (see "Prompt 147b").
     - **The evidence is narrow:** one floor and two beacons.
   - **For 147b,** the sweep folder holds:
     - `export-f5t60\`: a scratch copy of 147 patched to run F5t60, with its `safety_service.py` as the reference;
@@ -252,7 +380,7 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
     - `validate.py`: the self-checks;
     - `tools\run_window.sh`: for reading 147b's live check from the logs.
     - Its README says how to rerun all of it. It also says how to check 147b's build against F5t60 move for move: `run_grid.py --export`, then `compare.py` and `analyse.py`.
-- **Reading a live check from the log** (read-only, Git Bash):
+- **Reading a live check from the log** (read-only, Git Bash). These read 147's code; for 147b's, use the tools under "Prompt 147b".
   - From `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\replay\`: `bash run_l23.sh <window start> <window end> <count from> [<1-min from> <1-min to>]`, in local times. It replays the window through `export-a635117`'s code (a `git archive` of 147). It lists every completed move, lone jump and red, compares the rule before 147, and gives 5-minute RSSI medians.
   - From `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\evidence\`: `/d/DOWNLOAD/Y3S2/FYP/SKYE/backend/venv/Scripts/python.exe -B -I v5_track15.py <log> <person> <start> <end>` prints one beacon's positions and per-AP RSSI in 15-s bins.
   - The backend logs neither a raised alert nor a settings save's value. So take the 1-minute stretches from Herman's notes and the `PUT /settings/safety` times.
@@ -320,7 +448,7 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
   - Commit only when asked, and split commits logically (frontend in its own commit).
   - Run `git diff --cached --stat` right before every commit.
   - **Push only when Herman says so.**
-  - Work goes on **fix branches** cut from `main`; until 147 is merged, 148's base is Herman's call (see "Where things stand"). A prompt that needs a branch says so.
+  - Work goes on **fix branches** cut from `main`; until 147b is merged, 148's base is Herman's call (see "Where things stand"). A prompt that needs a branch says so.
   - **HANDOFF.md and README.md are tracked.** Commit changes to them only when asked. Never modify `frontend/package*.json` (Herman's own lockfile update is `13491a9`) or `backend/encode.py`.
   - **The repo is public.** Never put the 134 review's text, or any description of a **security** finding (`SEC-xx`) that isn't fixed yet, into a tracked file, a commit message or a push. Correctness, reliability and documentation items can be described (the open threads below do), and so can fixed findings, whose IDs the commit messages already carry.
   - **Herman runs git commands himself from these messages**, including steps labelled as Claude's: on 16 Oct he ran the post-merge switch before anything was merged. Give him copy-paste commands in the order he should run them, with any precondition (such as "merged on GitHub") stated before the command. On 17 Nov he had Claude run the 145 push and the v9 commit and push, and on 18 Nov the 143 push and the v10 commit and push.
@@ -341,17 +469,17 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 - **Herman's Chrome:** don't use it (Claude in Chrome) without asking him first (Herman, 18 Nov). A browser test touches only test devices on an inactive floor.
 - **Live system:**
   - Herman's dev backend is `uvicorn main:app --reload --host 0.0.0.0 --port 8000` (backend venv). `next dev` is on :3000.
-  - The live tree is on `fix/147-man-down-still`, so a backend started now runs 136, 142, 145, 143 and 147 together. Don't switch it to `main`, or to a branch cut from `main`, before 147 is merged: that brings back the one-fix rule, and a running backend reloads.
+  - The live tree is on `fix/147b-man-down-moves`, so a backend started now runs 136, 142, 145, 143 and 147b together, with the map fix. Don't switch it to `main`, or to a branch cut from `main`, before 147b is merged: that brings back the one-fix rule, and a running backend reloads.
   - Saving any `.py` under `backend/` reloads the backend. Each reload costs one new camera OpenAPI login, and produces a short burst of "RuntimeError: No response returned" tracebacks (see Open #15). On 17 Nov one was also followed by a 22 s Firebase hang (Open #15, parked for 140).
   - **go2rtc runs from Herman's own terminal** (`tools\go2rtc\.\start.ps1`). Herman decided on 7 Oct: no auto-start, and don't propose launchers again unless he asks.
   - **Never stop processes by name or path:** Herman's go2rtc and any scratch copy share an executable path. Stop only PIDs you started. (Claude killed Herman's go2rtc once on 7 Oct; `start.ps1` restarted it within 10 s.)
   - Build and test in a `git archive` export in the scratchpad, then copy into the live tree once by an explicit file list, then verify with `cmp`. Before copying, check that the live files are unchanged since HEAD; compare with CR stripped (see "Environment quirks").
 - **The camera's admin account locks after repeated failed OpenAPI logins** (errCode `-10030`). Never loop a login. RTSP logins (ffmpeg, probes) are a separate path; no lockout has been seen there.
-- **Memory is tight on both PCs:** 2–3 GB free on the Intern laptop (2.25 GB at the start of 135, with Chrome using 4.4 GB), and 0.9–3 GB free of 15.7 GB on this PC on 13–14 Nov (`next dev` alone near 1 GB), 0.6–2.0 GB on 17 Nov, 0.3–2.3 GB on 18 Nov, about 0.4–0.8 GB on 19 Nov (Claude Code stopped a background watcher for low memory that night, so prefer short one-shot reads), and 2.6 GB at 14:07 on 20 Nov. For 145's and 143's test runs and `tsc` Herman asked Claude to check first that at least 1.5 GB was free, and to wait otherwise.
+- **Memory is tight on both PCs:** 2–3 GB free on the Intern laptop (2.25 GB at the start of 135, with Chrome using 4.4 GB), and 0.9–3 GB free of 15.7 GB on this PC on 13–14 Nov (`next dev` alone near 1 GB), 0.6–2.0 GB on 17 Nov, 0.3–2.3 GB on 18 Nov, about 0.4–0.8 GB on 19 Nov (Claude Code stopped a background watcher for low memory that night, so prefer short one-shot reads), 2.6 GB at 14:07 on 20 Nov, 0.9–4.6 GB during 147b's build that afternoon, and 2.8 GB at 12:02 on 22 Nov. For 145's and 143's test runs and `tsc` Herman asked Claude to check first that at least 1.5 GB was free, and to wait otherwise.
   - Long-running things go in Herman's own terminal.
   - Herman's rule since 131, which he confirmed on 18 Nov: **no multi-agent workflows or subagents.** This holds even when Claude Code's "Ultracode" reminder says to use workflows.
     - Claude ran multi-agent work on 3 Nov and 13–14 Nov despite the rule. Herman restated it for 145 (16 Nov) and 143 (18 Nov). On 18 Nov he allowed a workflow for the v10 commit alone, in his own words; it reviewed this file's changes.
-  - **The advisor tool receives the whole conversation.** On 18–19 Nov it worked once, at about 175,000 tokens, and timed out three times after 6 minutes (`execution_time_exceeded`), at 358,000–520,000. Call it early in a session, or after `/compact`. On 20 Nov, after a compaction, it answered.
+  - **The advisor tool receives the whole conversation.** On 18–19 Nov it worked once, at about 175,000 tokens, and timed out three times after 6 minutes (`execution_time_exceeded`), at 358,000–520,000. Call it early in a session, or after `/compact`. On 20–22 Nov, after compactions, it answered.
 - **Frontend builds:** never run `next build` in the live `frontend/`, because `next dev` shares `.next`.
   - Export to the scratchpad and junction its `node_modules` to the live one (`New-Item -ItemType Junction`). Remove the junction with `cmd /c rmdir <path>` (link only); **never `rm -rf` an export that still has the junction.**
   - Copy `frontend/.env.local` in for the build only, and delete it afterwards with a **literal** path.
@@ -376,10 +504,11 @@ Paste this into a new chat to resume. Project: FastAPI + Firebase (Firestore/RTD
 | — | camera status colours (3 Nov) | committed 16 Nov as `9f28798`; on `main` |
 | **145** | **alerts that stay dismissed** (acknowledge for everyone, the pop-up banner, no stillness repeat after a restart; the review's FE-02) | **on `main`** (5 commits); V1–V4 passed; **live check V5 passed 17 Nov** (L1, L2; L3 skipped) |
 | **143** | **the Floor Plans tab** (placement guides from the room's walls, camera direction, red Deactivate, names from the IP; its D5 fixes Open #29) | **on `main`** (13 commits); V1–V4 passed; **live check V5 passed 17–18 Nov, and L6 on 19 Nov** (its optional L6.4 didn't run) |
-| **147** | **the stillness-timer fix:** a move counts only after three fixes in a row (Open #31) | **on hold (STOP, 20 Nov):** built and in the live tree, not pushed (2 code commits on `fix/147-man-down-still`); V1–V4 passed 19 Nov; **live check V5 failed at L1.3** (a red while walking, 20 Nov); **F5t60 chosen** from the DIAGNOSE sweep (20 Nov); **Prompt 147b builds it** in a fresh session; push on hold |
-| **148** | **dashboard and editor fixes:** remembering the chosen floor and the calibration rounding (Open #34, #35) | after 147b, as the order stands; its base (147's branch, or `main` after a merge) is Herman's call; its live check removes the backup floor's three test APs |
+| **147** | **the stillness-timer fix:** a move counts only after three fixes in a row (Open #31) | **superseded by 147b:** V1–V4 passed 19 Nov; **live check V5 failed at L1.3** (a red while walking, 20 Nov), and Herman called a STOP; F5t60 chosen from the DIAGNOSE sweep (20 Nov); 2 code commits and v12 on `fix/147-man-down-still`, not pushed |
+| **147b** | **the stillness-timer fix, revised:** a move is 3 of the last 5 fixes, and the anchor settles (F5t60; Open #31) | **accepted (Herman, 22 Nov):** in the live tree, not pushed (4 commits and v13 on `fix/147b-man-down-moves`, with the map fix); V1–V4 passed 20 Nov; **live check V5 complete:** L1 passed, L2 passed in its 22 Nov redo, and L3 passed for the worker; for the guard's L3 failure (STOP 3), the reruns point to the weaker guard beacon at a weak spot (Herman's reading; see "Prompt 147b"); push of both 147 branches on Herman's word |
+| **148** | **dashboard and editor fixes:** remembering the chosen floor and the calibration rounding (Open #34, #35) | **next**; its base (147b's branch, or `main` after a merge) is Herman's call; its live check removes the backup floor's three test APs |
 | 133 | Ghost Patrol (evaluator, verdicts, `departed_at`, patrol enabled), plus the review's prerequisites | in the camera work after 139, with 146, 133a and 133-prep; 136 and 142 are on `main` |
-| 137–141 | rules and account controls (FE-02 moved to 145); reports and simulator; positioning; reliability; docs | planned: 139 right after 148; then, after the camera work, 137, 144, 138, 140 and 141 |
+| 137–141 | rules and account controls (FE-02 moved to 145); reports and simulator; positioning; reliability; docs | planned: 139 right after 148, with the findings from 147 and 147b (Open #38, #39); then, after the camera work, 137, 144, 138, 140 and 141 (140 and 141 each have a note in #39) |
 
 ## VIGI camera
 
@@ -573,13 +702,17 @@ The rest of this section is the Intern laptop and the 5 Oct camera, up to 16 Oct
 | 19 Nov | Zones should keep their drawn shape, and the dashboard should remember the chosen floor | requested (Open #33, #34) |
 | 19 Nov | 136, 142, 145 and 143 merged into `main` with fast-forward pushes, and the local `main` reset to `origin/main` at about 04:09 (Herman ran both); HANDOFF v11 committed straight onto `main`, as the v7 docs were, and pushed (Claude ran it) | done |
 | 19 Nov | 142-L2.2 and L4.1 passed on an earlier run, so only the backup floor's clean-up stays open from the live checks | standing (Open #32) |
-| 19 Nov | Next: Prompt 147, the stillness-timer fix (a move counts only after three fixes in a row), then Prompt 148, the dashboard and editor fixes (the chosen floor remembered, the calibration rounding) | 147 built and live-checked (see "Prompt 147"); 148 planned (Open #34, #35) |
+| 19 Nov | Next: Prompt 147, the stillness-timer fix (a move counts only after three fixes in a row), then Prompt 148, the dashboard and editor fixes (the chosen floor remembered, the calibration rounding) | 147 superseded by 147b, accepted 22 Nov; 148 next (Open #34, #35) |
 | 19 Nov | After 148: 139 (positioning), the camera work (146 for the alarms, 133a, 133-prep and 133), then 137, 144, 138, 140 and 141; zone shapes (Open #33) after 144, and only if a real zone needs a slanted edge; the test-feedback clean-up (Open #36) before any real AI report or the demo; the backup floor's three test APs removed in 148's live check | planned |
 | 19 Nov | 147 built from `main`'s tip (`e632d13`), with Herman's backend and frontend stopped during the build and tests; copied into the live tree at 16:58 at Herman's word; not pushed | done |
 | 20 Nov | 147's V5: Herman ran it on 19–20 Nov, and Claude checked it against the logs. L1.3 was rerun twice; the 14:39 rerun (3 minutes end to end) got a red while walking | failed at L1.3 |
-| 20 Nov | L1.3's failure is a STOP for 147: no push, and the move rule is revised. The single-position anchor (the 23:33:04 red, both L1.3 walks) is part of the revision. The 10:22:16 move is a note for 139 (Herman may have been near it). Man-down back at 60 | standing (Open #37, #38) |
+| 20 Nov | L1.3's failure is a STOP for 147: no push, and the move rule is revised. The single-position anchor (the 23:33:04 red, both L1.3 walks) is part of the revision. The 10:22:16 move is a note for 139 (Herman may have been near it). Man-down back at 60 | done: 147b revised the rule (Open #38 stands) |
 | 20 Nov | A DIAGNOSE sweep of 27 move rules over every logged case, with no change to the branch's code; F5t60 (3 of the last 5, with an anchor frozen while moving that settles after 60 s) passes every case. HANDOFF v12 committed on `fix/147-man-down-still`, not pushed | done |
-| 20 Nov | `guard-001`'s L2 hour is counted from the end of the 10:11 carry, not the 10:19 note (the 10:18 shift was under 2 m, not a move by design). On that reading F5t60 passes every case, so F5t60 is the revised rule, built as Prompt 147b in a fresh session. The push stays on hold | planned (147b) |
+| 20 Nov | `guard-001`'s L2 hour is counted from the end of the 10:11 carry, not the 10:19 note (the 10:18 shift was under 2 m, not a move by design). On that reading F5t60 passes every case, so F5t60 is the revised rule, built as Prompt 147b in a fresh session. The push stays on hold | done: 147b built 20 Nov, accepted 22 Nov |
+| 20 Nov | 147b: no cap on the median's list for now (`F5t60c1800` noted for 140); the three older suites' "fixes in a row" wording left for 141; both 147 branches pushed with `-u` after V5, v13 and the scans, on Herman's word | standing (Open #39, #37) |
+| 21 Nov | 147b's V5 L3: `guard-001` got no red, so STOP 3. No 147c; a side-by-side beacon test instead. The Patrol Reports map fix committed (`b5f100d`, `3235c32`), and the dwell setting kept out | done; dwell stays out (Open #41) |
+| 21 Nov | The guard's transmit power changed from +4 to 0 dBm at about 01:15; the worker laid at the guard's L3 spot as a rerun, with updates paused | done: the worker passed live |
+| 22 Nov | 147b's L2 accepted on its redo, without rerunning the 90 s rest; V5 complete and 147b accepted; F5t60s25 kept as a candidate, F5t60k46 out; the guard beacon to be replaced; next 148, then 139 with 147b's findings, and the older suites' wording in 141; HANDOFF v13 committed on `fix/147b-man-down-moves`, not pushed | standing (Open #39, #40) |
 
 The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patrol) and section 8 (live view; **section 8 is partly superseded**, see Open #10).
 
@@ -608,7 +741,7 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
      - After a restart, one red came at 03:00:49: "nothing earlier for this spot", 47 ms, 85 alerts. An earlier red at that spot didn't count, because it had been resolved at 03:00:14.
      - With that alert unresolved and acknowledged, two more restarts raised nothing: "already raised for this spot", in 75 ms and 51 ms, 86 alerts, with new anchors 1.5 m and 1.1 m from the alert's.
      - After the beacon was carried around, a new red came at 03:12:30 with no restart-check line. It ended about 1 m from the old alert, which didn't block it, because the person had been seen moving.
-     - Before 147, single noisy fixes also counted as moving, which skipped this check for a still person (#31). **Since 147 (in the live tree, not yet on `main`) a move needs three fixes in a row,** so the check now runs for a still beacon. On 20 Nov, after the 10:02 restart at 1 minute, it held back both beacons' reds at spots with unresolved reds ("already raised for this spot", 10:03:22 and 10:03:25).
+     - Before 147, single noisy fixes also counted as moving, which skipped this check for a still person (#31). **Since 147, and now 147b (in the live tree, not yet on `main`), a move needs several away fixes** (147b: 3 of the last 5), so the check now runs for a still beacon. On 20 Nov, after the 10:02 restart at 1 minute, it held back both beacons' reds at spots with unresolved reds ("already raised for this spot", 10:03:22 and 10:03:25).
 2. **`/alerts` was cleared before 5 Oct 11:13:** Herman did it (answered 9 Oct). Resolved.
 3. **Prompt 127** needs ground truth for the Sep 30 and Oct 1 captures. The captures themselves were in the Intern laptop's archive and aren't on this PC.
 4. **Prompt 129,** the null-RSSI grace period, is not started.
@@ -630,6 +763,7 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
       - `patrol_tracker_service.py:15` still describes the 10 Sep set-up (three APs placed and online);
       - `check_collision` in `safety_service.py` says 30 s, but the code suppresses repeats for 10 s (fixed on the fix branches by 136).
     - The `TEMP-MEASURE-119` prints are still live (`patrol_tracker_service.py`).
+    - Three older harness suites still describe a move as "fixes in a row" (#39, for 141).
 11. **Radius settings:** `PATROL_PROXIMITY_RADIUS_M` is 1.0. The per-floor field is ignored, and a newly created floor would store 0.0.
 12. **Unchanged since v3:**
     - the unidentified "Mystery Man" beacon;
@@ -689,10 +823,10 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
     - With 143 the boxes stay empty and Save stays off until the real values load, with Retry. It passed 143's live check (L7).
 30. **A position update for a device that doesn't exist answers 500, not 404 (18 Nov; parked for 140).**
     - `PATCH …/aps/{ap_id}/position` (`routes/floor_routes.py:251`) and `PATCH …/cctvs/{cctv_id}/position` (`:388`) update the Firestore document without checking that it exists, so a drag of a device removed meanwhile gets a 500. Seen on 18 Nov for an AP. **Parked for 140** (Herman, 18 Nov).
-31. **Single noisy positions restarted the stillness clock (found 19 Nov). Prompt 147's fix is on hold.**
-    - The fix is in the live tree, on `fix/147-man-down-still`. Still beacons now get their 60-minute reds.
-    - But its live check failed at L1.3: a walk got a red while walking at the 1-minute timer. Herman called a STOP. He chose the revised rule, F5t60, and Prompt 147b builds it next (see "Prompt 147").
-    - The notes below are from before the fix.
+31. **Single noisy positions restarted the stillness clock (found 19 Nov). Fixed by Prompt 147b, accepted on 22 Nov** (in the live tree; not yet pushed or on `main`).
+    - 147b's rule, F5t60, is on `fix/147b-man-down-moves`. Still beacons get their 60-minute reds: V5's L3 worker, and both beacons in the 21 Nov evening rerun. Walks get no red while walking. Its known limits are #39, and the guard beacon's part in L3 is #40.
+    - Prompt 147's first fix (three in a row) failed its live check at L1.3 and was replaced by 147b (see "Prompt 147").
+    - The notes below are from before the fixes.
     - `check_man_down()` treats one exact fix 2 m or more from the anchor as movement. It moves the anchor, restarts the clock and clears the one-alert latch.
     - Both beacons sat still from 00:02 to 01:23 on 19 Nov. `guard-001`: 2,299 exact fixes, 95% of them within 0.41 m of its usual spot, yet the clock restarted 32 times and its longest unbroken stillness was 13.5 minutes. `worker-001`: 2,274 fixes, 177 restarts, longest 17.7 minutes.
     - So the 60-minute setting raised nothing, and the red expected at about 01:02 never came. The 1-minute live tests can't show this.
@@ -706,27 +840,53 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
       - Herman made both part of 147's revision, and chose the sweep's F5t60 for it, to be built as Prompt 147b (see "Prompt 147").
     - **Still for 139:**
       - the 10:22:16 note (#38);
-      - the two-cluster swing seen at 03:05–03:11 on 19 Nov (147's V3). Even F5t60 counts it as moves in the first 60 s after a move.
+      - the two-cluster swing seen at 03:05–03:11 on 19 Nov (147's V3). Even F5t60 counts it as moves in the first 60 s after a move;
+      - 147b's known limits (#39).
 32. **The backup floor's clean-up (19 Nov; still to do).** The backup floor still has the three test APs and its zone `Test`. The APs are removed in Prompt 148's live check (Herman, 19 Nov); the zone still needs removing too, with no time set. The floor is inactive, so they do no harm meanwhile. The floor names are in `combined.md`.
 33. **Zones lose their drawn shape (Herman's request, 19 Nov).** Herman wants a zone to keep the shape drawn, as the walls do. A zone record stores only `x_min`, `x_max`, `y_min` and `y_max`, and `handleRightClick` in `ZoneEditor.tsx` saves the rectangle around the clicked corners. No version has stored the corners: it has worked this way since May (`9f98dc9`), and 143 only moved the drawing code. It's a new feature touching `models/zone.py`, `schemas/zone_schema.py`, `utils/zone_utils.py` (which zone a position is in), `FloorMap.tsx`, `ZoneEditor.tsx` and AI Detect, which returns rectangles. Search for `x_min` before planning it. **When:** after 144, and only if a real zone needs a slanted edge (Herman, 19 Nov).
 34. **The dashboard forgets the chosen floor (Herman's request, 19 Nov).** With two active floors, leaving the dashboard and coming back shows the first active floor again. `FloorMapArea.tsx` keeps `selectedFloorId` in component state, so it's lost when the page unmounts. Herman wants the choice remembered. It's a small frontend change, in Prompt 148.
 35. **Recalibrate moves the scale slightly when the distance isn't edited (19 Nov).** `CalibrationTool.tsx` rounds the suggested distance to 1 cm and recalculates the scale from it, so a short line shifts the scale: on the backup floor 37.11 became 37.18 with 1.79 m, then 37.09 with 1.81 m. Points far apart make it tiny. A small fix could keep the current scale when the suggested distance is saved unedited. Herman asked why it happens. Prompt 148 covers it.
 36. **Test feedback is in the AI reports' context (19 Nov).** All 45 documents in Firestore `feedback` come from the live checks: 43 `fixed` and 2 `confirmed`, none `false_alarm`. `rag_service.py` offers them to the reports as "Similar past incidents". **When:** a short clean-up before any real AI report or the demo (Herman, 19 Nov).
-37. **Prompt 147's open questions (20 Nov): answered by Herman the same day.**
-    1. **L1.3:** rerun twice, and it failed (see "Prompt 147"). **It's a STOP: 147 is on hold, and its move rule is to be revised.**
+37. **Prompt 147's open questions (20 Nov): answered by Herman the same day. Only the push is still open.**
+    1. **L1.3:** rerun twice, and it failed (see "Prompt 147"). **It was a STOP: 147 went on hold, and 147b revised its move rule** (accepted 22 Nov).
     2. **The untouched second red at 23:33:04 on 19 Nov:** part of 147's revision, not a 139 note. It has the same cause as L1.3's failure: the anchor comes from a single position.
     3. **The 10:22:16 move on 20 Nov:** Herman may have been near `guard-001` then, so the cause is uncertain. It's a note for 139 (#38).
-    4. **The push:** none; it stays on hold after Herman chose F5t60 for Prompt 147b. After 147b:
-       - first scan the branch's commits again (the `.env` scan and `skye-scratch\143\commit_scan.py`);
-       - then push with `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git push -u origin fix/147-man-down-still`, at his word.
+    4. **The push:** since 147b's acceptance (22 Nov), both 147 branches go up together, at Herman's word:
+       - first the range scan, which covers both: every commit from `origin/main` to the tip, each diff and each message, with `skye-scratch\143\commit_scan.py` and the `.env` scan. Herman asked for it after the v13 commit; run it again after any later commit;
+       - then `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git push -u origin fix/147-man-down-still fix/147b-man-down-moves`.
        - Merging into `main` is his call.
 38. **Notes from 147 (20 Nov).**
     1. **For 139: the 10:22:16 move on 20 Nov, possibly caused by Herman.**
        - `guard-001` had been set down 1.7 m from its anchor.
        - Then one AP heard it 5 dB weaker, and its fixes' median shifted about 0.4 m. So three fixes in a row landed just past 2 m (2.01, 2.34 and 2.32 m) and completed a move.
        - Its 60-minute red came 63 minutes after the put-down. F5t60 doesn't make this move.
-    2. **The single-position anchor (the 23:33:04 red, both L1.3 walks): moved to 147's revision** (Herman, 20 Nov), which is F5t60, built in Prompt 147b. The 23:33:04 red is also in the safety report on slide 16 of Herman's deck.
+    2. **The single-position anchor (the 23:33:04 red, both L1.3 walks): moved to 147's revision** (Herman, 20 Nov), which is F5t60, built in Prompt 147b and accepted on 22 Nov. The 23:33:04 red is also in the safety report on slide 16 of Herman's deck.
     3. **By design, unchanged:** a set-down within 2 m of the anchor isn't a move, so the clock keeps running from the earlier anchor (`guard-001`, about 10:18 on 20 Nov). With F5t60 the anchor then follows the beacon as it settles. Its L2 red comes 60.2 minutes after the carry ended, which is how Herman decided to count that hour (20 Nov), and 53 minutes after the 10:18 shift.
+39. **147b's known limits, and notes for later prompts (22 Nov).** The evidence is under "Prompt 147b".
+    - **For 139 (positioning), after 148:**
+      1. a move re-anchors at an outlying fix, so one noise burst becomes 4–6 moves;
+      2. an 8 s blockage at the nearest AP gave a still beacon 2 counted moves;
+      3. V5's L1.1 carry, about 5 m by Herman's measure, showed as 2.3 m in the fixes;
+      4. the info slot's frames share each AP's one averaged reading for the beacon, which the backend can't split. Whether the average includes them is unknown;
+      5. a spot a few metres from every AP, weak at one of them, is noisy, most of all for a weak beacon (the guard's L3 spot, #40);
+      6. **F5t60s25 is kept as a candidate rule** (stricter once the anchor has settled; Herman, 22 Nov). Its known cost: small or badly placed carries, like L1.1, may not count, and a latched red then stays latched. F5t60k46 is out.
+    - **For demos and tests:**
+      - the L2 redo's walk had a 60 s gap between counted moves, so use a 3-minute timer, not 1;
+      - pause Windows updates before a long test (one restarted the laptop mid-test on 21 Nov);
+      - the log has no red line for anyone it has seen move, so take live reds from the dashboard or a replay.
+    - **For 140:** the median's list has no limit. The sweep's `F5t60c1800` (the last 1,800 fixes) gives the same results on every logged case, if a cap is wanted.
+    - **For 141:** three older suites still describe a move as "`MAN_DOWN_MOVE_CONFIRM_FIXES` exact fixes in a row".
+      - That is how they move someone, and it's a move under 3 of 5 too, but it reads like 147's rule.
+      - The places: `man_down_latch_inprocess.py:8` and `:111`; `cor03_coverage_edge_inprocess.py:12` and `:173-174`; `f145_stillness_restart_inprocess.py:20-21` and `:213`; and those suites' rows in `tools/harness/README.md` (190, 199 and 209).
+40. **The guard beacon is to be replaced (Herman, 22 Nov).**
+    - `guard-001`'s beacon was the noisier of the two in every comparison on 21 Nov. Side by side, it arrived 2–8 dB weaker at the two EAP660 HD.
+    - Herman reads its V5 L3 failure as that beacon at a weak spot (see "Prompt 147b").
+    - Until it's replaced, test stillness with `worker-001`, or expect noise moves from the guard at spots a few metres from every AP.
+    - **The new beacon:** register it in Firestore (its address goes there, not here), and match its settings to the worker's: the iBeacon slot at 0 dBm and the info slot at −8 dBm. The old guard was at +4 dBm until about 01:15 on 21 Nov.
+41. **The checkpoint-dwell setting (part B of Herman's 20 Nov request): built, not copied or committed. It stays out (Herman, 21 Nov).**
+    - It lets an admin set the dwell that a compliant checkpoint visit needs, stored in its own document, `settings/patrol`, not in `settings/safety`.
+    - Built and tested in an export only, with its new suite at 12/12. The patches, files and report are in `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\patrol-map-dwell\`.
+    - Only on Herman's word. Part A, the map, is committed (`b5f100d`, see "Prompt 147b").
 
 ## Test harness (`tools/harness/`; `tools/harness/README.md` has the commands)
 - **Point it at a `git archive` export, never the live `backend/`:**
@@ -767,14 +927,15 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
   | `f145_stillness_restart_inprocess.py` (145, 147) | 19/19 (it sets the AP-change hold to 30 s; since 147, #5 and #6 move with N fixes in a row) |
   | `f143_camera_direction_inprocess.py` (143) | 14/14 |
   | `f143_ap_heartbeat_ip_inprocess.py` (143) | 9/9 |
-  | `f147_move_confirm_inprocess.py` (147) | **10/10** (on the code before 147 it fails 7) |
+  | `f147_move_confirm_inprocess.py` (147, 147b) | **10/10** (on the code before 147 it failed 7; 147b changed #1, #3 and #8 for its rule) |
+  | `f147b_move_window_inprocess.py` (147b) | **10/10** (on 147's tip it fails 8, both walk checks among them) |
 
   - **143's maths check is Node, not Python:** from PowerShell, `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools\harness\f143_wall_guides_check.ts`. Expect `22 passed`. It needs `frontend/utils` beside `tools/`.
   - The 135 tests are `sec04`, `sec01`, `cor05`, `cor12`, `cor01` and `cor08`. All six fail or crash on `2f00309`, the code before 135.
   - COR-05 and COR-12 fake the simulators' HTTP client and send them to a dead port. The harness tripwire doesn't cover `localhost`, and `localhost:8000` is the live backend.
   - The review's fix plan asks every later prompt to add an in-process test for each finding it closes.
-  - The 136, 142, 145 and 143 suites are on `main` since 19 Nov. 147's new suite and its changes to three older ones are only on `fix/147-man-down-still`. Each changed suite still passes at its count on `main`'s code, because it reads the setting and falls back to 1. The reports have each suite's result on the code before the change.
-  - `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\run_suites.sh <export> <repo>` runs `selftest.py` and the 27 in-process suites one at a time, and prints each one's last result line. On 147's code (19 Nov), all 239 checks passed.
+  - The 136, 142, 145 and 143 suites are on `main` since 19 Nov. 147's new suite and its changes to three older ones are only on the 147 branches, and 147b's suite and its changes to 147's only on `fix/147b-man-down-moves`. Each of the three older suites still passes at its count on `main`'s code, because it reads the setting and falls back to 1. The reports have each suite's result on the code before the change.
+  - `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147b\run_suites.sh <export> <repo>` runs `selftest.py` and the 28 in-process suites one at a time, from inside the export, and prints each one's last result line. On 147b's code (20 Nov), all 249 checks passed. (`skye-scratch\147\run_suites.sh` is 147's version, with 27 suites.)
   - Since 136, `run_smoke.py`'s sweeper also raises `positioning_offline` for the seeded stale worker.
   - **Never pass `--backend-dir` to `selftest.py`:** its first argument is a scratch folder, and a runner once wrote a `--backend-dir/` folder into the repo root.
 
@@ -786,7 +947,8 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
 
 ## Environment quirks
 - **This PC** (`D:\DOWNLOAD\Y3S2\FYP\SKYE`, since 19 Oct). Where it differs from the Intern-laptop notes below:
-  - **Backend venv:** python.org Python 3.13.9, not uv 3.12. Brought up to `backend/requirements.txt` on 21 Oct (`google-genai` 2.22.0, pydantic 2.13.5; `pip check` clean). `google-generativeai` 0.7.2 is still installed. **Start the backend from the venv:** on 20 Nov a 09:58 start under the system Python failed on `from google import genai`, and the 10:02 start from the venv worked.
+  - **Backend venv:** python.org Python 3.13.9, not uv 3.12. Brought up to `backend/requirements.txt` on 21 Oct (`google-genai` 2.22.0, pydantic 2.13.5; `pip check` clean). `google-generativeai` 0.7.2 is still installed. **Start the backend from the venv:** on 20 Nov a 09:58 start under the system Python failed on `from google import genai`, and the 10:02 start from the venv worked. On 22 Nov a 10:03:18 start failed on the same import, and the 10:03:45 start worked.
+  - **Windows Update restarted this PC mid-test** at 14:50:52 on 21 Nov (the OS build went from 10.0.26200 to 10.0.26300), and nothing of SKYE ran again until the backend's next start at 17:35. Herman paused updates for the evening's rerun. Pause them before any long test.
   - **Node:** `D:\DOWNLOAD\node.exe` (v24.19.0). It's on PowerShell's PATH but not Git Bash's, so run `node`, `npx` and `tsc` from PowerShell.
   - **Firebase key:** `backend\serviceAccountKey.json` holds the key in use since 22 Oct (checked 3 Nov). An older, revoked key made `create_app()` retry Firestore for 300 s and then fail.
   - **go2rtc:** `tools/go2rtc/bin/` holds go2rtc 1.9.14 and ffmpeg 9.0.2, installed on 14 Nov from the official releases. The zip and exe SHA-256 match the values under "Live view".
@@ -809,9 +971,18 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
       - `results\`: `summary.md`, `summary.csv`, every rule's runs and the self-checks.
     - `147\stages\`: 147's patches, commit messages, `copy147.py` and its staging copy.
     - `147\run_suites.sh`: every in-process suite, one at a time (see "Test harness").
+    - **For 147b** (`147b\`; each folder's README has its commands). Every `data\` folder and `slice.log` holds raw log lines with device and floor IDs, so they stay out of the repo.
+      - `147b\report.md`: the build, V1–V4, and V5's steps with Herman's entries;
+      - `147b\v5\v5-results.md`: V5 checked against the logs, and STOP 3;
+      - `147b\stages\` (the patches, messages and `copy147b.py`), `147b\tools\run_window.sh` (the log reader for 147b) and `147b\run_suites.sh`;
+      - `147b\sweep2\`: the sweep after STOP 3, with `export-147b` and `export-a635117` (`git archive`s of 147b and 147), the engine, `check_f5t60.py` and the results;
+      - `147b\side-by-side\`: the beacon test and both beacons' overnight stays;
+      - `147b\worker-far-spot\`: the worker at the guard's spot, the L2 check and the L2 redo (`wfs_run.py`, `l2_redo.py`);
+      - `147b\v13\`: v13's commit message and scan output;
+      - `beacon-signal\`: the V5 night's beacon notes and timelines.
   - **The `.env` scan** (PowerShell): `git diff origin/main...<branch> | backend\venv\Scripts\python.exe -I D:\DOWNLOAD\Y3S2\FYP\skye-scratch\136\scan_env.py .` prints key names only. In Git Bash, use forward slashes.
   - **Line endings:** `HANDOFF.md` is CRLF here (the Intern-laptop note below says LF). Check with `git ls-files --eol`.
-  - **Logs:** backend logs split into 50 MB `.partNNN.log` files (about 75 minutes each on 16–17 Nov). The names are in UTC (`skye-YYYYMMDD-HHMMSS`), one file per process start or reload; local time is UTC+8. A directory listing can show a stale size for the file being written, so open the file to check it. Each position decision logs one `[MEMBERSHIP-128]` line (person, fresh APs, outcome, x, y), so man-down can be replayed offline (Open #31). A raised alert and a settings save's value aren't logged. The access log has the `PUT /settings/safety` calls and the alert calls (`/acknowledge`, `/feedback`).
+  - **Logs:** backend logs split into 50 MB `.partNNN.log` files (about 75 minutes each on 16–17 Nov). The names are in UTC (`skye-YYYYMMDD-HHMMSS`), one file per process start or reload; local time is UTC+8. A directory listing can show a stale size for the file being written, so open the file to check it. Each position decision logs one `[MEMBERSHIP-128]` line (person, fresh APs, outcome, x, y), so man-down can be replayed offline (Open #31). A raised alert and a settings save's value aren't logged, and 145's restart-check line appears only for someone the process hasn't seen move (Open #39). The access log has the `PUT /settings/safety` calls and the alert calls (`/acknowledge`, `/feedback`).
   - **Claude in Chrome:** only with Herman's go-ahead (see "Working methodology"). The extension can open a new window, and a tab behind another window throttles timers, which spoils load timings.
 - **Intern laptop (to 16 Oct):** the rest of this section, except where it says otherwise.
 - **Shells:** PowerShell is primary; the Bash tool is Git Bash.
@@ -854,9 +1025,9 @@ The design notes are in `docs/vigi-integration-design.md`: section 7 (Ghost Patr
   The scratchpad is temporary.
 
 ## Suggested first message in the new chat
-"Continue from HANDOFF.md v12. Before anything else:
-1. Run `git status`, `git log --oneline -20` and `git ls-remote --heads origin` fresh. The live tree is on `fix/147-man-down-still`: Prompt 147's two code commits and the HANDOFF v12 commit, on top of `main`'s `e632d13`, local only. 147 is on hold after my STOP, and the push stays on hold. Ask me before committing or pushing anything. Don't merge, don't switch the live tree's branch, and don't prune (keep `origin/claude/repo-review-r1fviz`).
-2. Read "Prompt 147" and Open #1, #15, #31, #37 and #38 here. Also read the "V5 results" section of `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\report.md` and `D:\DOWNLOAD\Y3S2\FYP\skye-scratch\147\sweep\README.md`.
+"Continue from HANDOFF.md v13. Before anything else:
+1. Run `git status`, `git log --oneline -20` and `git ls-remote --heads origin` fresh. The live tree is on `fix/147b-man-down-moves`: Prompt 147b's two commits, the map fix's two and the HANDOFF v13 commit, on top of `fix/147-man-down-still` (147's three commits on `main`'s `e632d13`), all local only. 147b is accepted; the push of both 147 branches is on my word. Ask me before committing or pushing anything. Don't merge, don't switch the live tree's branch, and don't prune (keep `origin/claude/repo-review-r1fviz`).
+2. Read "Prompt 147b" and Open #1, #15, #31, #37, #38, #39 and #40 here.
 3. Check what's running (backend on :8000, `next dev` on :3000, go2rtc on :1984), this PC's network address and the free memory, and don't start, stop or restart my servers.
 
-Then I'll give you Prompt 147b, which builds F5t60. That's the rule I chose from the sweep on 20 Nov, counting `guard-001`'s L2 hour from the end of the 10:11 carry. Change nothing before it. After 147b come Prompt 148, 139, the camera work (146, 133a, 133-prep and 133), then 137, 144, 138, 140 and 141, as the plan here lists. Leave `man_down_minutes` and `backend/encode.py` alone, keep secrets out of all output and addresses, MACs, key IDs and real names out of tracked files, no multi-agent workflows or subagents, and don't use my Chrome without asking; a browser test touches only test devices on an inactive floor."
+Then I'll give you Prompt 148, the dashboard and editor fixes. Change nothing before it. After 148 come 139 (with the findings from 147 and 147b), the camera work (146, 133a, 133-prep and 133), then 137, 144, 138, 140 and 141, as the plan here lists. Leave `man_down_minutes` and `backend/encode.py` alone, keep secrets out of all output and addresses, MACs, key IDs and real names out of tracked files, no multi-agent workflows or subagents, and don't use my Chrome without asking; a browser test touches only test devices on an inactive floor."
